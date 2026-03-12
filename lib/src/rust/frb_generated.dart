@@ -128,6 +128,8 @@ abstract class RustLibApi extends BaseApi {
 
   Future<String> crateApiWenku8GetApiHost();
 
+  Future<String> crateApiWenku8GetSessionCookieString();
+
   String crateApiSimpleGreet({required String name});
 
   Future<List<HomeBlock>> crateApiWenku8Index();
@@ -750,6 +752,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiWenku8GetApiHostConstMeta =>
       const TaskConstMeta(debugName: "get_api_host", argNames: []);
+
+  @override
+  Future<String> crateApiWenku8GetSessionCookieString() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 45,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiWenku8GetSessionCookieStringConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiWenku8GetSessionCookieStringConstMeta =>
+      const TaskConstMeta(debugName: "get_session_cookie_string", argNames: []);
 
   @override
   String crateApiSimpleGreet({required String name}) {

@@ -8,6 +8,8 @@ import 'package:event/event.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+const _methodChannel = MethodChannel('methods');
+
 ///////////////
 
 final keyboardController = false;
@@ -62,6 +64,12 @@ void addVolumeListen() {
   if (_volumeListenCount == 1) {
     volumeS =
         volumeButtonChannel.receiveBroadcastStream().listen(_onVolumeEvent);
+    // 確保 WebView 不會覆蓋 AVAudioSession 設定
+    if (Platform.isIOS) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        _methodChannel.invokeMethod('reassertAudioSession');
+      });
+    }
   }
 }
 

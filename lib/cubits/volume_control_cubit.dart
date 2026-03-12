@@ -9,8 +9,7 @@ class VolumeControlCubit extends Cubit<bool> {
   static const String _key = "_volumeControlProperty";
 
   Future<void> init() async {
-    if (!Platform.isAndroid) {
-      // 非安卓平台默认为 false
+    if (!Platform.isAndroid && !Platform.isIOS) {
       emit(false);
       return;
     }
@@ -33,8 +32,8 @@ class VolumeControlCubit extends Cubit<bool> {
   }
 
   Future<void> updateVolumeControl(bool enabled) async {
-    if (!Platform.isAndroid) {
-      return; // 非安卓平台不支持
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      return;
     }
 
     try {

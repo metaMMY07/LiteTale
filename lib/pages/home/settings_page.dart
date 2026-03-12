@@ -79,8 +79,8 @@ class SettingsPage extends StatelessWidget {
                       screenUpOnScrollSetting(),
                       const SizedBox(height: 16),
                     ],
-                    // 音量键控制设置（仅安卓）
-                    if (Platform.isAndroid) ...[
+                    // 音量键控制设置（安卓 & iOS）
+                    if (Platform.isAndroid || Platform.isIOS) ...[
                       BlocBuilder<VolumeControlCubit, bool>(
                         builder: (context, isEnabled) {
                           return SwitchListTile(

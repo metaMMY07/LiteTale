@@ -41,6 +41,18 @@ pub async fn logout() -> Result<()> {
     Ok(())
 }
 
+/// 回傳 wenku8.net 的 session cookies 字串（格式：name=value; name2=value2）
+/// 供 WebView 注入使用
+pub async fn get_session_cookie_string() -> Result<String> {
+    let cookies = CookieEntity::find_by_domain("www.wenku8.net").await?;
+    let s = cookies
+        .into_iter()
+        .map(|c| format!("{}={}", c.name, c.value))
+        .collect::<Vec<_>>()
+        .join("; ");
+    Ok(s)
+}
+
 pub async fn download_checkcode() -> Result<Vec<u8>> {
     CLIENT.checkcode().await
 }

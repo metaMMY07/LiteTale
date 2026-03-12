@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:wild/src/rust/api/wenku8.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 
-enum BookshelfStatus { initial, loading, success, error }
+enum BookshelfStatus { initial, loading, success, error, cloudflareChallenge }
 
 class BookshelfState {
   final String tip;
@@ -106,27 +107,61 @@ class BookshelfCubit extends Cubit<BookshelfState> {
         return;
       }
 
-      var tip = '';
       final contents = <String, List<BookcaseItem>>{};
-      for (final bookcase in bookcases) {
-        final bk = await bookInCase(caseId: bookcase.id);
-        contents[bookcase.id] = bk.items;
-        tip = bk.tip;
-      }
 
+      // 先載入第一個書架，立即 emit 讓 UI 顯示
+      final firstBk = await bookInCase(caseId: bookcases.first.id);
+      contents[bookcases.first.id] = firstBk.items;
       emit(state.copyWith(
-        tip: tip,
+        tip: firstBk.tip,
         status: BookshelfStatus.success,
         bookcases: bookcases,
         currentCaseId: bookcases.first.id,
-        bookcaseContents: contents,
+        bookcaseContents: Map.from(contents),
       ));
+
+      // 後續書架在背景繼續載入，每載完一個就更新
+      for (int i = 1; i < bookcases.length; i++) {
+        final bk = await bookInCase(caseId: bookcases[i].id);
+        contents[bookcases[i].id] = bk.items;
+        emit(state.copyWith(
+          tip: bk.tip,
+          bookcaseContents: Map.from(contents),
+        ));
+      }
     } catch (e) {
-      emit(state.copyWith(
-        status: BookshelfStatus.error,
-        errorMessage: e.toString(),
-      ));
+      final msg = e.toString();
+      // 403 / CF 封鎖 → 改用 WebView 繞過
+      if (msg.contains('403') || msg.contains('Cloudflare') || msg.contains('cf_')) {
+        emit(state.copyWith(status: BookshelfStatus.cloudflareChallenge));
+      } else {
+        emit(state.copyWith(status: BookshelfStatus.error, errorMessage: msg));
+      }
     }
+  }
+
+  /// WebView 成功取得書架資料後呼叫
+  void loadFromWebViewData(
+    List<Bookcase> bookcases,
+    Map<String, BookcaseDto> bookcaseContents,
+  ) {
+    final tip = bookcaseContents.values.isNotEmpty
+        ? bookcaseContents.values.last.tip
+        : '';
+    final contents = bookcaseContents.map(
+      (k, v) => MapEntry(k, v.items),
+    );
+    emit(state.copyWith(
+      tip: tip,
+      status: BookshelfStatus.success,
+      bookcases: bookcases,
+      currentCaseId: bookcases.isNotEmpty ? bookcases.first.id : null,
+      bookcaseContents: contents,
+    ));
+  }
+
+  void setError(String message) {
+    emit(state.copyWith(status: BookshelfStatus.error, errorMessage: message));
   }
 
   void selectBookcase(String caseId) {
@@ -153,79 +188,90 @@ class BookshelfCubit extends Cubit<BookshelfState> {
   Future<void> moveSelectedBooks(String toBookcaseId) async {
     if (state.selectedBids.isEmpty || state.currentCaseId == null) return;
 
+    final bidsToMove = Set<String>.from(state.selectedBids);
+    final fromId = state.currentCaseId!;
+
     try {
       await moveBookcase(
-        bidList: state.selectedBids.toList(),
-        fromBookcaseId: state.currentCaseId!,
+        bidList: bidsToMove.toList(),
+        fromBookcaseId: fromId,
         toBookcaseId: toBookcaseId,
       );
-
-      // 刷新源书架
-      final fromBooks = await bookInCase(caseId: state.currentCaseId!);
-      final newContents = Map<String, List<BookcaseItem>>.from(state.bookcaseContents);
-      newContents[state.currentCaseId!] = fromBooks.items;
-      var tip = fromBooks.tip;
-
-      // 如果目标不是删除（-1），则刷新目标书架
-      if (toBookcaseId != '-1') {
-        final toBooks = await bookInCase(caseId: toBookcaseId);
-        newContents[toBookcaseId] = toBooks.items;
-      }
-
-      emit(state.copyWith(
-        tip: tip,
-        bookcaseContents: newContents,
-        selectedBids: {},
-        isSelecting: false,
-      ));
     } catch (e) {
-      emit(state.copyWith(
-        status: BookshelfStatus.error,
-        errorMessage: e.toString(),
-      ));
+      final msg = e.toString();
+      if (msg.contains('403') || msg.contains('Cloudflare') || msg.contains('cf_')) {
+        rethrow; // 讓 UI 層用 WebView 重試
+      }
+      emit(state.copyWith(status: BookshelfStatus.error, errorMessage: msg));
+      return;
     }
+
+    // 寫入成功 → 樂觀更新本地狀態，無需等伺服器回傳
+    final newContents = Map<String, List<BookcaseItem>>.from(state.bookcaseContents);
+    newContents[fromId] = (newContents[fromId] ?? [])
+        .where((b) => !bidsToMove.contains(b.bid))
+        .toList();
+    emit(state.copyWith(
+      bookcaseContents: newContents,
+      selectedBids: {},
+      isSelecting: false,
+    ));
+
+    // 背景刷新伺服器資料（失敗不影響已更新的 UI）
+    unawaited(_refreshBookcasesInBackground());
   }
 
   Future<void> addToBookshelf(String aid) async {
     try {
       await addBookshelf(aid: aid);
-      // 添加到第一个书架
-      if (state.bookcases.isNotEmpty) {
-        final firstCaseId = state.bookcases.first.id;
-        final books = await bookInCase(caseId: firstCaseId);
-        var tip = books.tip;
-        final newContents = Map<String, List<BookcaseItem>>.from(state.bookcaseContents);
-        newContents[firstCaseId] = books.items;
-        emit(state.copyWith(bookcaseContents: newContents, tip: tip));
-      }
     } catch (e) {
-      emit(state.copyWith(
-        status: BookshelfStatus.error,
-        errorMessage: e.toString(),
-      ));
+      final msg = e.toString();
+      if (msg.contains('403') || msg.contains('Cloudflare') || msg.contains('cf_')) {
+        rethrow; // 讓 novel_info_page 用 WebView 重試
+      }
+      emit(state.copyWith(status: BookshelfStatus.error, errorMessage: msg));
+      return;
     }
+
+    // 寫入成功 → 觸發完整書架刷新（loadBookcases 有 CF 備援）
+    await loadBookcases();
   }
 
   Future<void> removeFromBookshelf(String aid) async {
-    try {
-      final bid = state.getBookBid(aid);
-      if (bid == null) return;
+    final bid = state.getBookBid(aid);
+    if (bid == null) return;
 
+    try {
       await deleteBookcase(bid: bid);
-      // 重新加载所有书架内容
+    } catch (e) {
+      final msg = e.toString();
+      if (msg.contains('403') || msg.contains('Cloudflare') || msg.contains('cf_')) {
+        rethrow; // 讓 novel_info_page 用 WebView 重試
+      }
+      emit(state.copyWith(status: BookshelfStatus.error, errorMessage: msg));
+      return;
+    }
+
+    // 寫入成功 → 樂觀從本地狀態移除
+    final newContents = <String, List<BookcaseItem>>{};
+    for (final entry in state.bookcaseContents.entries) {
+      newContents[entry.key] = entry.value.where((b) => b.bid != bid).toList();
+    }
+    emit(state.copyWith(bookcaseContents: newContents));
+
+    // 背景刷新伺服器資料（失敗不影響已更新的 UI）
+    unawaited(_refreshBookcasesInBackground());
+  }
+
+  /// 背景靜默刷新書架，失敗時不改變 UI 狀態
+  Future<void> _refreshBookcasesInBackground() async {
+    try {
       final contents = <String, List<BookcaseItem>>{};
-      var tip = '';
       for (final bookcase in state.bookcases) {
         final bk = await bookInCase(caseId: bookcase.id);
         contents[bookcase.id] = bk.items;
-        tip = bk.tip;
       }
-      emit(state.copyWith(bookcaseContents: contents, tip: tip));
-    } catch (e) {
-      emit(state.copyWith(
-        status: BookshelfStatus.error,
-        errorMessage: e.toString(),
-      ));
-    }
+      emit(state.copyWith(bookcaseContents: contents));
+    } catch (_) {}
   }
 }

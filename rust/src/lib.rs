@@ -7,6 +7,7 @@ pub(crate) use cache_manager::*;
 use once_cell::sync::{Lazy, OnceCell};
 use rand::seq::IndexedRandom;
 use rand::Rng;
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CONNECTION, REFERER};
 use reqwest::Client;
 use std::ops::Deref;
 use std::path::Path;
@@ -30,9 +31,15 @@ pub(crate) static COOKIE_STORE: Lazy<Arc<DatabaseCookieStore>> =
 
 pub(crate) static CLIENT: Lazy<Wenku8Client> = Lazy::new(|| {
     let cookie_store = Arc::clone(COOKIE_STORE.deref());
+    let mut default_headers = HeaderMap::new();
+    default_headers.insert(ACCEPT, HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"));
+    default_headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("zh-TW,zh;q=0.9,en;q=0.8"));
+    default_headers.insert(REFERER, HeaderValue::from_static("https://www.wenku8.net/login.php"));
+    default_headers.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
     let client = Client::builder()
         .cookie_provider(cookie_store)
         .gzip(true)
+        .default_headers(default_headers)
         .build()
         .unwrap();
     Wenku8Client {
