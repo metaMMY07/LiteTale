@@ -27,6 +27,9 @@ Future<bool> preLoginState() =>
 
 Future<void> logout() => RustLib.instance.api.crateApiWenku8Logout();
 
+Future<String> getSessionCookieString() =>
+    RustLib.instance.api.crateApiWenku8GetSessionCookieString();
+
 Future<Uint8List> downloadCheckcode() =>
     RustLib.instance.api.crateApiWenku8DownloadCheckcode();
 

@@ -111,9 +111,11 @@ pub(crate) async fn get_chapter_content(aid: &str, cid: &str) -> anyhow::Result<
         }
     }
 
-    // 先尝试从缓存获取
+    // 先尝试从缓存获取（跳过无效的缓存内容）
     if let Some(cache) = chapter_cache::Entity::get_chapter_content(aid, cid).await? {
-        return Ok(cache.content);
+        if !cache.content.trim().is_empty() && cache.content.trim() != "0" {
+            return Ok(cache.content);
+        }
     }
 
     // 下载章节内容

@@ -85,18 +85,21 @@ class ReaderPage extends StatelessWidget {
           }
           if (state is ReaderError) {
             return Scaffold(
-              body: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(state.error),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed:
-                          () => context.read<ReaderCubit>().loadChapter(),
-                      child: const Text('重试'),
-                    ),
-                  ],
+              body: SafeArea(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(state.error),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed:
+                            () => context.read<ReaderCubit>().loadChapter(),
+                        child: const Text('重试'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -134,7 +137,7 @@ class _ReaderViewState extends State<_ReaderView> {
     setKeepScreenUpOnReading(true);
     
     // 监听音量键事件
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || Platform.isIOS) {
       final volumeControlCubit = context.read<VolumeControlCubit>();
       if (volumeControlCubit.isEnabled) {
         addVolumeListen();
@@ -148,9 +151,9 @@ class _ReaderViewState extends State<_ReaderView> {
     _pageController.dispose();
     setKeepScreenUpOnReading(false);
     setKeepScreenUpOnScroll(false);
-    
+
     // 取消音量键事件监听
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || Platform.isIOS) {
       delVolumeListen();
       readerControllerEvent.unsubscribe(_onController);
     }

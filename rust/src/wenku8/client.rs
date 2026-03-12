@@ -6,13 +6,15 @@ use rand::Rng;
 use regex::Regex;
 use reqwest::{
     header::{
-        HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CONNECTION, CONTENT_TYPE, REFERER,
-        USER_AGENT,
+        HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CONNECTION, CONTENT_TYPE,
+        REFERER, USER_AGENT,
     },
     Client,
 };
 use scraper::Node::Element;
 use scraper::{ElementRef, Html, Selector};
+use std::ops::Deref;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 const DEFAULT_API_HOST: &str = "https://www.wenku8.net";
@@ -77,19 +79,51 @@ impl Wenku8Client {
         headers
     }
 
-    // 👇 新增：先打 login.php，讓伺服器種初始 Cookie
-    pub async fn init_session(&self) -> Result<()> {
-        let url = format!("{}/login.php", self.load_api_host().await);
+    // 模擬 Android app 的請求標頭，用於書架等 HTML 頁面請求
+    // 使用 Dalvik UA（與其他請求一致），避免觸發 Cloudflare 的瀏覽器偵測
+    async fn bookcase_headers(&self, referer: &str) -> HeaderMap {
         let ua = self.load_user_agent().await;
-        let headers = Self::default_headers_sync(&ua);
+        let mut headers = HeaderMap::new();
+        if let Ok(v) = HeaderValue::from_str(&ua) {
+            headers.insert(USER_AGENT, v);
+        }
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static(
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            ),
+        );
+        headers.insert(
+            ACCEPT_LANGUAGE,
+            HeaderValue::from_static("zh-CN,zh;q=0.9"),
+        );
+        if !referer.is_empty() {
+            if let Ok(v) = HeaderValue::from_str(referer) {
+                headers.insert(REFERER, v);
+            }
+        }
+        headers.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
+        headers
+    }
 
+    // 先訪問首頁與 login.php，讓伺服器種初始 Cookie（包含 CF 的 __cflb 等）
+    pub async fn init_session(&self) -> Result<()> {
+        let api_host = self.load_api_host().await;
+        let ua = self.load_user_agent().await;
+        // 1) 訪問首頁，觸發 CF cookie 設置
         let _ = self
             .client
-            .get(url)
-            .headers(headers)
+            .get(format!("{}/", api_host))
+            .headers(Self::default_headers_sync(&ua))
             .send()
-            .await
-            .context("init_session: GET login.php failed")?;
+            .await;
+        // 2) 再打 login.php 種 session cookie
+        let _ = self
+            .client
+            .get(format!("{}/login.php", api_host))
+            .headers(Self::default_headers_sync(&ua))
+            .send()
+            .await;
         Ok(())
     }
 
@@ -282,10 +316,12 @@ impl Wenku8Client {
             "{}/modules/article/articleinfo.php?id={aid}&charset=gbk",
             self.load_api_host().await
         );
+        let ua = self.load_user_agent().await;
+        let headers = Self::default_headers_sync(&ua);
         let response = self
             .client
             .get(url)
-            .header("User-Agent", self.load_user_agent().await)
+            .headers(headers)
             .send()
             .await?;
         if !response.status().is_success() {
@@ -782,17 +818,28 @@ impl Wenku8Client {
     }
 
     pub async fn get_bookshelf(&self) -> Result<Vec<BookshelfItem>> {
+        let api_host = self.load_api_host().await;
+        let referer = format!("{}/", api_host);
+        let headers = self.bookcase_headers(&referer).await;
+        let url = format!("{}/modules/article/bookcase.php", api_host);
         let resp = self
             .client
-            .get("https://www.wenku8.net/modules/article/bookcase.php")
+            .get(&url)
+            .headers(headers)
             .send()
             .await?;
 
-        if !resp.status().is_success() {
-            return Err(anyhow!("Failed to get bookshelf: HTTP {}", resp.status()));
+        let status = resp.status();
+        let body = resp.bytes().await.unwrap_or_default();
+        if !status.is_success() {
+            let text = String::from_utf8_lossy(&body);
+            if text.contains("Attention Required") || text.contains("cf_chl") || text.contains("Just a moment") {
+                return Err(anyhow!("Cloudflare 封鎖了書架請求，請嘗試重新登入後再試"));
+            }
+            return Err(anyhow!("Failed to get bookshelf: HTTP {}", status));
         }
 
-        let body = decode_gbk(resp.bytes().await?)?;
+        let body = decode_gbk(bytes::Bytes::from(body.to_vec()))?;
         let document = Html::parse_document(&body);
 
         let mut items = Vec::new();
@@ -914,10 +961,12 @@ impl Wenku8Client {
             "{}/modules/article/reader.php?aid={aid}&charset=gbk",
             self.load_api_host().await
         );
+        let ua = self.load_user_agent().await;
+        let headers = Self::default_headers_sync(&ua);
         let response = self
             .client
             .get(url)
-            .header("User-Agent", self.load_user_agent().await)
+            .headers(headers)
             .send()
             .await?;
         if !response.status().is_success() {
@@ -930,28 +979,66 @@ impl Wenku8Client {
     }
 
     pub async fn c_content(&self, aid: &str, cid: &str) -> Result<String> {
-        let url = format!("{APP_HOST}/android.php");
-        let params = [
-            (
-                "request",
-                base64::prelude::BASE64_STANDARD
-                    .encode(format!("action=book&do=text&aid={aid}&cid={cid}&t=0").as_bytes()),
-            ),
-            ("appver", "1.21".to_string()),
-            ("timestamp", chrono::Utc::now().timestamp().to_string()),
-        ];
+        let aid_num: u64 = aid.parse().unwrap_or(0);
+        let sub_dir = aid_num / 1000;
+        let url = format!(
+            "{}/novel/{}/{}/{}.htm",
+            self.load_api_host().await,
+            sub_dir,
+            aid,
+            cid
+        );
+        let ua = self.load_user_agent().await;
+        let headers = Self::default_headers_sync(&ua);
         let response = self
             .client
-            .post(url)
-            .header("User-Agent", self.load_user_agent().await)
-            .form(&params)
+            .get(url)
+            .headers(headers)
             .send()
             .await?;
         if !response.status().is_success() {
             return Err(anyhow!("Failed to get novel reader: {}", response.status()));
         }
-        let text = response.text().await?;
-        Ok(text)
+        let bytes = response.bytes().await?;
+        let html = decode_gbk(bytes)?;
+
+        let document = Html::parse_document(&html);
+        let content_selector = Selector::parse("#content").unwrap();
+        let content = document
+            .select(&content_selector)
+            .next()
+            .ok_or_else(|| anyhow!("Failed to find #content in chapter page"))?;
+
+        // Build plain text: skip <ul> watermark, convert <br> to newline
+        let mut result = String::new();
+        Self::extract_content_text(content, &mut result);
+        Ok(result.trim().to_string())
+    }
+
+    fn extract_content_text(element: ElementRef, buf: &mut String) {
+        use scraper::Node;
+        for child in element.children() {
+            match child.value() {
+                Node::Text(t) => {
+                    let s = t.text.replace('\u{a0}', " "); // &nbsp; → space
+                    buf.push_str(&s);
+                }
+                Node::Element(e) => {
+                    let name = e.name();
+                    if name == "ul" {
+                        // skip watermark block
+                        continue;
+                    }
+                    if name == "br" {
+                        buf.push('\n');
+                        continue;
+                    }
+                    let child_ref = ElementRef::wrap(child).unwrap();
+                    Self::extract_content_text(child_ref, buf);
+                }
+                _ => {}
+            }
+        }
     }
 
     pub async fn toplist(&self, sort: &str, page: i32) -> Result<PageStats<NovelCover>> {
@@ -1003,49 +1090,90 @@ impl Wenku8Client {
     }
 
     pub async fn add_bookshelf(&self, aid: &str) -> Result<()> {
+        let api_host = self.load_api_host().await;
         let url = format!(
             "{}/modules/article/addbookcase.php?bid={aid}&charset=gbk",
-            self.load_api_host().await
+            api_host
         );
-        let response = self
-            .client
-            .get(url)
-            .header("User-Agent", self.load_user_agent().await)
+        // 使用小說頁面作為 Referer
+        let referer = format!("{}/book/{}.htm", api_host, aid);
+        let headers = self.bookcase_headers(&referer).await;
+
+        // 使用不跟隨 redirect 的臨時客戶端：
+        // addbookcase.php 成功後會 302 redirect 到 bookcase.php
+        // 但 bookcase.php 被 Cloudflare 封鎖，所以我們在 302 時就直接返回成功
+        let temp_client = reqwest::Client::builder()
+            .cookie_provider(Arc::clone(crate::COOKIE_STORE.deref()))
+            .redirect(reqwest::redirect::Policy::none())
+            .gzip(true)
+            .build()?;
+
+        let response = temp_client
+            .get(&url)
+            .headers(headers)
             .send()
             .await?;
-        if !response.status().is_success() {
-            return Err(anyhow!("Failed to add bookshelf: {}", response.status()));
+
+        let status = response.status();
+
+        // 302 = 加入成功，wenku8 重定向到書架頁
+        if status.as_u16() == 302 {
+            return Ok(());
+        }
+
+        if !status.is_success() {
+            return Err(anyhow!("Failed to add bookshelf: HTTP {}", status));
         }
 
         let text = response.bytes().await?;
         let text = decode_gbk(text)?;
-        if text.contains("处理成功") {
+        if text.contains("处理成功") || text.contains("已经在您的书架") {
             Ok(())
         } else {
-            Err(anyhow!("Failed to add bookshelf: {}", text))
+            // 從 HTML 中提取錯誤原因
+            let doc = Html::parse_document(&text);
+            let sel = Selector::parse(".blockcontent").unwrap();
+            let msg = doc
+                .select(&sel)
+                .next()
+                .map(|e| e.text().collect::<Vec<_>>().join("").trim().to_string())
+                .unwrap_or_else(|| text.clone());
+            Err(anyhow!("Failed to add bookshelf: {}", msg))
         }
     }
 
     pub async fn bookcase_list(&self) -> Result<Vec<Bookcase>> {
-        let url = format!(
-            "{}/modules/article/bookcase.php?charset=gbk",
-            self.load_api_host().await
-        );
+        // 先訪問首頁，確保 session cookie 已建立（避免 CF 403）
+        let _ = self.init_session().await;
+        let api_host = self.load_api_host().await;
+        let url = format!("{}/modules/article/bookcase.php?charset=gbk", api_host);
+        let referer = format!("{}/", api_host);
+        let headers = self.bookcase_headers(&referer).await;
         let response = self
             .client
             .get(url)
-            .header("User-Agent", self.load_user_agent().await)
+            .headers(headers)
             .send()
             .await?;
-        if !response.status().is_success() {
+        let status = response.status();
+        let ua_used = self.load_user_agent().await;
+        let body = response.bytes().await.unwrap_or_default();
+        let text_preview: String = String::from_utf8_lossy(&body).chars().take(300).collect();
+        if !status.is_success() {
             return Err(anyhow!(
-                "Failed to get bookcase list: {}",
-                response.status()
+                "書架請求失敗 [HTTP {}] UA={} body_preview={}",
+                status, ua_used, text_preview
+            ));
+        }
+        // 200 但可能是 CF challenge 頁面
+        if text_preview.contains("Just a moment") || text_preview.contains("cf_chl") || text_preview.contains("Attention Required") || text_preview.contains("Enable JavaScript") {
+            return Err(anyhow!(
+                "Cloudflare Challenge [HTTP {}] UA={} body_preview={}",
+                status, ua_used, text_preview
             ));
         }
 
-        let text = response.bytes().await?;
-        let text = decode_gbk(text)?;
+        let text = decode_gbk(bytes::Bytes::from(body.to_vec()))?;
         Self::parse_bookcase_list(text.as_str())
     }
 
@@ -1068,22 +1196,27 @@ impl Wenku8Client {
     }
 
     pub async fn book_in_case(&self, case_id: &str) -> Result<BookcaseDto> {
-        let url = format!(
-            "{}/modules/article/bookcase.php?classid={case_id}&charset=gbk",
-            self.load_api_host().await
-        );
+        let api_host = self.load_api_host().await;
+        let url = format!("{}/modules/article/bookcase.php?classid={case_id}&charset=gbk", api_host);
+        let referer = format!("{}/modules/article/bookcase.php", api_host);
+        let headers = self.bookcase_headers(&referer).await;
         let response = self
             .client
             .get(url)
-            .header("User-Agent", self.load_user_agent().await)
+            .headers(headers)
             .send()
             .await?;
-        if !response.status().is_success() {
-            return Err(anyhow!("Failed to get book in case: {}", response.status()));
+        let status = response.status();
+        let body = response.bytes().await.unwrap_or_default();
+        if !status.is_success() {
+            let text = String::from_utf8_lossy(&body);
+            if text.contains("Attention Required") || text.contains("cf_chl") || text.contains("Just a moment") {
+                return Err(anyhow!("Cloudflare 封鎖了書架請求，請嘗試重新登入後再試"));
+            }
+            return Err(anyhow!("Failed to get book in case: {}", text));
         }
 
-        let text = response.bytes().await?;
-        let text = decode_gbk(text)?;
+        let text = decode_gbk(bytes::Bytes::from(body.to_vec()))?;
         Self::parse_book_in_case(text.as_str())
     }
 
@@ -1201,26 +1334,27 @@ impl Wenku8Client {
     }
 
     pub async fn delete_bookcase(&self, delid: &str) -> Result<()> {
-        let url = format!(
-            "{}/modules/article/bookcase.php?delid={delid}&charset=gbk",
-            self.load_api_host().await
-        );
-        let response = self
-            .client
+        let api_host = self.load_api_host().await;
+        let url = format!("{}/modules/article/bookcase.php?delid={delid}&charset=gbk", api_host);
+        let referer = format!("{}/modules/article/bookcase.php", api_host);
+        let headers = self.bookcase_headers(&referer).await;
+        // 刪除後也會 302 redirect，用 no-redirect 客戶端
+        let temp_client = reqwest::Client::builder()
+            .cookie_provider(Arc::clone(crate::COOKIE_STORE.deref()))
+            .redirect(reqwest::redirect::Policy::none())
+            .gzip(true)
+            .build()?;
+        let response = temp_client
             .get(url)
-            .header("User-Agent", self.load_user_agent().await)
+            .headers(headers)
             .send()
             .await?;
-        if !response.status().is_success() {
-            return Err(anyhow!("Failed to delete bookcase: {}", response.status()));
-        }
-
-        let code = response.status();
-        let text = response.bytes().await?;
-        let text = decode_gbk(text)?;
-        if code.is_success() {
+        let status = response.status();
+        if status.as_u16() == 302 || status.is_success() {
             Ok(())
         } else {
+            let text = response.bytes().await.unwrap_or_default();
+            let text = String::from_utf8_lossy(&text);
             Err(anyhow!("Failed to delete bookcase: {}", text))
         }
     }
@@ -1231,10 +1365,10 @@ impl Wenku8Client {
         old_classid: String,
         new_classid: String,
     ) -> Result<()> {
-        let url = format!(
-            "{}/modules/article/bookcase.php",
-            self.load_api_host().await
-        );
+        let api_host = self.load_api_host().await;
+        let url = format!("{}/modules/article/bookcase.php", api_host);
+        let referer = format!("{}/modules/article/bookcase.php", api_host);
+        let headers = self.bookcase_headers(&referer).await;
         let mut params = vec![];
         for id in ids {
             params.push(("checkid[]", id));
@@ -1244,20 +1378,26 @@ impl Wenku8Client {
         params.push(("newclassid", new_classid));
         params.push(("classid", old_classid));
 
-        let response = self
-            .client
+        // move 也是 POST 後 302 redirect
+        let temp_client = reqwest::Client::builder()
+            .cookie_provider(Arc::clone(crate::COOKIE_STORE.deref()))
+            .redirect(reqwest::redirect::Policy::none())
+            .gzip(true)
+            .build()?;
+        let response = temp_client
             .post(url)
-            .header("User-Agent", self.load_user_agent().await)
+            .headers(headers)
             .form(&params)
             .send()
             .await?;
         let status = response.status();
-        let text = response.bytes().await?;
-        let text = decode_gbk(text)?;
-        if !status.is_success() {
-            return Err(anyhow!("Failed to move bookcase: {}", status));
+        if status.as_u16() == 302 || status.is_success() {
+            Ok(())
+        } else {
+            let text = response.bytes().await.unwrap_or_default();
+            let text = decode_gbk(text)?;
+            Err(anyhow!("Failed to move bookcase: {}", text))
         }
-        Ok(())
     }
 
     // search_type: articlename author
@@ -1294,7 +1434,7 @@ impl Wenku8Client {
     }
 
     pub async fn sign(&self) -> Result<String> {
-        let url = format!("{APP_HOST}/android.php");
+        let url = format!("{APP_HOST}/api.php");
         let params = [
             (
                 "request",

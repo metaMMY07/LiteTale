@@ -76,7 +76,7 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper> {
     _scrollController = ScrollController();
     
     // 监听音量键事件
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || Platform.isIOS) {
       final volumeControlCubit = context.read<VolumeControlCubit>();
       if (volumeControlCubit.isEnabled) {
         addVolumeListen();
@@ -91,9 +91,9 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper> {
     setKeepScreenUpOnScroll(false);
     _scrollController.dispose();
     _autoScrollTimer?.cancel();
-    
+
     // 取消音量键事件监听
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || Platform.isIOS) {
       delVolumeListen();
       readerControllerEvent.unsubscribe(_onController);
     }

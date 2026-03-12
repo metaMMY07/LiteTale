@@ -4,11 +4,18 @@ import 'package:wild/src/rust/api/wenku8.dart' as w8;
 import 'package:wild/src/rust/frb_generated.dart';
 import 'package:wild/widgets/cached_image.dart';
 import 'package:flutter_html/flutter_html.dart';
+import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/pages/novel/reviews_page.dart';
+import 'package:wild/widgets/cf_action_loader.dart';
 
 import '../../src/rust/wenku8/models.dart';
 import 'novel_info_cubit.dart';
+
+bool _isCfError(dynamic e) {
+  final msg = e.toString();
+  return msg.contains('403') || msg.contains('Cloudflare') || msg.contains('cf_');
+}
 
 class NovelInfoPage extends StatelessWidget {
   final String novelId;
@@ -93,9 +100,43 @@ class NovelInfoPage extends StatelessWidget {
                       }
                     } catch (e) {
                       if (!context.mounted) return;
-                      ScaffoldMessenger.of(
-                        context,
-                      ).showSnackBar(SnackBar(content: Text('操作失败: $e')));
+                      if (_isCfError(e)) {
+                        final apiHost = context.read<ApiHostCubit>().state;
+                        String actionPath;
+                        if (isInBookshelf) {
+                          final bid = bookshelfCubit.state.getBookBid(novelId);
+                          if (bid == null) return;
+                          actionPath = '/modules/article/bookcase.php?delid=$bid';
+                        } else {
+                          actionPath = '/modules/article/addbookcase.php?bid=$novelId';
+                        }
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (ctx) => Dialog.fullscreen(
+                            child: CfActionLoader(
+                              apiHost: apiHost,
+                              actionPath: actionPath,
+                              successUrlKeyword: 'bookcase.php',
+                              successBodyKeyword: '处理成功',
+                              onSuccess: () {
+                                Navigator.of(ctx).pop();
+                                bookshelfCubit.loadBookcases();
+                              },
+                              onError: (err) {
+                                Navigator.of(ctx).pop();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('操作失敗: $err')),
+                                );
+                              },
+                            ),
+                          ),
+                        );
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('操作失败: $e')),
+                        );
+                      }
                     }
                   },
                 );
