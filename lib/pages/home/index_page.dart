@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
 
 import '../../src/rust/api/database.dart';
@@ -96,8 +97,8 @@ class _HomeBlockWidget extends StatelessWidget {
           child: GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
+            gridDelegate: BookGridDelegate(
+              sectionItemCount: block.list.length,
               childAspectRatio: 207 / 307,
               crossAxisSpacing: 8,
               mainAxisSpacing: 8,
@@ -297,8 +298,7 @@ class _ToplistPageState extends State<ToplistPage> {
                     child: GridView.builder(
                       padding: const EdgeInsets.all(8),
                       gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
+                          const BookGridDelegate(
                             childAspectRatio: 207 / 307,
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
@@ -433,8 +433,7 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
                 },
                 child: GridView.builder(
                   padding: const EdgeInsets.all(8),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
+                  gridDelegate: const BookGridDelegate(
                     childAspectRatio: 207 / 307,
                     crossAxisSpacing: 8,
                     mainAxisSpacing: 8,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../cubits/articlelist_cubit.dart';
 import '../../src/rust/wenku8/models.dart';
@@ -63,8 +64,7 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
                 : GridView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.all(8),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
+                    gridDelegate: const BookGridDelegate(
                       childAspectRatio: 0.7,
                       crossAxisSpacing: 8,
                       mainAxisSpacing: 8,
@@ -99,4 +99,4 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
       },
     );
   }
-} 
+}

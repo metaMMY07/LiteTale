@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/pages/home/bookshelf_cubit.dart';
@@ -212,8 +213,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                 onRefresh: () => context.read<BookshelfCubit>().loadBookcases(),
                 child: GridView.builder(
                   padding: const EdgeInsets.all(8),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
+                  gridDelegate: const BookGridDelegate(
                     childAspectRatio: 0.7,
                     crossAxisSpacing: 8,
                     mainAxisSpacing: 8,
