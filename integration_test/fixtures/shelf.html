@@ -1,0 +1,37 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>novels UI test fixture</title>
+<style>
+* { box-sizing: border-box; } body { margin: 0; background: white; color: black; font: 14px sans-serif; }
+.q-page { padding: 16px; } .q-card__section { padding: 16px; }
+.q-card { background: white; box-shadow: 0 2px 5px #bbb; }
+.q-img { aspect-ratio: 2 / 3; background: linear-gradient(135deg, #d7e6fe, #53688d); }
+.book-name { font-size: 12px; } .book-name-text { overflow: hidden; }
+.extra { display: flex; justify-content: space-between; font-size: 12px; }
+.introduction { opacity: .6; line-height: 1; }
+</style></head>
+<body><main class="q-page" style="max-width:1920px">
+  <!-- Synthetic data, with the public BookCard/QGrid/ShelfBook nesting. -->
+  <section id="catalogue"><div id="books" style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px"></div></section>
+  <section id="details" hidden><div class="q-card book-info-card"><div class="q-card__section">
+    <div id="detailGrid" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px">
+      <div style="grid-column:span 1/span 1"><div class="q-card"><div class="q-img"></div></div></div>
+      <div style="grid-column:span 2/span 1"><div>
+        <div class="book-info-header"><div class="text-subtitle1 ellipsis">测试书籍：很长的标题也应完整显示</div></div>
+        <p>作者：测试作者</p><div class="introduction"><p>测试简介。行距应该舒适，文字清晰。</p></div>
+        <div class="book-actions"><button id="readButton" class="q-btn bg-primary">开始阅读</button></div>
+      </div></div>
+    </div>
+  </div></div></section>
+  <div class="read" style="font-family:serif;font-size:23px;line-height:2;color:rgb(10,20,30)">原有正文格式</div>
+  <input id="loginInput" type="text" value="synthetic-test-only">
+</main>
+<script>
+function addBook(index) {
+  const item = document.createElement('div');
+  item.style.gridColumn = 'span 1 / span 1';
+  item.innerHTML = `<div class="shelf-item-wrap"><div><a href="#book-${index}"><div class="book-cover"><div class="q-card"><div class="q-img"></div></div></div></a><div style="padding:4px"><div class="book-name"><div class="book-name-text">测试书籍 ${index}</div></div></div><div class="extra"><div>测试作者</div><div>今天</div></div></div></div>`;
+  document.getElementById('books').appendChild(item);
+}
+for (let i = 0; i < 24; i++) addBook(i);
+document.getElementById('readButton').onclick = () => { window.testReadClicked = true; };
+</script></body></html>

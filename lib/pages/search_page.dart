@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/book_grid_delegate.dart';
 import '../src/rust/api/wenku8.dart';
-import '../src/rust/wenku8/models.dart';
-import '../widgets/cached_image.dart';
+import '../widgets/novel_cover_card.dart';
 
 class SearchPage extends StatefulWidget {
   final String? initialSearchType;
@@ -250,8 +250,7 @@ class _SearchPageState extends State<SearchPage> {
                 },
                 child: GridView.builder(
                   padding: const EdgeInsets.all(8),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
+                  gridDelegate: const BookGridDelegate(
                     childAspectRatio: 207 / 307,
                     crossAxisSpacing: 8,
                     mainAxisSpacing: 8,
@@ -270,7 +269,7 @@ class _SearchPageState extends State<SearchPage> {
                       );
                     }
                     final novel = _searchResults!.records[index];
-                    return _NovelCoverCard(novel: novel);
+                    return NovelCoverCard(novel: novel);
                   },
                 ),
               ),
@@ -287,44 +286,3 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 }
-
-class _NovelCoverCard extends StatelessWidget {
-  final NovelCover novel;
-
-  const _NovelCoverCard({required this.novel});
-
-  @override
-  Widget build(BuildContext context) {
-    var card = Card(
-      clipBehavior: Clip.antiAlias,
-      elevation: .5,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: CachedImage(
-              url: novel.img,
-              fit: BoxFit.cover,
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(4.0),
-            child: Text(
-              novel.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-            ),
-          ),
-        ],
-      ),
-    );
-    return GestureDetector(
-      onTap: () {
-        Navigator.pushNamed(context, '/novel/info', arguments: novel.aid);
-      },
-      child: card,
-    );
-  }
-} 

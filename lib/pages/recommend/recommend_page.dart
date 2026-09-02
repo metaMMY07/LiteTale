@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/src/rust/api/wenku8.dart' as w8;
 import 'package:wild/src/rust/wenku8/models.dart' as w8;
@@ -76,8 +77,8 @@ class _HomeBlockWidget extends StatelessWidget {
           child: GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
+            gridDelegate: BookGridDelegate(
+              sectionItemCount: block.list.length,
               childAspectRatio: 207 / 307,
               crossAxisSpacing: 8,
               mainAxisSpacing: 8,
@@ -101,4 +102,4 @@ class _HomeBlockWidget extends StatelessWidget {
       ],
     );
   }
-} 
+}

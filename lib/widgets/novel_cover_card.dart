@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/widgets/cached_image.dart';
@@ -15,9 +14,15 @@ class NovelCoverCard extends StatelessWidget {
       elevation: .5,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(child: CachedImage(url: novel.img, fit: BoxFit.cover)),
+          Expanded(
+            child: CachedImage(
+              url: novel.img,
+              width: double.infinity,
+              fit: BoxFit.cover,
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.all(4.0),
             child: Text(
@@ -38,4 +43,3 @@ class NovelCoverCard extends StatelessWidget {
     );
   }
 }
-

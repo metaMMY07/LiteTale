@@ -70,6 +70,9 @@ class CachedImage extends StatelessWidget {
       fit: fit,
       width: width,
       height: height,
+      // Mipmapped filtering preserves detail when large covers are reduced.
+      // Bicubic (high) filtering can alias when shrinking below half-size.
+      filterQuality: FilterQuality.medium,
       loadingBuilder: (context, child, loadingProgress) {
         if (loadingProgress == null) return child;
         return Container(

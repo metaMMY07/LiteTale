@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/src/rust/api/database.dart';
 import 'package:wild/src/rust/api/wenku8.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
@@ -325,8 +326,7 @@ class _CategoryPageState extends State<CategoryPage> {
                     child: GridView.builder(
                       padding: const EdgeInsets.all(8),
                       gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
+                          const BookGridDelegate(
                             childAspectRatio: 207 / 307,
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
