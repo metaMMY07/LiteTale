@@ -19,6 +19,7 @@ import 'left_padding_cubit.dart';
 import 'right_padding_cubit.dart';
 import 'reader_type_cubit.dart';
 import 'package:wild/cubits/reader_background_cubit.dart';
+import 'package:wild/theme/app_fonts.dart';
 
 class ReaderPage extends StatelessWidget {
   final String aid;
@@ -513,10 +514,14 @@ class _TextPage extends StatelessWidget {
                       SizedBox(
                         width: canvasWidth,
                         child: Text.rich(
-                          strutStyle: StrutStyle(height: lineHeight),
+                          strutStyle: StrutStyle(
+                            fontFamily: appFontFamily,
+                            height: lineHeight,
+                          ),
                           TextSpan(
                             text: texts[i],
                             style: TextStyle(
+                              fontFamily: appFontFamily,
                               fontSize: fontSize,
                               height: lineHeight,
                               letterSpacing: 0.5,

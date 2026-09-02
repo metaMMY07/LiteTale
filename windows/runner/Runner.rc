@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "opensource" "\0"
-            VALUE "FileDescription", "wild" "\0"
+            VALUE "FileDescription", "novels" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "wild" "\0"
+            VALUE "InternalName", "novels" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2025 opensource. All rights reserved." "\0"
-            VALUE "OriginalFilename", "wild.exe" "\0"
-            VALUE "ProductName", "wild" "\0"
+            VALUE "OriginalFilename", "novels.exe" "\0"
+            VALUE "ProductName", "novels" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

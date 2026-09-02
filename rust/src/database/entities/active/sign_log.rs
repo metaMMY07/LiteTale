@@ -1,7 +1,11 @@
-use sea_orm::{prelude::*, sea_query::{Index, SqliteQueryBuilder}, Order, QueryOrder, QuerySelect, Schema, Set, Statement};
+use flutter_rust_bridge::frb;
+use sea_orm::{
+    prelude::*,
+    sea_query::{Index, SqliteQueryBuilder},
+    Order, QueryOrder, QuerySelect, Schema, Set, Statement,
+};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
-use flutter_rust_bridge::frb;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "sign_log")]
@@ -63,9 +67,7 @@ impl Entity {
     pub async fn sign() -> crate::Result<()> {
         let db = super::get_connect().await;
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let model = ActiveModel {
-            date: Set(today),
-        };
+        let model = ActiveModel { date: Set(today) };
         model.insert(db.deref()).await?;
         Ok(())
     }
@@ -122,4 +124,4 @@ impl Entity {
         Entity::delete_many().exec(db.deref()).await?;
         Ok(())
     }
-} 
+}

@@ -1,4 +1,8 @@
-use sea_orm::{prelude::*, sea_query::{Index, SqliteQueryBuilder}, Order, QueryOrder, QuerySelect, Schema, Set, Statement};
+use sea_orm::{
+    prelude::*,
+    sea_query::{Index, SqliteQueryBuilder},
+    Order, QueryOrder, QuerySelect, Schema, Set, Statement,
+};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
@@ -22,7 +26,6 @@ pub enum Relation {}
 impl ActiveModelBehavior for ActiveModel {}
 
 impl Entity {
-
     pub async fn reset_fail_downloads() -> Result<(), DbErr> {
         Entity::update_many()
             .col_expr(Column::DownloadStatus, Expr::value(0))
@@ -81,10 +84,7 @@ impl Entity {
         Ok(())
     }
 
-    pub async fn update_download_status(
-        id: &str,
-        download_status: i32,
-    ) -> Result<(), DbErr> {
+    pub async fn update_download_status(id: &str, download_status: i32) -> Result<(), DbErr> {
         let model = ActiveModel {
             id: Set(id.to_string()),
             download_status: Set(download_status),
@@ -99,7 +99,10 @@ impl Entity {
         Ok(())
     }
 
-    pub async fn delete_by_novel_id(conn: &impl ConnectionTrait, novel_id: &str) -> Result<(), DbErr> {
+    pub async fn delete_by_novel_id(
+        conn: &impl ConnectionTrait,
+        novel_id: &str,
+    ) -> Result<(), DbErr> {
         Entity::delete_many()
             .filter(Column::NovelId.eq(novel_id))
             .exec(conn)
@@ -159,9 +162,9 @@ impl Entity {
 }
 
 pub mod migrations {
-    use sea_orm_migration::prelude::*;
-    use super::Entity;
     use super::Column;
+    use super::Entity;
+    use sea_orm_migration::prelude::*;
 
     pub struct M000001CreateTableNovelDownloadVolume;
 
@@ -179,12 +182,7 @@ pub mod migrations {
                     Table::create()
                         .table(Entity)
                         .if_not_exists()
-                        .col(
-                            ColumnDef::new(Column::Id)
-                                .string()
-                                .not_null()
-                                .primary_key(),
-                        )
+                        .col(ColumnDef::new(Column::Id).string().not_null().primary_key())
                         .col(ColumnDef::new(Column::NovelId).string().not_null())
                         .col(ColumnDef::new(Column::VolumeIdx).integer().not_null())
                         .col(ColumnDef::new(Column::Title).string().not_null())
@@ -233,7 +231,11 @@ pub mod migrations {
 
         async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
             manager
-                .drop_index(Index::drop().name("idx_novel_download_volume_novel_id").to_owned())
+                .drop_index(
+                    Index::drop()
+                        .name("idx_novel_download_volume_novel_id")
+                        .to_owned(),
+                )
                 .await?;
 
             Ok(())
@@ -269,10 +271,14 @@ pub mod migrations {
 
         async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
             manager
-                .drop_index(Index::drop().name("idx_novel_download_volume_novel_id_volume_idx").to_owned())
+                .drop_index(
+                    Index::drop()
+                        .name("idx_novel_download_volume_novel_id_volume_idx")
+                        .to_owned(),
+                )
                 .await?;
 
             Ok(())
         }
     }
-} 
+}

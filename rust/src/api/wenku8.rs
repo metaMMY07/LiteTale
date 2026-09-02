@@ -346,7 +346,11 @@ pub async fn search(
     let data = crate::cache_first(
         key,
         Duration::from_secs(60 * 60),
-        Box::pin(async move { CLIENT.search(&search_type, &search_key, page).await }),
+        Box::pin(async move {
+            CLIENT
+                .search_compatible(&search_type, &search_key, page)
+                .await
+        }),
     )
     .await?;
     Ok(PageStatsNovelCover {

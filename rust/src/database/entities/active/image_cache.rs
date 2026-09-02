@@ -105,7 +105,6 @@ pub(super) mod migrations {
 }
 
 impl Entity {
-
     pub async fn expired_images(time: i64) -> Result<Vec<Model>, DbErr> {
         let db = database::ACTIVE_DB_CONNECT.get().unwrap().lock().await;
         let expired_records = Self::find()

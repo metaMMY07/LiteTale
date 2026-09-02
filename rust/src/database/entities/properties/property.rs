@@ -1,7 +1,7 @@
-use sea_orm::entity::prelude::*;
-use sea_orm::{ConnectionTrait,  Schema, Set};
-use serde::{Deserialize, Serialize};
 use anyhow::Result;
+use sea_orm::entity::prelude::*;
+use sea_orm::{ConnectionTrait, Schema, Set};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "property")]
@@ -61,13 +61,10 @@ pub(super) mod migrations {
 }
 
 impl Entity {
-
     /// 获取属性值
     pub async fn get_value(key: &str) -> Result<Option<String>> {
         let db = super::get_connect().await;
-        let record = Entity::find_by_id(key)
-            .one(&*db)
-            .await?;
+        let record = Entity::find_by_id(key).one(&*db).await?;
         Ok(record.map(|m| m.value))
     }
 
@@ -82,10 +79,10 @@ impl Entity {
             .on_conflict(
                 sea_orm::sea_query::OnConflict::column(Column::Key)
                     .update_column(Column::Value)
-                    .to_owned()
+                    .to_owned(),
             )
             .exec(&*db)
             .await?;
         Ok(())
     }
-} 
+}

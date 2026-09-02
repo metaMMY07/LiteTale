@@ -62,7 +62,7 @@ impl Entity {
             .await?;
         Ok(())
     }
-    
+
     pub async fn exists(name: &str) -> crate::Result<bool> {
         let db = super::get_connect().await;
         let exists = Entity::find()
@@ -71,12 +71,10 @@ impl Entity {
             .await?;
         Ok(exists > 0)
     }
-    
+
     pub async fn delete_all() -> crate::Result<()> {
         let db = super::get_connect().await;
-        Entity::delete_many()
-            .exec(db.deref())
-            .await?;
+        Entity::delete_many().exec(db.deref()).await?;
         Ok(())
     }
 }

@@ -8,13 +8,9 @@ cmake_minimum_required(VERSION 3.14)
 set(PROJECT_NAME "rust_lib_wild")
 project(${PROJECT_NAME} LANGUAGES CXX)
 
-include("../cargokit/cmake/cargokit.cmake")
-apply_cargokit(${PROJECT_NAME} ../../../../../../rust rust_lib_wild "")
-
-# List of absolute paths to libraries that should be bundled with the plugin.
-# This list could contain prebuilt libraries, or libraries created by an
-# external build triggered from this build file.
+# The search fix already ships as a verified native DLL. Reuse it while
+# rebuilding the Windows host so adding WebView2 cannot overwrite that fix.
 set(rust_lib_wild_bundled_libraries
-  "${${PROJECT_NAME}_cargokit_lib}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/prebuilt/rust_lib_wild.dll"
   PARENT_SCOPE
 )

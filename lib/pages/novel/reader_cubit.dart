@@ -11,6 +11,7 @@ import 'package:wild/pages/novel/top_bar_height_cubit.dart';
 import 'package:wild/pages/novel/bottom_bar_height_cubit.dart';
 import 'package:wild/pages/novel/left_padding_cubit.dart';
 import 'package:wild/pages/novel/right_padding_cubit.dart';
+import 'package:wild/theme/app_fonts.dart';
 
 class ReaderCubit extends Cubit<ReaderState> {
   final NovelInfo novelInfo;
@@ -345,8 +346,12 @@ class ReaderCubit extends Cubit<ReaderState> {
           textDirection: TextDirection.ltr,
           maxLines: null,
         );
-        textPainter.strutStyle = StrutStyle(height: lineHeight);
+        textPainter.strutStyle = StrutStyle(
+          fontFamily: appFontFamily,
+          height: lineHeight,
+        );
         final textStyle = TextStyle(
+          fontFamily: appFontFamily,
           fontSize: fontSize,
           height: lineHeight,
           letterSpacing: 0.5,

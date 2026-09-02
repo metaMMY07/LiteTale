@@ -1,8 +1,8 @@
+use super::get_connect;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue::Set, IntoActiveModel, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
-use super::get_connect;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "search_history")]
@@ -48,20 +48,20 @@ impl Entity {
             .limit(100)
             .all(db.deref())
             .await?;
-        
+
         if records.len() < 100 {
             return Ok(());
         }
 
         // 获取第100条记录的时间
         let cutoff_time = records.last().unwrap().search_time;
-        
+
         // 删除这个时间点之前的记录
         Entity::delete_many()
             .filter(Column::SearchTime.lt(cutoff_time))
             .exec(db.deref())
             .await?;
-        
+
         Ok(())
     }
 
@@ -69,7 +69,7 @@ impl Entity {
     pub async fn save_or_update(search_type: String, search_key: String) -> crate::Result<()> {
         let db = get_connect().await;
         let now = chrono::Utc::now().timestamp();
-        
+
         // 检查记录是否存在
         let exists = Entity::find()
             .filter(Column::SearchType.eq(search_type.as_str()))
@@ -91,7 +91,7 @@ impl Entity {
             };
             model.insert(db.deref()).await?;
         }
-        
+
         Ok(())
     }
 }
@@ -181,4 +181,4 @@ pub(super) mod migrations {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelatedEntity)]
-pub enum RelatedEntity {} 
+pub enum RelatedEntity {}

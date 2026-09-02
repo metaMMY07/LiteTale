@@ -2,6 +2,8 @@ use super::models::*;
 use anyhow::{anyhow, Context, Result};
 use base64::Engine;
 use encoding_rs::GBK;
+use futures::stream::{self, StreamExt, TryStreamExt};
+use once_cell::sync::Lazy;
 use rand::Rng;
 use regex::Regex;
 use reqwest::{
@@ -13,12 +15,32 @@ use reqwest::{
 };
 use scraper::Node::Element;
 use scraper::{ElementRef, Html, Selector};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::ops::Deref;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 const DEFAULT_API_HOST: &str = "https://www.wenku8.net";
 const APP_HOST: &str = "http://app.wenku8.com";
+const SEARCH_INDEX_PROPERTY: &str = "search_index_v1";
+const SEARCH_INDEX_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;
+const SEARCH_FALLBACK_PAGE_SIZE: usize = 20;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct SearchIndexEntry {
+    pub(crate) cover: NovelCover,
+    pub(crate) author: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SearchIndexCache {
+    updated_at: i64,
+    entries: Vec<SearchIndexEntry>,
+}
+
+static SEARCH_INDEX_CACHE: Lazy<RwLock<Option<SearchIndexCache>>> = Lazy::new(|| RwLock::new(None));
+static SEARCH_INDEX_REFRESH_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 pub struct Wenku8Client {
     pub client: Client,
@@ -93,10 +115,7 @@ impl Wenku8Client {
                 "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             ),
         );
-        headers.insert(
-            ACCEPT_LANGUAGE,
-            HeaderValue::from_static("zh-CN,zh;q=0.9"),
-        );
+        headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("zh-CN,zh;q=0.9"));
         if !referer.is_empty() {
             if let Ok(v) = HeaderValue::from_str(referer) {
                 headers.insert(REFERER, v);
@@ -318,12 +337,7 @@ impl Wenku8Client {
         );
         let ua = self.load_user_agent().await;
         let headers = Self::default_headers_sync(&ua);
-        let response = self
-            .client
-            .get(url)
-            .headers(headers)
-            .send()
-            .await?;
+        let response = self.client.get(&url).headers(headers).send().await?;
         if !response.status().is_success() {
             return Err(anyhow!("Failed to get novel info: {}", response.status()));
         }
@@ -822,18 +836,16 @@ impl Wenku8Client {
         let referer = format!("{}/", api_host);
         let headers = self.bookcase_headers(&referer).await;
         let url = format!("{}/modules/article/bookcase.php", api_host);
-        let resp = self
-            .client
-            .get(&url)
-            .headers(headers)
-            .send()
-            .await?;
+        let resp = self.client.get(&url).headers(headers).send().await?;
 
         let status = resp.status();
         let body = resp.bytes().await.unwrap_or_default();
         if !status.is_success() {
             let text = String::from_utf8_lossy(&body);
-            if text.contains("Attention Required") || text.contains("cf_chl") || text.contains("Just a moment") {
+            if text.contains("Attention Required")
+                || text.contains("cf_chl")
+                || text.contains("Just a moment")
+            {
                 return Err(anyhow!("Cloudflare 封鎖了書架請求，請嘗試重新登入後再試"));
             }
             return Err(anyhow!("Failed to get bookshelf: HTTP {}", status));
@@ -963,12 +975,7 @@ impl Wenku8Client {
         );
         let ua = self.load_user_agent().await;
         let headers = Self::default_headers_sync(&ua);
-        let response = self
-            .client
-            .get(url)
-            .headers(headers)
-            .send()
-            .await?;
+        let response = self.client.get(url).headers(headers).send().await?;
         if !response.status().is_success() {
             return Err(anyhow!("Failed to get novel reader: {}", response.status()));
         }
@@ -990,18 +997,17 @@ impl Wenku8Client {
         );
         let ua = self.load_user_agent().await;
         let headers = Self::default_headers_sync(&ua);
-        let response = self
-            .client
-            .get(url)
-            .headers(headers)
-            .send()
-            .await?;
+        let response = self.client.get(&url).headers(headers).send().await?;
         if !response.status().is_success() {
             return Err(anyhow!("Failed to get novel reader: {}", response.status()));
         }
         let bytes = response.bytes().await?;
         let html = decode_gbk(bytes)?;
 
+        Self::parse_chapter_content(&html, &url)
+    }
+
+    pub(crate) fn parse_chapter_content(html: &str, page_url: &str) -> Result<String> {
         let document = Html::parse_document(&html);
         let content_selector = Selector::parse("#content").unwrap();
         let content = document
@@ -1009,13 +1015,14 @@ impl Wenku8Client {
             .next()
             .ok_or_else(|| anyhow!("Failed to find #content in chapter page"))?;
 
-        // Build plain text: skip <ul> watermark, convert <br> to newline
+        // Build reader content: skip the watermark, preserve line breaks, and
+        // encode illustrations using the marker understood by the Flutter reader.
         let mut result = String::new();
-        Self::extract_content_text(content, &mut result);
+        Self::extract_content_text(content, &mut result, page_url);
         Ok(result.trim().to_string())
     }
 
-    fn extract_content_text(element: ElementRef, buf: &mut String) {
+    fn extract_content_text(element: ElementRef, buf: &mut String, page_url: &str) {
         use scraper::Node;
         for child in element.children() {
             match child.value() {
@@ -1034,7 +1041,25 @@ impl Wenku8Client {
                         continue;
                     }
                     let child_ref = ElementRef::wrap(child).unwrap();
-                    Self::extract_content_text(child_ref, buf);
+                    if name == "img" {
+                        if let Some(src) = child_ref
+                            .value()
+                            .attr("src")
+                            .or_else(|| child_ref.value().attr("data-src"))
+                        {
+                            let image_url = url::Url::parse(page_url)
+                                .and_then(|base| base.join(src.trim()))
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|_| src.trim().to_string());
+                            if !image_url.is_empty() {
+                                buf.push_str("\n<!--image-->");
+                                buf.push_str(&image_url);
+                                buf.push_str("<!--image-->\n");
+                            }
+                        }
+                        continue;
+                    }
+                    Self::extract_content_text(child_ref, buf, page_url);
                 }
                 _ => {}
             }
@@ -1089,6 +1114,208 @@ impl Wenku8Client {
         Self::parse_tag_page(text)
     }
 
+    async fn search_index_page(&self, page: i32) -> Result<PageStats<SearchIndexEntry>> {
+        let url = format!(
+            "{}/modules/article/articlelist.php?fullflag=1&page={page}&charset=gbk",
+            self.load_api_host().await
+        );
+        let response = self
+            .client
+            .get(url)
+            .header("User-Agent", self.load_user_agent().await)
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "Failed to build local search index: {}",
+                response.status()
+            ));
+        }
+
+        let text = decode_gbk(response.bytes().await?)?;
+        Self::parse_search_index_page(&text)
+    }
+
+    pub(crate) fn parse_search_index_page(text: &str) -> Result<PageStats<SearchIndexEntry>> {
+        let html = Html::parse_document(text);
+        let block_selector = Selector::parse("table.grid tr td>div").unwrap();
+        let image_selector = Selector::parse("div>a>img").unwrap();
+        let author_regex = Regex::new(r"作者[:：]\s*([^/\r\n]+)").unwrap();
+        let mut records = Vec::new();
+
+        for block in html.select(&block_selector) {
+            let Some(image) = block.select(&image_selector).next() else {
+                continue;
+            };
+            let Some(parent) = image.parent().and_then(ElementRef::wrap) else {
+                continue;
+            };
+            if parent.value().name() != "a" {
+                continue;
+            }
+
+            let Some(title) = parent.value().attr("title") else {
+                continue;
+            };
+            let Some(image_url) = image.value().attr("src") else {
+                continue;
+            };
+            let Some(detail_url) = parent.value().attr("href") else {
+                continue;
+            };
+            let Some(aid) = detail_url
+                .split('/')
+                .last()
+                .map(|value| value.trim_end_matches(".htm"))
+            else {
+                continue;
+            };
+
+            let block_text = block.text().collect::<String>();
+            let author = author_regex
+                .captures(&block_text)
+                .and_then(|captures| captures.get(1))
+                .map(|value| value.as_str().trim().to_string())
+                .unwrap_or_default();
+            records.push(SearchIndexEntry {
+                cover: NovelCover {
+                    title: title.trim().to_string(),
+                    img: image_url.to_string(),
+                    detail_url: detail_url.to_string(),
+                    aid: aid.to_string(),
+                },
+                author,
+            });
+        }
+
+        let (current_page, max_page) = Self::parse_page_stats(&html)?;
+        if current_page <= 0 || max_page <= 0 || records.is_empty() {
+            return Err(anyhow!(
+                "Failed to parse local search index page (possibly blocked by Cloudflare)"
+            ));
+        }
+        Ok(PageStats {
+            current_page,
+            max_page,
+            records,
+        })
+    }
+
+    async fn rebuild_search_index(&self) -> Result<SearchIndexCache> {
+        let first_page = self.search_index_page(1).await?;
+        let max_page = first_page.max_page.clamp(1, 500);
+        let mut pages = stream::iter(2..=max_page)
+            .map(|page| async move { self.search_index_page(page).await })
+            .buffer_unordered(4)
+            .try_collect::<Vec<_>>()
+            .await?;
+        pages.sort_by_key(|page| page.current_page);
+
+        let mut entries = first_page.records;
+        for page in pages {
+            entries.extend(page.records);
+        }
+
+        let mut seen = HashSet::new();
+        entries.retain(|entry| seen.insert(entry.cover.aid.clone()));
+        if entries.is_empty() {
+            return Err(anyhow!("The local search index is empty"));
+        }
+
+        Ok(SearchIndexCache {
+            updated_at: chrono::Utc::now().timestamp(),
+            entries,
+        })
+    }
+
+    async fn load_search_index(&self) -> Result<SearchIndexCache> {
+        let now = chrono::Utc::now().timestamp();
+        if let Some(cache) = SEARCH_INDEX_CACHE.read().await.as_ref() {
+            if now - cache.updated_at < SEARCH_INDEX_TTL_SECONDS {
+                return Ok(cache.clone());
+            }
+        }
+
+        let _refresh_guard = SEARCH_INDEX_REFRESH_LOCK.lock().await;
+        if let Some(cache) = SEARCH_INDEX_CACHE.read().await.as_ref() {
+            if now - cache.updated_at < SEARCH_INDEX_TTL_SECONDS {
+                return Ok(cache.clone());
+            }
+        }
+
+        let persisted = crate::api::database::load_property(SEARCH_INDEX_PROPERTY.to_string())
+            .await
+            .unwrap_or_default();
+        let persisted_cache = if persisted.is_empty() {
+            None
+        } else {
+            serde_json::from_str::<SearchIndexCache>(&persisted).ok()
+        };
+        if let Some(cache) = persisted_cache.as_ref() {
+            *SEARCH_INDEX_CACHE.write().await = Some(cache.clone());
+            if now - cache.updated_at < SEARCH_INDEX_TTL_SECONDS {
+                return Ok(cache.clone());
+            }
+        }
+
+        match self.rebuild_search_index().await {
+            Ok(cache) => {
+                let serialized = serde_json::to_string(&cache)?;
+                crate::api::database::save_property(SEARCH_INDEX_PROPERTY.to_string(), serialized)
+                    .await?;
+                *SEARCH_INDEX_CACHE.write().await = Some(cache.clone());
+                Ok(cache)
+            }
+            Err(error) => {
+                if let Some(cache) = persisted_cache {
+                    Ok(cache)
+                } else {
+                    Err(error)
+                }
+            }
+        }
+    }
+
+    pub async fn search_compatible(
+        &self,
+        search_type: &str,
+        search_key: &str,
+        page: i32,
+    ) -> Result<PageStats<NovelCover>> {
+        let cache = self.load_search_index().await?;
+        let normalized_key = search_key.trim().to_lowercase();
+        let mut matches = cache
+            .entries
+            .iter()
+            .filter(|entry| {
+                let value = if search_type == "author" {
+                    &entry.author
+                } else {
+                    &entry.cover.title
+                };
+                value.to_lowercase().contains(&normalized_key)
+            })
+            .map(|entry| entry.cover.clone())
+            .collect::<Vec<_>>();
+
+        let max_page = ((matches.len() + SEARCH_FALLBACK_PAGE_SIZE - 1) / SEARCH_FALLBACK_PAGE_SIZE)
+            .max(1) as i32;
+        let current_page = page.max(1).min(max_page);
+        let start = (current_page as usize - 1) * SEARCH_FALLBACK_PAGE_SIZE;
+        let end = (start + SEARCH_FALLBACK_PAGE_SIZE).min(matches.len());
+        let records = if start < matches.len() {
+            matches.drain(start..end).collect()
+        } else {
+            Vec::new()
+        };
+
+        Ok(PageStats {
+            current_page,
+            max_page,
+            records,
+        })
+    }
+
     pub async fn add_bookshelf(&self, aid: &str) -> Result<()> {
         let api_host = self.load_api_host().await;
         let url = format!(
@@ -1108,11 +1335,7 @@ impl Wenku8Client {
             .gzip(true)
             .build()?;
 
-        let response = temp_client
-            .get(&url)
-            .headers(headers)
-            .send()
-            .await?;
+        let response = temp_client.get(&url).headers(headers).send().await?;
 
         let status = response.status();
 
@@ -1146,15 +1369,11 @@ impl Wenku8Client {
         // 先訪問首頁，確保 session cookie 已建立（避免 CF 403）
         let _ = self.init_session().await;
         let api_host = self.load_api_host().await;
-        let url = format!("{}/modules/article/bookcase.php?charset=gbk", api_host);
+        // bookcase.php 不支持 charset；附加该参数会直接触发 Cloudflare 403。
+        let url = format!("{}/modules/article/bookcase.php?classid=0", api_host);
         let referer = format!("{}/", api_host);
         let headers = self.bookcase_headers(&referer).await;
-        let response = self
-            .client
-            .get(url)
-            .headers(headers)
-            .send()
-            .await?;
+        let response = self.client.get(url).headers(headers).send().await?;
         let status = response.status();
         let ua_used = self.load_user_agent().await;
         let body = response.bytes().await.unwrap_or_default();
@@ -1162,14 +1381,22 @@ impl Wenku8Client {
         if !status.is_success() {
             return Err(anyhow!(
                 "書架請求失敗 [HTTP {}] UA={} body_preview={}",
-                status, ua_used, text_preview
+                status,
+                ua_used,
+                text_preview
             ));
         }
         // 200 但可能是 CF challenge 頁面
-        if text_preview.contains("Just a moment") || text_preview.contains("cf_chl") || text_preview.contains("Attention Required") || text_preview.contains("Enable JavaScript") {
+        if text_preview.contains("Just a moment")
+            || text_preview.contains("cf_chl")
+            || text_preview.contains("Attention Required")
+            || text_preview.contains("Enable JavaScript")
+        {
             return Err(anyhow!(
                 "Cloudflare Challenge [HTTP {}] UA={} body_preview={}",
-                status, ua_used, text_preview
+                status,
+                ua_used,
+                text_preview
             ));
         }
 
@@ -1197,20 +1424,21 @@ impl Wenku8Client {
 
     pub async fn book_in_case(&self, case_id: &str) -> Result<BookcaseDto> {
         let api_host = self.load_api_host().await;
-        let url = format!("{}/modules/article/bookcase.php?classid={case_id}&charset=gbk", api_host);
+        let url = format!(
+            "{}/modules/article/bookcase.php?classid={case_id}",
+            api_host
+        );
         let referer = format!("{}/modules/article/bookcase.php", api_host);
         let headers = self.bookcase_headers(&referer).await;
-        let response = self
-            .client
-            .get(url)
-            .headers(headers)
-            .send()
-            .await?;
+        let response = self.client.get(url).headers(headers).send().await?;
         let status = response.status();
         let body = response.bytes().await.unwrap_or_default();
         if !status.is_success() {
             let text = String::from_utf8_lossy(&body);
-            if text.contains("Attention Required") || text.contains("cf_chl") || text.contains("Just a moment") {
+            if text.contains("Attention Required")
+                || text.contains("cf_chl")
+                || text.contains("Just a moment")
+            {
                 return Err(anyhow!("Cloudflare 封鎖了書架請求，請嘗試重新登入後再試"));
             }
             return Err(anyhow!("Failed to get book in case: {}", text));
@@ -1335,7 +1563,7 @@ impl Wenku8Client {
 
     pub async fn delete_bookcase(&self, delid: &str) -> Result<()> {
         let api_host = self.load_api_host().await;
-        let url = format!("{}/modules/article/bookcase.php?delid={delid}&charset=gbk", api_host);
+        let url = format!("{}/modules/article/bookcase.php?delid={delid}", api_host);
         let referer = format!("{}/modules/article/bookcase.php", api_host);
         let headers = self.bookcase_headers(&referer).await;
         // 刪除後也會 302 redirect，用 no-redirect 客戶端
@@ -1344,11 +1572,7 @@ impl Wenku8Client {
             .redirect(reqwest::redirect::Policy::none())
             .gzip(true)
             .build()?;
-        let response = temp_client
-            .get(url)
-            .headers(headers)
-            .send()
-            .await?;
+        let response = temp_client.get(url).headers(headers).send().await?;
         let status = response.status();
         if status.as_u16() == 302 || status.is_success() {
             Ok(())

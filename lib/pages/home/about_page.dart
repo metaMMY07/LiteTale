@@ -20,9 +20,7 @@ class AboutPage extends StatelessWidget {
     return BlocBuilder<UpdateCubit, UpdateState>(
       builder: (context, state) {
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('关于'),
-          ),
+          appBar: AppBar(title: const Text('关于')),
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -41,8 +39,8 @@ class AboutPage extends StatelessWidget {
                 child: Text(
                   AppInfo.appName,
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
@@ -51,8 +49,8 @@ class AboutPage extends StatelessWidget {
                 child: Text(
                   '版本 ${AppInfo.fullVersion}',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
               const SizedBox(height: 32),
@@ -96,26 +94,44 @@ class AboutPage extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '关于 Wild',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                        '关于 novels',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Wild 是一个使用 Flutter 开发的轻小说文库客户端，提供流畅的阅读体验和丰富的功能。',
+                        'novels 是一个使用 Flutter 开发的轻小说文库客户端，提供流畅的阅读体验和丰富的功能。',
                         style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '本版本基于开源项目 Wild 开发，感谢原作者和所有贡献者。',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        onPressed:
+                            () => _launchUrl(
+                              'https://github.com/MMY-SYSU/novels',
+                            ),
+                        icon: const Icon(Icons.code),
+                        label: const Text('查看 novels 源代码'),
+                      ),
+                      TextButton.icon(
+                        onPressed:
+                            () => _launchUrl('https://github.com/niuhuan/wild'),
+                        icon: const Icon(Icons.account_tree_outlined),
+                        label: const Text('查看上游 Wild 项目'),
                       ),
                       const SizedBox(height: 16),
                       Text(
                         '开源协议',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '本项目采用 GNU General Public License v3.0 (GPLv3) 协议开源。',
+                        'Wild 衍生代码采用 GNU GPL v3；应用图标来自 Novella，并按 GNU AGPL v3 许可使用。',
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ],
@@ -128,4 +144,4 @@ class AboutPage extends StatelessWidget {
       },
     );
   }
-} 
+}

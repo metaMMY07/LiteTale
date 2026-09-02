@@ -1,4 +1,7 @@
-use crate::database::entities::active::{chapter_cache, image_cache, novel_download, novel_download_chapter, novel_download_picture, web_cache};
+use crate::database::entities::active::{
+    chapter_cache, image_cache, novel_download, novel_download_chapter, novel_download_picture,
+    web_cache,
+};
 use crate::database::entities::WebCacheEntity;
 use crate::{get_image_cache_dir, CLIENT, DOWNLOAD_FOLDER, IMAGE_LOCKS};
 use chrono::Utc;
@@ -9,6 +12,10 @@ use std::path::Path;
 use std::pin::Pin;
 use std::time::Duration;
 use tokio::fs as async_fs;
+
+// Cached chapter text written before this parser version has no illustration
+// markers because the old HTML extractor discarded every <img> node.
+const CHAPTER_IMAGE_PARSER_V2_EPOCH: i64 = 1_788_248_849;
 
 pub async fn cleanup_image_cache() -> crate::Result<()> {
     let image_cache_dir = get_image_cache_dir();
@@ -46,7 +53,7 @@ pub async fn get_cached_image(img_url: String) -> crate::Result<String> {
         if a.cover_download_status == 1 {
             let novel_dir = Path::new(DOWNLOAD_FOLDER.get().unwrap()).join(&a.novel_id);
             let picture_file_path = novel_dir.join("cover");
-            let path = picture_file_path.to_str().unwrap().to_string(); 
+            let path = picture_file_path.to_str().unwrap().to_string();
             return Ok(path);
         }
     }
@@ -106,14 +113,36 @@ pub(crate) async fn get_chapter_content(aid: &str, cid: &str) -> anyhow::Result<
         if a.download_status == 1 {
             let novel_dir = Path::new(DOWNLOAD_FOLDER.get().unwrap()).join(&a.aid);
             let chapter_file_path = novel_dir.join(format!("chapter_{}", cid));
-            let content = tokio::fs::read_to_string(chapter_file_path).await?;
-            return Ok(content);
+            let content = tokio::fs::read_to_string(&chapter_file_path).await?;
+            let is_current_parser = tokio::fs::metadata(&chapter_file_path)
+                .await
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|modified| modified.as_secs() as i64 >= CHAPTER_IMAGE_PARSER_V2_EPOCH)
+                .unwrap_or(false);
+            if is_current_parser {
+                return Ok(content);
+            }
+
+            // Refresh old downloaded chapter text once so illustrations appear.
+            // If the network is unavailable, keep the existing offline text.
+            return match CLIENT.c_content(aid, cid).await {
+                Ok(refreshed) => {
+                    tokio::fs::write(&chapter_file_path, &refreshed).await?;
+                    Ok(refreshed)
+                }
+                Err(_) => Ok(content),
+            };
         }
     }
 
     // 先尝试从缓存获取（跳过无效的缓存内容）
     if let Some(cache) = chapter_cache::Entity::get_chapter_content(aid, cid).await? {
-        if !cache.content.trim().is_empty() && cache.content.trim() != "0" {
+        if cache.download_time >= CHAPTER_IMAGE_PARSER_V2_EPOCH
+            && !cache.content.trim().is_empty()
+            && cache.content.trim() != "0"
+        {
             return Ok(cache.content);
         }
     }

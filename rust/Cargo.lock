@@ -2131,6 +2131,7 @@ dependencies = [
  "cookie",
  "encoding_rs",
  "flutter_rust_bridge",
+ "futures",
  "hex",
  "image",
  "lazy_static",

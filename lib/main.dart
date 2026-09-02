@@ -34,9 +34,11 @@ import 'package:wild/pages/novel/reviews_page.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/cubits/reader_background_cubit.dart';
 import 'package:wild/cubits/volume_control_cubit.dart';
+import 'package:wild/theme/app_fonts.dart';
 
 final lightTheme = ThemeData(
   colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+  fontFamily: appFontFamily,
   useMaterial3: true,
 );
 final darkTheme = ThemeData(
@@ -44,6 +46,7 @@ final darkTheme = ThemeData(
     seedColor: Colors.blue,
     brightness: Brightness.dark,
   ),
+  fontFamily: appFontFamily,
   useMaterial3: true,
 );
 

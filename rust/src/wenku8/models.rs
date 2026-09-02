@@ -60,7 +60,7 @@ pub struct HomeBlock {
     pub list: Vec<NovelCover>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct NovelCover {
     pub title: String,
     pub img: String,

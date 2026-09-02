@@ -1,12 +1,16 @@
-use sea_orm::{prelude::*, sea_query::{Index, SqliteQueryBuilder}, Order, QueryOrder, QuerySelect, Schema, Set, Statement};
+use sea_orm::{
+    prelude::*,
+    sea_query::{Index, SqliteQueryBuilder},
+    Order, QueryOrder, QuerySelect, Schema, Set, Statement,
+};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
-use sea_orm::{EntityTrait, ColumnTrait, DatabaseConnection};
 
 use super::get_connect;
 
 /// 小说章节下载表
-/// 
+///
 /// 字段说明：
 /// - id: 章节ID，主键
 /// - title: 章节标题
@@ -36,7 +40,6 @@ pub enum Relation {}
 impl ActiveModelBehavior for ActiveModel {}
 
 impl Entity {
-
     pub async fn reset_fail_downloads() -> Result<(), DbErr> {
         Entity::update_many()
             .col_expr(Column::DownloadStatus, Expr::value(0))
@@ -46,7 +49,10 @@ impl Entity {
         Ok(())
     }
 
-    pub async fn delete_by_novel_id(conn: &impl ConnectionTrait, novel_id: &str) -> Result<(), DbErr> {
+    pub async fn delete_by_novel_id(
+        conn: &impl ConnectionTrait,
+        novel_id: &str,
+    ) -> Result<(), DbErr> {
         Entity::delete_many()
             .filter(Column::Aid.eq(novel_id))
             .exec(conn)
@@ -121,10 +127,7 @@ impl Entity {
     }
 
     /// 更新章节下载状态
-    pub async fn update_download_status(
-        id: &str,
-        download_status: i32,
-    ) -> Result<(), DbErr> {
+    pub async fn update_download_status(id: &str, download_status: i32) -> Result<(), DbErr> {
         let model = ActiveModel {
             id: Set(id.to_string()),
             download_status: Set(download_status),
@@ -186,7 +189,10 @@ impl Entity {
             .await?)
     }
 
-    pub async fn find_incomplete_by_volume(novel_id: &str, volume_id: &str) -> Result<Option<Model>, DbErr> {
+    pub async fn find_incomplete_by_volume(
+        novel_id: &str,
+        volume_id: &str,
+    ) -> Result<Option<Model>, DbErr> {
         Entity::find()
             .filter(Column::Aid.eq(novel_id))
             .filter(Column::VolumeId.eq(volume_id))
@@ -197,7 +203,12 @@ impl Entity {
             .await
     }
 
-    pub async fn update_status(novel_id: &str, volume_id: &str, chapter_id: &str, status: i32) -> Result<(), DbErr> {
+    pub async fn update_status(
+        novel_id: &str,
+        volume_id: &str,
+        chapter_id: &str,
+        status: i32,
+    ) -> Result<(), DbErr> {
         Entity::update_many()
             .filter(Column::Aid.eq(novel_id))
             .filter(Column::VolumeId.eq(volume_id))
@@ -210,13 +221,12 @@ impl Entity {
             .await?;
         Ok(())
     }
-
 }
 
 pub mod migrations {
-    use sea_orm_migration::prelude::*;
-    use super::Entity;
     use super::Column;
+    use super::Entity;
+    use sea_orm_migration::prelude::*;
 
     pub struct M000001CreateTableNovelDownloadChapter;
 
@@ -234,12 +244,7 @@ pub mod migrations {
                     Table::create()
                         .table(Entity)
                         .if_not_exists()
-                        .col(
-                            ColumnDef::new(Column::Id)
-                                .string()
-                                .not_null()
-                                .primary_key(),
-                        )
+                        .col(ColumnDef::new(Column::Id).string().not_null().primary_key())
                         .col(ColumnDef::new(Column::Title).string().not_null())
                         .col(ColumnDef::new(Column::Url).string().not_null())
                         .col(ColumnDef::new(Column::Aid).string().not_null())
@@ -290,7 +295,11 @@ pub mod migrations {
 
         async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
             manager
-                .drop_index(Index::drop().name("idx_novel_download_chapter_aid").to_owned())
+                .drop_index(
+                    Index::drop()
+                        .name("idx_novel_download_chapter_aid")
+                        .to_owned(),
+                )
                 .await?;
 
             Ok(())
@@ -324,7 +333,11 @@ pub mod migrations {
 
         async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
             manager
-                .drop_index(Index::drop().name("idx_novel_download_chapter_volume_id").to_owned())
+                .drop_index(
+                    Index::drop()
+                        .name("idx_novel_download_chapter_volume_id")
+                        .to_owned(),
+                )
                 .await?;
 
             Ok(())
@@ -361,10 +374,14 @@ pub mod migrations {
 
         async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
             manager
-                .drop_index(Index::drop().name("idx_novel_download_chapter_aid_volume_id_chapter_idx").to_owned())
+                .drop_index(
+                    Index::drop()
+                        .name("idx_novel_download_chapter_aid_volume_id_chapter_idx")
+                        .to_owned(),
+                )
                 .await?;
 
             Ok(())
         }
     }
-} 
+}
