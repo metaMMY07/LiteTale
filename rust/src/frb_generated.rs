@@ -2461,7 +2461,12 @@ fn pde_ffi_dispatcher_primary_impl(
             wire__crate__api__wenku8__wenku8_get_bookshelf_impl(port, ptr, rust_vec_len, data_len)
         }
         44 => wire__crate__api__wenku8__wenku8_login_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__wenku8__get_session_cookie_string_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__wenku8__get_session_cookie_string_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
         _ => unreachable!(),
     }
 }

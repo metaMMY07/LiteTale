@@ -20,6 +20,7 @@ import 'package:wild/pages/novel/auto_scroll_cubit.dart';
 import 'package:wild/pages/novel/auto_scroll_config_cubit.dart';
 import 'package:wild/cubits/volume_control_cubit.dart';
 import 'package:wild/utils/controller_event.dart';
+import 'package:wild/theme/app_fonts.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -426,6 +427,7 @@ class _ReaderContent extends StatelessWidget {
             child: Text(
               content.text,
               style: TextStyle(
+                fontFamily: appFontFamily,
                 fontSize: fontSize,
                 height: lineHeight,
                 color: textColor,

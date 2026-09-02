@@ -6,6 +6,7 @@ import 'package:wild/pages/novel/novel_download_info_cubit.dart';
 import 'package:wild/pages/novel/reader_page.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:flutter_html/flutter_html.dart';
+import 'package:wild/theme/app_fonts.dart';
 
 class NovelDownloadInfoPage extends StatelessWidget {
   final String novelId;
@@ -389,6 +390,7 @@ class _NovelDescription extends StatelessWidget {
               'body': Style(
                 margin: Margins.zero,
                 padding: HtmlPaddings.zero,
+                fontFamily: appFontFamily,
                 fontSize: FontSize(14),
                 color: Theme.of(context).colorScheme.onSurface,
               ),

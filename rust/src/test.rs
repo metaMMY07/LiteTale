@@ -150,10 +150,44 @@ async fn test_add_bookshelf() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires WILD_TEST_DATA_DIR with a saved login session"]
+async fn test_bookshelf_live_with_saved_session() -> anyhow::Result<()> {
+    set_logger();
+    let root = std::env::var("WILD_TEST_DATA_DIR")?;
+    crate::init(root).await?;
+    let response = CLIENT.get_bookshelf().await?;
+    println!("bookshelf categories: {}", response.len());
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_c_content() -> anyhow::Result<()> {
     init_context().await?;
-    let response = CLIENT.c_content("3103", "128331").await?;
-    println!("response : {}", response);
+    let response = CLIENT.c_content("3103", "128338").await?;
+    assert!(response.contains("<!--image-->https://pic.777743.xyz/"));
+    Ok(())
+}
+
+#[test]
+fn test_parse_chapter_content_keeps_illustrations() -> anyhow::Result<()> {
+    let html = r#"
+        <html><body><div id="content">
+          开头<br>
+          <div class="divimage"><a href="https://pic.example/full.jpg">
+            <img src="//pic.example/illustration.jpg" class="imagecontent">
+          </a></div>
+          结尾
+          <ul><li><img src="/watermark.jpg"></li></ul>
+        </div></body></html>
+    "#;
+    let content = Wenku8Client::parse_chapter_content(
+        html,
+        "https://www.wenku8.net/novel/3/3103/128338.htm",
+    )?;
+    assert!(content.contains("开头"));
+    assert!(content.contains("<!--image-->https://pic.example/illustration.jpg<!--image-->"));
+    assert!(content.contains("结尾"));
+    assert!(!content.contains("watermark.jpg"));
     Ok(())
 }
 
@@ -173,4 +207,25 @@ async fn test_reviews() -> anyhow::Result<()> {
     Ok(())
 }
 
-1
+#[test]
+fn test_parse_search_index_fallback_page() -> anyhow::Result<()> {
+    let html = r#"
+        <html><body>
+          <em id="pagestats">1/2</em>
+          <table class="grid"><tr><td><div>
+            <div><a href="/book/42.htm" title="云端测试">
+              <img src="https://img.wenku8.com/image/0/42/42s.jpg" />
+            </a></div>
+            作者:测试作者/分类:测试文库
+          </div></td></tr></table>
+        </body></html>
+    "#;
+    let page = Wenku8Client::parse_search_index_page(html)?;
+    assert_eq!(page.current_page, 1);
+    assert_eq!(page.max_page, 2);
+    assert_eq!(page.records.len(), 1);
+    assert_eq!(page.records[0].cover.aid, "42");
+    assert_eq!(page.records[0].cover.title, "云端测试");
+    assert_eq!(page.records[0].author, "测试作者");
+    Ok(())
+}

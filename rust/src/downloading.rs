@@ -425,18 +425,30 @@ async fn downloading_loop() -> Result<()> {
             if !all_success {
                 continue;
             }
-            let all_chapters = novel_download_chapter::Entity::find_by_novel_id(&novel.novel_id).await?;
-            let has_failed = all_chapters.iter().any(|chapter| chapter.download_status == 2);
+            let all_chapters =
+                novel_download_chapter::Entity::find_by_novel_id(&novel.novel_id).await?;
+            let has_failed = all_chapters
+                .iter()
+                .any(|chapter| chapter.download_status == 2);
             if has_failed {
                 let _ = novel_download::Entity::update_status(&novel.novel_id, 2).await;
                 continue;
             }
-            let all_success = all_chapters.iter().all(|chapter| chapter.download_status == 1);
+            let all_success = all_chapters
+                .iter()
+                .all(|chapter| chapter.download_status == 1);
             if !all_success {
                 continue;
             }
-            let success_chapter_count = all_chapters.iter().filter(|chapter| chapter.download_status == 1).count();
-            let _ = novel_download::Entity::update_download_chapter_count(&novel.novel_id, success_chapter_count.try_into().unwrap()).await;
+            let success_chapter_count = all_chapters
+                .iter()
+                .filter(|chapter| chapter.download_status == 1)
+                .count();
+            let _ = novel_download::Entity::update_download_chapter_count(
+                &novel.novel_id,
+                success_chapter_count.try_into().unwrap(),
+            )
+            .await;
             let _ = novel_download::Entity::update_status(&novel.novel_id, 1).await;
         }
 

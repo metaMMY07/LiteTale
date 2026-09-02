@@ -1,7 +1,7 @@
-use std::ops::Deref;
+use crate::database::PROPERTIES_DB_CONNECT;
 use sea_orm::DatabaseConnection;
 use sea_orm_migration::{MigrationTrait, MigratorTrait};
-use crate::database::PROPERTIES_DB_CONNECT;
+use std::ops::Deref;
 
 pub mod property;
 
@@ -19,10 +19,8 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![
-            Box::new(
-                property::migrations::m000001_create_table_properties::Migration,
-            ),
-        ]
+        vec![Box::new(
+            property::migrations::m000001_create_table_properties::Migration,
+        )]
     }
 }

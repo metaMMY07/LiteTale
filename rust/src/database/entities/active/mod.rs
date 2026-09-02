@@ -36,10 +36,12 @@ async fn get_connect() -> tokio::sync::MutexGuard<'static, DatabaseConnection> {
 
 pub(crate) async fn remove_download_data(novel_id: &str) -> crate::Result<()> {
     let db = get_connect().await;
-    novel_download::Entity::delete_by_id(novel_id).exec(db.deref()).await?;
+    novel_download::Entity::delete_by_id(novel_id)
+        .exec(db.deref())
+        .await?;
     novel_download_volume::Entity::delete_by_novel_id(db.deref(), novel_id).await?;
-    novel_download_chapter::Entity::delete_by_novel_id(db.deref(),novel_id).await?;
-    novel_download_picture::Entity::delete_by_novel_id(db.deref(),novel_id).await?;
+    novel_download_chapter::Entity::delete_by_novel_id(db.deref(), novel_id).await?;
+    novel_download_picture::Entity::delete_by_novel_id(db.deref(), novel_id).await?;
     Ok(())
 }
 

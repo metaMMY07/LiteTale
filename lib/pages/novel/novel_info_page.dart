@@ -8,6 +8,7 @@ import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/pages/novel/reviews_page.dart';
 import 'package:wild/widgets/cf_action_loader.dart';
+import 'package:wild/theme/app_fonts.dart';
 
 import '../../src/rust/wenku8/models.dart';
 import 'novel_info_cubit.dart';
@@ -442,6 +443,7 @@ class _NovelDescription extends StatelessWidget {
               'body': Style(
                 margin: Margins.zero,
                 padding: HtmlPaddings.zero,
+                fontFamily: appFontFamily,
                 fontSize: FontSize(14),
                 color: Theme.of(context).colorScheme.onSurface,
               ),

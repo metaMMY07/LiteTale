@@ -1,5 +1,5 @@
 name: wild
-description: "A new Flutter project."
+description: "A light novel reader derived from the Wild open-source project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -48,6 +48,7 @@ dependencies:
   image_picker: ^1.2.0
   event: ^3.1.0
   webview_flutter: ^4.10.0
+  webview_windows: ^0.4.0
 
 dev_dependencies:
   flutter_test:
@@ -76,6 +77,10 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - lib/assets/
+  fonts:
+    - family: LXGWNeoZhiSongPlus
+      fonts:
+        - asset: lib/assets/fonts/LXGWNeoZhiSongPlus.ttf
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
 
