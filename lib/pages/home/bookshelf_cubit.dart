@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:wild/src/rust/api/wenku8.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
+import 'package:wild/utils/wenku8_network_error.dart';
 
 enum BookshelfStatus { initial, loading, success, error, cloudflareChallenge }
 
@@ -131,8 +132,8 @@ class BookshelfCubit extends Cubit<BookshelfState> {
       }
     } catch (e) {
       final msg = e.toString();
-      // 403 / CF 封鎖 → 改用 WebView 繞過
-      if (msg.contains('403') || msg.contains('Cloudflare') || msg.contains('cf_')) {
+      // CF 封鎖或 wenku8 非標準 TLS 斷線 → 改用 WebView 載入。
+      if (shouldUseWenku8WebViewFallback(e)) {
         emit(state.copyWith(status: BookshelfStatus.cloudflareChallenge));
       } else {
         emit(state.copyWith(status: BookshelfStatus.error, errorMessage: msg));
@@ -199,7 +200,7 @@ class BookshelfCubit extends Cubit<BookshelfState> {
       );
     } catch (e) {
       final msg = e.toString();
-      if (msg.contains('403') || msg.contains('Cloudflare') || msg.contains('cf_')) {
+      if (shouldUseWenku8WebViewFallback(e)) {
         rethrow; // 讓 UI 層用 WebView 重試
       }
       emit(state.copyWith(status: BookshelfStatus.error, errorMessage: msg));
@@ -226,7 +227,7 @@ class BookshelfCubit extends Cubit<BookshelfState> {
       await addBookshelf(aid: aid);
     } catch (e) {
       final msg = e.toString();
-      if (msg.contains('403') || msg.contains('Cloudflare') || msg.contains('cf_')) {
+      if (shouldUseWenku8WebViewFallback(e)) {
         rethrow; // 讓 novel_info_page 用 WebView 重試
       }
       emit(state.copyWith(status: BookshelfStatus.error, errorMessage: msg));
@@ -245,7 +246,7 @@ class BookshelfCubit extends Cubit<BookshelfState> {
       await deleteBookcase(bid: bid);
     } catch (e) {
       final msg = e.toString();
-      if (msg.contains('403') || msg.contains('Cloudflare') || msg.contains('cf_')) {
+      if (shouldUseWenku8WebViewFallback(e)) {
         rethrow; // 讓 novel_info_page 用 WebView 重試
       }
       emit(state.copyWith(status: BookshelfStatus.error, errorMessage: msg));

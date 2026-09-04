@@ -9,13 +9,13 @@ import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/pages/novel/reviews_page.dart';
 import 'package:wild/widgets/cf_action_loader.dart';
 import 'package:wild/theme/app_fonts.dart';
+import 'package:wild/utils/wenku8_network_error.dart';
 
 import '../../src/rust/wenku8/models.dart';
 import 'novel_info_cubit.dart';
 
 bool _isCfError(dynamic e) {
-  final msg = e.toString();
-  return msg.contains('403') || msg.contains('Cloudflare') || msg.contains('cf_');
+  return shouldUseWenku8WebViewFallback(e);
 }
 
 class NovelInfoPage extends StatelessWidget {
