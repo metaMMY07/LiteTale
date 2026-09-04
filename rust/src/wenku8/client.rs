@@ -11,7 +11,7 @@ use reqwest::{
         HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CONNECTION, CONTENT_TYPE,
         REFERER, USER_AGENT,
     },
-    Client,
+    Client, RequestBuilder, Response,
 };
 use scraper::Node::Element;
 use scraper::{ElementRef, Html, Selector};
@@ -20,6 +20,7 @@ use std::collections::HashSet;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
+use tokio::time::{sleep, Duration};
 
 const DEFAULT_API_HOST: &str = "https://www.wenku8.net";
 const APP_HOST: &str = "http://app.wenku8.com";
@@ -41,6 +42,41 @@ struct SearchIndexCache {
 
 static SEARCH_INDEX_CACHE: Lazy<RwLock<Option<SearchIndexCache>>> = Lazy::new(|| RwLock::new(None));
 static SEARCH_INDEX_REFRESH_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+fn is_retryable_get_error(error: &reqwest::Error) -> bool {
+    let message = error.to_string().to_ascii_lowercase();
+    error.is_connect()
+        || error.is_timeout()
+        || error.is_request()
+        || message.contains("close_notify")
+        || message.contains("unexpected eof")
+        || message.contains("unexpected-eof")
+        || message.contains("connection reset")
+        || message.contains("connection closed")
+}
+
+/// Retry idempotent GET requests when Wenku8 closes a TLS connection early.
+/// The site intermittently drops keep-alive connections without a TLS
+/// `close_notify`; a fresh request normally succeeds immediately.
+async fn send_idempotent_get(mut request: RequestBuilder) -> reqwest::Result<Response> {
+    for attempt in 0..3 {
+        let retry = request.try_clone();
+        match request.send().await {
+            Ok(response) => return Ok(response),
+            Err(error) => {
+                if attempt == 2 || !is_retryable_get_error(&error) {
+                    return Err(error);
+                }
+                let Some(next_request) = retry else {
+                    return Err(error);
+                };
+                sleep(Duration::from_millis(150 * (attempt + 1))).await;
+                request = next_request;
+            }
+        }
+    }
+    unreachable!("GET retry loop always returns")
+}
 
 pub struct Wenku8Client {
     pub client: Client,
@@ -337,7 +373,7 @@ impl Wenku8Client {
         );
         let ua = self.load_user_agent().await;
         let headers = Self::default_headers_sync(&ua);
-        let response = self.client.get(&url).headers(headers).send().await?;
+        let response = send_idempotent_get(self.client.get(&url).headers(headers)).await?;
         if !response.status().is_success() {
             return Err(anyhow!("Failed to get novel info: {}", response.status()));
         }
@@ -975,7 +1011,7 @@ impl Wenku8Client {
         );
         let ua = self.load_user_agent().await;
         let headers = Self::default_headers_sync(&ua);
-        let response = self.client.get(url).headers(headers).send().await?;
+        let response = send_idempotent_get(self.client.get(url).headers(headers)).await?;
         if !response.status().is_success() {
             return Err(anyhow!("Failed to get novel reader: {}", response.status()));
         }
@@ -997,7 +1033,7 @@ impl Wenku8Client {
         );
         let ua = self.load_user_agent().await;
         let headers = Self::default_headers_sync(&ua);
-        let response = self.client.get(&url).headers(headers).send().await?;
+        let response = send_idempotent_get(self.client.get(&url).headers(headers)).await?;
         if !response.status().is_success() {
             return Err(anyhow!("Failed to get novel reader: {}", response.status()));
         }
@@ -1071,12 +1107,12 @@ impl Wenku8Client {
             "{}/modules/article/toplist.php?sort={sort}&page={page}&charset=gbk",
             self.load_api_host().await
         );
-        let response = self
-            .client
-            .get(url)
-            .header("User-Agent", self.load_user_agent().await)
-            .send()
-            .await?;
+        let response = send_idempotent_get(
+            self.client
+                .get(url)
+                .header("User-Agent", self.load_user_agent().await),
+        )
+        .await?;
         if !response.status().is_success() {
             return Err(anyhow!("Failed to get toplist: {}", response.status()));
         }
@@ -1095,12 +1131,12 @@ impl Wenku8Client {
             "{}/modules/article/articlelist.php?fullflag={fullflag}&page={page}&charset=gbk",
             self.load_api_host().await
         );
-        let response = self
-            .client
-            .get(url)
-            .header("User-Agent", self.load_user_agent().await)
-            .send()
-            .await?;
+        let response = send_idempotent_get(
+            self.client
+                .get(url)
+                .header("User-Agent", self.load_user_agent().await),
+        )
+        .await?;
         if !response.status().is_success() {
             return Err(anyhow!("Failed to get article list: {}", response.status()));
         }
@@ -1119,12 +1155,12 @@ impl Wenku8Client {
             "{}/modules/article/articlelist.php?fullflag=1&page={page}&charset=gbk",
             self.load_api_host().await
         );
-        let response = self
-            .client
-            .get(url)
-            .header("User-Agent", self.load_user_agent().await)
-            .send()
-            .await?;
+        let response = send_idempotent_get(
+            self.client
+                .get(url)
+                .header("User-Agent", self.load_user_agent().await),
+        )
+        .await?;
         if !response.status().is_success() {
             return Err(anyhow!(
                 "Failed to build local search index: {}",
@@ -1373,10 +1409,13 @@ impl Wenku8Client {
         let url = format!("{}/modules/article/bookcase.php?classid=0", api_host);
         let referer = format!("{}/", api_host);
         let headers = self.bookcase_headers(&referer).await;
-        let response = self.client.get(url).headers(headers).send().await?;
+        let response = send_idempotent_get(self.client.get(url).headers(headers)).await?;
         let status = response.status();
         let ua_used = self.load_user_agent().await;
-        let body = response.bytes().await.unwrap_or_default();
+        let body = response
+            .bytes()
+            .await
+            .context("Failed to read bookcase list response")?;
         let text_preview: String = String::from_utf8_lossy(&body).chars().take(300).collect();
         if !status.is_success() {
             return Err(anyhow!(
@@ -1430,9 +1469,12 @@ impl Wenku8Client {
         );
         let referer = format!("{}/modules/article/bookcase.php", api_host);
         let headers = self.bookcase_headers(&referer).await;
-        let response = self.client.get(url).headers(headers).send().await?;
+        let response = send_idempotent_get(self.client.get(url).headers(headers)).await?;
         let status = response.status();
-        let body = response.bytes().await.unwrap_or_default();
+        let body = response
+            .bytes()
+            .await
+            .context("Failed to read bookcase response")?;
         if !status.is_success() {
             let text = String::from_utf8_lossy(&body);
             if text.contains("Attention Required")
