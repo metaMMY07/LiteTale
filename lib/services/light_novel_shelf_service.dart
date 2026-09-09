@@ -83,7 +83,7 @@ class LightNovelShelfService {
       socket = await WebSocket.connect(
         _hubUrl,
         headers: {
-          HttpHeaders.userAgentHeader: 'novels/0.0.15',
+          HttpHeaders.userAgentHeader: 'LiteTale/0.0.17',
           'x-id': _createUuid(),
         },
         customClient: client,

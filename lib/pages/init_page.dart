@@ -102,7 +102,7 @@ class _InitPageState extends State<InitPage> {
                 ),
               ),
               const SizedBox(height: 24),
-              Text('novels', style: Theme.of(context).textTheme.headlineLarge),
+              Text('LiteTale', style: Theme.of(context).textTheme.headlineLarge),
               const SizedBox(height: 32),
               const SizedBox(
                 width: 24,

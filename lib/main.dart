@@ -127,7 +127,7 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                 key: _dynamicColorKey,
                 builder:
                     (dynamicLight, dynamicDark) => MaterialApp(
-                      title: 'novels',
+                      title: 'LiteTale',
                       debugShowCheckedModeBanner: false,
                       themeMode: switch (theme.themeMode) {
                         ReaderThemeMode.auto => ThemeMode.system,

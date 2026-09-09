@@ -1,4 +1,4 @@
-# novels Android development
+# LiteTale Android development
 
 Android uses the existing Wild Flutter/Rust reader and Wenku8 backend. The UI
 uses Material 3, Android wallpaper colors (Android 12+), a violet fallback palette and six selectable accents,
@@ -29,7 +29,7 @@ flutter build apk --release --target-platform android-arm64,android-x64 --split-
 APK output: `build/app/outputs/flutter-apk/`. Install the arm64-v8a APK on
 ARM64 phones and the x86_64 APK on an x86 Android emulator.
 
-Application ID: `io.github.metammy07.novels`; app name: `novels`.
+Application ID: `io.github.metammy07.novels`; app name: `LiteTale`.
 This ID allows installation alongside upstream Wild. It does not migrate Wild's
 private data. This first development build uses the local debug signing key;
 configure a durable release signing key before distributing a production version.

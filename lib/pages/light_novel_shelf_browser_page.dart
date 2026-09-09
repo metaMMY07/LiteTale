@@ -211,7 +211,7 @@ class _LightNovelShelfBrowserPageState
         actions: [
           if (_canGoBack)
             IconButton(
-              tooltip: '返回 novels',
+              tooltip: '返回 LiteTale',
               onPressed: () => Navigator.of(context).maybePop(),
               icon: const Icon(Icons.close),
             ),
