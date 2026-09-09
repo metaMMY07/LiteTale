@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title>novels 应用图标</title>
+  <rect width="512" height="512" rx="112" fill="#344E38"/>
+  <path fill="#E1EEDB" d="M119 135c53-16 99-3 145 27v213c-46-30-92-43-145-27zM393 135c-53-16-99-3-145 27v213c46-30 92-43 145-27z"/>
+  <path fill="#BCD4AD" d="m147 177 48 14v16l-48-14zm0 38 48 14v16l-48-14zm218-38-48 14v16l48-14zm0 38-48 14v16l48-14z"/>
+</svg>
