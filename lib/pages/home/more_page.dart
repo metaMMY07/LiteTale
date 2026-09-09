@@ -187,7 +187,7 @@ class MorePage extends StatelessWidget {
                 ),
                 entry(
                   Icons.info_outline_rounded,
-                  '关于 novels',
+                  '关于 LiteTale',
                   state.updateInfo == null ? '版本与开源信息' : '发现新版本',
                   () => Navigator.pushNamed(context, '/about'),
                 ),

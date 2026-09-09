@@ -79,7 +79,7 @@ class _LoginPageState extends State<LoginPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(usesMaterialYou ? '欢迎来到 novels' : '登录轻小说文库'),
+        title: Text(usesMaterialYou ? '欢迎来到 LiteTale' : '登录轻小说文库'),
         actions: [
           if (usesMaterialYou)
             IconButton(

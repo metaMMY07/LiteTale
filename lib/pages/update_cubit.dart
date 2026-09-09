@@ -61,13 +61,13 @@ class UpdateCubit extends Cubit<UpdateState> {
     if (kDebugMode) {
       print('Checking for updates...');
       print('Request URL: $_apiUrl');
-      print('User-Agent: novels/${AppInfo.fullVersion}');
+      print('User-Agent: LiteTale/${AppInfo.fullVersion}');
     }
 
     try {
       final response = await http.get(
         Uri.parse(_apiUrl),
-        headers: {'User-Agent': 'novels/${AppInfo.fullVersion}'},
+        headers: {'User-Agent': 'LiteTale/${AppInfo.fullVersion}'},
       );
 
       if (kDebugMode) {

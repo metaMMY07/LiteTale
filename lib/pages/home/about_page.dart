@@ -94,13 +94,13 @@ class AboutPage extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '关于 novels',
+                        '关于 LiteTale',
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'novels 是一个使用 Flutter 开发的轻小说文库客户端，提供流畅的阅读体验和丰富的功能。',
+                        'LiteTale 是一个使用 Flutter 开发的轻小说文库客户端，提供流畅的阅读体验和丰富的功能。',
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 8),
@@ -112,10 +112,10 @@ class AboutPage extends StatelessWidget {
                       TextButton.icon(
                         onPressed:
                             () => _launchUrl(
-                              'https://github.com/MMY-SYSU/novels',
+                              'https://github.com/metaMMY07/novels',
                             ),
                         icon: const Icon(Icons.code),
-                        label: const Text('查看 novels 源代码'),
+                        label: const Text('查看 LiteTale 源代码'),
                       ),
                       TextButton.icon(
                         onPressed:
