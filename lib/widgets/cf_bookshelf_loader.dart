@@ -2,11 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:webview_windows/webview_windows.dart';
+import 'package:wild/widgets/wenku_webview.dart';
 import 'package:wild/src/rust/api/wenku8.dart' show getSessionCookieString;
 import 'package:wild/src/rust/wenku8/models.dart';
 
-/// Windows WebView2 书架加载器。
+/// Android WebView / Windows WebView2 书架加载器。
 ///
 /// wenku8 的书架接口会被 Cloudflare 拦截，普通 HTTP 请求拿到 403。
 /// 这个组件用真正的 Edge WebView2 完成验证，再从已登录的页面解析书架。
@@ -37,8 +37,7 @@ class CfBookshelfLoader extends StatefulWidget {
 }
 
 class CfBookshelfLoaderState extends State<CfBookshelfLoader> {
-  final WebviewController _controller = WebviewController();
-  final List<StreamSubscription<dynamic>> _subscriptions = [];
+  final WenkuWebView _controller = WenkuWebView();
 
   bool _initialized = false;
   String? _initializationError;
@@ -107,55 +106,17 @@ class CfBookshelfLoaderState extends State<CfBookshelfLoader> {
 
   Future<void> _initializeWebView() async {
     try {
-      final version = await WebviewController.getWebViewVersion();
-      if (version == null) {
-        throw StateError('未检测到 Microsoft Edge WebView2 Runtime');
-      }
-
-      await _controller.initialize();
-      if (!mounted) return;
-
-      final edgeVersion = RegExp(
-        r'\d+\.\d+\.\d+\.\d+',
-      ).firstMatch(version)?.group(0);
-      if (edgeVersion != null) {
-        final chromiumMajor = edgeVersion.split('.').first;
-        await _controller.setUserAgent(
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-          'AppleWebKit/537.36 (KHTML, like Gecko) '
-          'Chrome/$chromiumMajor.0.0.0 Safari/537.36 '
-          'Edg/$edgeVersion',
-        );
-      }
-
-      _subscriptions.add(
-        _controller.loadingState.listen((state) {
-          if (state == LoadingState.navigationCompleted) {
-            _queueNavigationCompleted();
-          }
-        }),
+      await _controller.initialize(
+        onLoaded: _queueNavigationCompleted,
+        onError: (error) {
+          if (_active) _fail(error);
+        },
       );
-      _subscriptions.add(
-        _controller.onLoadError.listen((error) {
-          if (error == WebErrorStatus.WebErrorStatusUnknown ||
-              error == WebErrorStatus.WebErrorStatusConnectionAborted ||
-              error == WebErrorStatus.WebErrorStatusOperationCanceled) {
-            return;
-          }
-          if (_active) _fail('WebView2 加载失败: $error');
-        }),
-      );
-
-      await _controller.setPopupWindowPolicy(
-        WebviewPopupWindowPolicy.sameWindow,
-      );
-      await _controller.setBackgroundColor(Colors.transparent);
-
       if (!mounted) return;
       setState(() => _initialized = true);
       await _controller.loadUrl('${widget.apiHost}/');
     } catch (e) {
-      _initializationError = 'WebView2 初始化失败: $e';
+      _initializationError = '网页组件初始化失败: $e';
       if (_active) _fail(_initializationError!);
     }
   }
@@ -380,9 +341,6 @@ class CfBookshelfLoaderState extends State<CfBookshelfLoader> {
   @override
   void dispose() {
     _timeout?.cancel();
-    for (final subscription in _subscriptions) {
-      subscription.cancel();
-    }
     if (_initialized) unawaited(_controller.dispose());
     super.dispose();
   }
@@ -390,6 +348,6 @@ class CfBookshelfLoaderState extends State<CfBookshelfLoader> {
   @override
   Widget build(BuildContext context) {
     if (!_initialized) return const SizedBox.shrink();
-    return Webview(_controller, width: 1024, height: 768);
+    return _controller.build();
   }
 }

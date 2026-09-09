@@ -162,7 +162,7 @@ class _ReaderViewState extends State<_ReaderView> {
     super.dispose();
   }
 
-  void _handleTap(TapDownDetails details) {
+  void _handleTap(TapUpDetails details) {
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
     final tapX = details.globalPosition.dx;
@@ -350,7 +350,7 @@ class _ReaderViewState extends State<_ReaderView> {
               // 阅读内容
               Positioned.fill(
                 child: GestureDetector(
-                  onTapDown: _handleTap,
+                  onTapUp: _handleTap,
                   child: PageView.builder(
                     controller: _pageController,
                     itemCount: widget.state.pages.length,

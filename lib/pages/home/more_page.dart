@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:wild/theme/material_you.dart';
+import 'package:wild/pages/auth_cubit.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/home/account_page.dart';
 import 'package:wild/pages/home/settings_page.dart';
@@ -12,10 +14,9 @@ class MorePage extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocBuilder<UpdateCubit, UpdateState>(
       builder: (context, state) {
+        if (usesMaterialYou) return _mobilePage(context, state);
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('更多'),
-          ),
+          appBar: AppBar(title: const Text('更多')),
           body: ListView(
             children: [
               ListTile(
@@ -25,7 +26,9 @@ class MorePage extends StatelessWidget {
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => const NovelDownloadPage()),
+                    MaterialPageRoute(
+                      builder: (context) => const NovelDownloadPage(),
+                    ),
                   );
                 },
               ),
@@ -36,7 +39,9 @@ class MorePage extends StatelessWidget {
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => const AccountPage()),
+                    MaterialPageRoute(
+                      builder: (context) => const AccountPage(),
+                    ),
                   );
                 },
               ),
@@ -47,7 +52,9 @@ class MorePage extends StatelessWidget {
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => const SettingsPage()),
+                    MaterialPageRoute(
+                      builder: (context) => const SettingsPage(),
+                    ),
                   );
                 },
               ),
@@ -89,4 +96,106 @@ class MorePage extends StatelessWidget {
       },
     );
   }
-} 
+
+  Widget _mobilePage(BuildContext context, UpdateState state) {
+    final colors = Theme.of(context).colorScheme;
+    void open(Widget page) =>
+        Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+    Widget entry(
+      IconData icon,
+      String title,
+      String subtitle,
+      VoidCallback onTap,
+    ) => ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      leading: CircleAvatar(
+        backgroundColor: colors.secondaryContainer,
+        foregroundColor: colors.onSecondaryContainer,
+        child: Icon(icon),
+      ),
+      title: Text(title),
+      subtitle: Text(subtitle),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: onTap,
+    );
+    return Scaffold(
+      appBar: AppBar(title: const Text('我的')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        children: [
+          Card.filled(
+            margin: EdgeInsets.zero,
+            color: colors.primaryContainer,
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.auto_stories_rounded,
+                    size: 36,
+                    color: colors.onPrimaryContainer,
+                  ),
+                  const SizedBox(height: 20),
+                  BlocBuilder<AuthCubit, AuthState>(
+                    builder:
+                        (context, auth) => Text(
+                          auth.username ?? '你的阅读空间',
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(color: colors.onPrimaryContainer),
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '收藏喜欢的故事，按自己的节奏阅读。',
+                    style: TextStyle(color: colors.onPrimaryContainer),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Card.filled(
+            margin: EdgeInsets.zero,
+            child: Column(
+              children: [
+                entry(
+                  Icons.download_outlined,
+                  '离线下载',
+                  '随时继续阅读',
+                  () => open(const NovelDownloadPage()),
+                ),
+                entry(
+                  Icons.person_outline_rounded,
+                  '文库8账户',
+                  '管理登录与账户信息',
+                  () => open(const AccountPage()),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card.filled(
+            margin: EdgeInsets.zero,
+            child: Column(
+              children: [
+                entry(
+                  Icons.tune_rounded,
+                  '阅读与外观',
+                  '主题、字体、翻页与阅读习惯',
+                  () => open(const SettingsPage()),
+                ),
+                entry(
+                  Icons.info_outline_rounded,
+                  '关于 novels',
+                  state.updateInfo == null ? '版本与开源信息' : '发现新版本',
+                  () => Navigator.pushNamed(context, '/about'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

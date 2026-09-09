@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'package:wild/theme/material_you.dart';
+import 'package:wild/widgets/app_color_settings.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -23,6 +25,11 @@ class SettingsPage extends StatelessWidget {
           return ListView(
             children: [
               const SizedBox(height: 8),
+              if (usesMaterialYou)
+                const Card(
+                  margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: AppColorSettings(),
+                ),
               // 阅读器设置
               Card(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

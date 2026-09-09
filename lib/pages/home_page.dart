@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wild/theme/material_you.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/home/more_page.dart';
 import 'package:wild/pages/home/index_page.dart';
@@ -92,10 +93,16 @@ class _HomePageState extends State<HomePage> {
               selectedIndex: _currentIndex,
               onDestinationSelected: _onDestinationSelected,
               destinations: [
-                const NavigationDestination(
-                  icon: Icon(Icons.home_outlined),
-                  selectedIcon: Icon(Icons.home),
-                  label: '首页',
+                NavigationDestination(
+                  icon: Icon(
+                    usesMaterialYou
+                        ? Icons.explore_outlined
+                        : Icons.home_outlined,
+                  ),
+                  selectedIcon: Icon(
+                    usesMaterialYou ? Icons.explore : Icons.home,
+                  ),
+                  label: usesMaterialYou ? '发现' : '首页',
                 ),
                 const NavigationDestination(
                   icon: Icon(Icons.book_outlined),
@@ -111,14 +118,20 @@ class _HomePageState extends State<HomePage> {
                   icon: Badge(
                     isLabelVisible: state.updateInfo != null,
                     label: const Text('新'),
-                    child: const Icon(Icons.more_horiz_outlined),
+                    child: Icon(
+                      usesMaterialYou
+                          ? Icons.person_outline_rounded
+                          : Icons.more_horiz_outlined,
+                    ),
                   ),
                   selectedIcon: Badge(
                     isLabelVisible: state.updateInfo != null,
                     label: const Text('新'),
-                    child: const Icon(Icons.more_horiz),
+                    child: Icon(
+                      usesMaterialYou ? Icons.person_rounded : Icons.more_horiz,
+                    ),
                   ),
-                  label: '更多',
+                  label: usesMaterialYou ? '我的' : '更多',
                 ),
               ],
             ),
@@ -127,4 +140,4 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
-} 
+}

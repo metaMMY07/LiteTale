@@ -342,7 +342,7 @@ pub async fn search(
     )
     .await?;
     crate::database::entities::active::search_history::Entity::delete_old_records().await?;
-    let key = format!("SEARCH${}${}${}", search_type, search_key, page);
+    let key = format!("SEARCH_V2${}${}${}", search_type, search_key, page);
     let data = crate::cache_first(
         key,
         Duration::from_secs(60 * 60),

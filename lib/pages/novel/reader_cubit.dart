@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/models/reader_page.dart';
-import 'package:flutter/rendering.dart';
+import 'package:wild/services/reader_paginator.dart';
 import 'package:wild/pages/novel/line_height_cubit.dart';
 import 'package:wild/src/rust/api/wenku8.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
@@ -11,7 +11,6 @@ import 'package:wild/pages/novel/top_bar_height_cubit.dart';
 import 'package:wild/pages/novel/bottom_bar_height_cubit.dart';
 import 'package:wild/pages/novel/left_padding_cubit.dart';
 import 'package:wild/pages/novel/right_padding_cubit.dart';
-import 'package:wild/theme/app_fonts.dart';
 
 class ReaderCubit extends Cubit<ReaderState> {
   final NovelInfo novelInfo;
@@ -100,7 +99,7 @@ class ReaderCubit extends Cubit<ReaderState> {
 
       // 计算从第一页到当前页的累计字数
       final characterCount = _calculateCharacterCountUpToPage(pages, pageIndex);
-      
+
       // 更新阅读历史
       await updateHistory(
         novelId: targetAid,
@@ -183,10 +182,13 @@ class ReaderCubit extends Cubit<ReaderState> {
     if (state is ReaderLoaded) {
       final currentState = state as ReaderLoaded;
       emit(currentState.copyWith(currentPageIndex: index));
-      
+
       // 计算从第一页到当前页的累计字数
-      final characterCount = _calculateCharacterCountUpToPage(currentState.pages, index);
-      
+      final characterCount = _calculateCharacterCountUpToPage(
+        currentState.pages,
+        index,
+      );
+
       // 更新阅读历史中的页码
       updateHistory(
         novelId: currentState.aid,
@@ -214,7 +216,8 @@ class ReaderCubit extends Cubit<ReaderState> {
     if (currentChapterIndex > 0) {
       // 同一卷的上一章
       volume = initialVolumes[currentVolumeIndex];
-      chapter = initialVolumes[currentVolumeIndex].chapters[currentChapterIndex - 1];
+      chapter =
+          initialVolumes[currentVolumeIndex].chapters[currentChapterIndex - 1];
       await loadChapter(aid: chapter.aid, cid: chapter.cid, initialPage: 0);
     } else if (currentVolumeIndex > 0) {
       // 上一卷的最后一章
@@ -235,10 +238,12 @@ class ReaderCubit extends Cubit<ReaderState> {
 
     Volume volume;
     Chapter chapter;
-    if (currentChapterIndex < initialVolumes[currentVolumeIndex].chapters.length - 1) {
+    if (currentChapterIndex <
+        initialVolumes[currentVolumeIndex].chapters.length - 1) {
       // 同一卷的下一章
       volume = initialVolumes[currentVolumeIndex];
-      chapter = initialVolumes[currentVolumeIndex].chapters[currentChapterIndex + 1];
+      chapter =
+          initialVolumes[currentVolumeIndex].chapters[currentChapterIndex + 1];
       await loadChapter(aid: chapter.aid, cid: chapter.cid, initialPage: 0);
     } else if (currentVolumeIndex < initialVolumes.length - 1) {
       // 下一卷的第一章
@@ -314,8 +319,6 @@ class ReaderCubit extends Cubit<ReaderState> {
     double paragraphSpacing,
     double lineHeight,
   ) {
-    final pages = <ReaderPage>[];
-    final paragraphs = content.split('\n');
     final screenWidth =
         MediaQueryData.fromView(WidgetsBinding.instance.window).size.width;
     final screenHeight =
@@ -337,91 +340,14 @@ class ReaderCubit extends Cubit<ReaderState> {
         topBarHeight -
         bottomBarHeight;
 
-    var currentPage = StringBuffer();
-    var pageFreeHeight = canvasHeight;
-
-    void putParagraph(String paragraph) {
-      while (paragraph.isNotEmpty) {
-        var textPainter = TextPainter(
-          textDirection: TextDirection.ltr,
-          maxLines: null,
-        );
-        textPainter.strutStyle = StrutStyle(
-          fontFamily: appFontFamily,
-          height: lineHeight,
-        );
-        final textStyle = TextStyle(
-          fontFamily: appFontFamily,
-          fontSize: fontSize,
-          height: lineHeight,
-          letterSpacing: 0.5,
-        );
-        textPainter.text = TextSpan(text: paragraph, style: textStyle);
-        textPainter.layout(maxWidth: canvasWidth);
-        var textHeight = textPainter.height;
-
-        if (textHeight > pageFreeHeight) {
-          // 当前段落超出页面高度，分割段落
-          var splitIndex =
-              textPainter
-                  .getPositionForOffset(Offset(0, pageFreeHeight))
-                  .offset;
-          var splitParagraph = paragraph.substring(0, splitIndex);
-          currentPage.write(splitParagraph);
-          pages.add(
-            ReaderPage(content: currentPage.toString(), isImage: false),
-          );
-          currentPage.clear();
-          paragraph = paragraph.substring(splitIndex);
-          pageFreeHeight = canvasHeight;
-        } else {
-          // 当前段落可以放入当前页面
-          currentPage.write(paragraph);
-          currentPage.write("\n");
-          pageFreeHeight -= textHeight + paragraphSpacing;
-          break;
-        }
-      }
-    }
-
-    endWrite() {
-      if (currentPage.isNotEmpty) {
-        pages.add(ReaderPage(content: currentPage.toString(), isImage: false));
-        currentPage.clear();
-      }
-    }
-
-    void putImage(String imageUrl) {
-      endWrite();
-      pages.add(ReaderPage(content: imageUrl, isImage: true));
-    }
-
-    for (var paragraph in paragraphs) {
-      RegExp regex = RegExp("\<\!\-\-image\-\-\>([^\<]+)\<\!\-\-image\-\-\>");
-      if (regex.hasMatch(paragraph)) {
-        while (regex.hasMatch(paragraph)) {
-          var match = regex.firstMatch(paragraph)!;
-          if (match.start > 0) {
-            var per = paragraph.substring(0, match.start).trim();
-            if (per.isNotEmpty) {
-              putParagraph(per);
-            }
-            putImage(match.group(1)!);
-            paragraph = paragraph.substring(match.end);
-          }
-        }
-        paragraph = paragraph.trim();
-        if (paragraph.isNotEmpty) {
-          putParagraph(paragraph);
-        }
-      } else {
-        putParagraph(paragraph);
-      }
-    }
-
-    endWrite();
-
-    return pages;
+    return paginateReaderContent(
+      content: content,
+      canvasWidth: canvasWidth,
+      canvasHeight: canvasHeight,
+      fontSize: fontSize,
+      paragraphSpacing: paragraphSpacing,
+      lineHeight: lineHeight,
+    );
   }
 
   void toggleControls() {

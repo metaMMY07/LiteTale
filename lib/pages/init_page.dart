@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'package:wild/cubits/app_accent_cubit.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:wild/theme/material_you.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/auth_cubit.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
@@ -36,6 +38,7 @@ class _InitPageState extends State<InitPage> {
       print('root: $root');
     }
     await init(root: root);
+    if (!mounted) return;
 
     // 初始化所有 Cubit
     final fontSizeCubit = context.read<FontSizeCubit>();
@@ -51,6 +54,7 @@ class _InitPageState extends State<InitPage> {
 
     // 等待所有 Cubit 初始化完成
     await Future.wait([
+      context.read<AppAccentCubit>().load(),
       fontSizeCubit.loadFontSize(),
       paragraphSpacingCubit.loadSpacing(),
       lineHeightCubit.loadLineHeight(),
@@ -62,6 +66,7 @@ class _InitPageState extends State<InitPage> {
       readerBackgroundCubit.init(root),
       volumeControlCubit.init(),
     ]);
+    if (!mounted) return;
 
     if (authCubit.state.status == AuthStatus.authenticated) {
       // 如果已经登录，跳转到首页
@@ -80,6 +85,35 @@ class _InitPageState extends State<InitPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (usesMaterialYou) {
+      final colors = Theme.of(context).colorScheme;
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 48,
+                backgroundColor: colors.primaryContainer,
+                child: Icon(
+                  Icons.auto_stories_rounded,
+                  size: 48,
+                  color: colors.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text('novels', style: Theme.of(context).textTheme.headlineLarge),
+              const SizedBox(height: 32),
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return Scaffold(
       body: ConstrainedBox(
         constraints: const BoxConstraints.expand(),
@@ -87,12 +121,13 @@ class _InitPageState extends State<InitPage> {
           builder: (BuildContext context, BoxConstraints constraints) {
             var width = 1080;
             var height = 1920;
-            var min = constraints.maxWidth > constraints.maxHeight 
-                ? constraints.maxHeight 
-                : constraints.maxWidth;
+            var min =
+                constraints.maxWidth > constraints.maxHeight
+                    ? constraints.maxHeight
+                    : constraints.maxWidth;
             var newHeight = min;
             var newWidth = min * (width / height);
-            
+
             return Stack(
               children: [
                 Center(

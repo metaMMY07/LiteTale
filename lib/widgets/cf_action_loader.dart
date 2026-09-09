@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:webview_windows/webview_windows.dart';
+import 'package:wild/widgets/wenku_webview.dart';
 import 'package:wild/src/rust/api/wenku8.dart' show getSessionCookieString;
 
-/// 通过 Windows WebView2 绕过 Cloudflare，执行一次书架操作。
+/// 通过平台 WebView 完成验证后执行一次书架操作。
 class CfActionLoader extends StatefulWidget {
   final String apiHost;
   final String? actionPath;
@@ -34,8 +34,7 @@ class CfActionLoader extends StatefulWidget {
 }
 
 class _CfActionLoaderState extends State<CfActionLoader> {
-  final WebviewController _controller = WebviewController();
-  final List<StreamSubscription<dynamic>> _subscriptions = [];
+  final WenkuWebView _controller = WenkuWebView();
   bool _initialized = false;
   bool _done = false;
   bool _homeLoaded = false;
@@ -54,53 +53,17 @@ class _CfActionLoaderState extends State<CfActionLoader> {
     });
 
     try {
-      final version = await WebviewController.getWebViewVersion();
-      if (version == null) {
-        throw StateError('未检测到 Microsoft Edge WebView2 Runtime');
-      }
-      await _controller.initialize();
-      if (!mounted) return;
-
-      final edgeVersion = RegExp(
-        r'\d+\.\d+\.\d+\.\d+',
-      ).firstMatch(version)?.group(0);
-      if (edgeVersion != null) {
-        final chromiumMajor = edgeVersion.split('.').first;
-        await _controller.setUserAgent(
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-          'AppleWebKit/537.36 (KHTML, like Gecko) '
-          'Chrome/$chromiumMajor.0.0.0 Safari/537.36 '
-          'Edg/$edgeVersion',
-        );
-      }
-
-      _subscriptions.add(
-        _controller.loadingState.listen((state) {
-          if (state == LoadingState.navigationCompleted) {
-            _onNavigationCompleted();
-          }
-        }),
+      await _controller.initialize(
+        onLoaded: _onNavigationCompleted,
+        onError: (error) {
+          _fail(error);
+        },
       );
-      _subscriptions.add(
-        _controller.onLoadError.listen((error) {
-          if (error == WebErrorStatus.WebErrorStatusUnknown ||
-              error == WebErrorStatus.WebErrorStatusConnectionAborted ||
-              error == WebErrorStatus.WebErrorStatusOperationCanceled) {
-            return;
-          }
-          _fail('WebView2 加载失败: $error');
-        }),
-      );
-
-      await _controller.setPopupWindowPolicy(
-        WebviewPopupWindowPolicy.sameWindow,
-      );
-      await _controller.setBackgroundColor(Colors.transparent);
       if (!mounted) return;
       setState(() => _initialized = true);
       await _controller.loadUrl('${widget.apiHost}/');
     } catch (e) {
-      _fail('WebView2 初始化失败: $e');
+      _fail('网页组件初始化失败: $e');
     }
   }
 
@@ -213,9 +176,6 @@ class _CfActionLoaderState extends State<CfActionLoader> {
   @override
   void dispose() {
     _timeout?.cancel();
-    for (final subscription in _subscriptions) {
-      subscription.cancel();
-    }
     if (_initialized) unawaited(_controller.dispose());
     super.dispose();
   }
@@ -230,7 +190,7 @@ class _CfActionLoaderState extends State<CfActionLoader> {
             top: 0,
             width: 1024,
             height: 768,
-            child: Webview(_controller, width: 1024, height: 768),
+            child: _controller.build(),
           ),
         const Center(
           child: Column(
