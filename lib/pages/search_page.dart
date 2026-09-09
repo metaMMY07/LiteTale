@@ -3,14 +3,25 @@ import 'package:wild/widgets/book_grid_delegate.dart';
 import '../src/rust/api/wenku8.dart';
 import '../widgets/novel_cover_card.dart';
 
+typedef NovelSearch =
+    Future<PageStatsNovelCover> Function({
+      required String searchType,
+      required String searchKey,
+      required int page,
+    });
+
 class SearchPage extends StatefulWidget {
   final String? initialSearchType;
   final String? initialSearchKey;
+  final NovelSearch? searcher;
+  final Future<List<SearchHistory>> Function()? historyLoader;
 
   const SearchPage({
     super.key,
     this.initialSearchType,
     this.initialSearchKey,
+    this.searcher,
+    this.historyLoader,
   });
 
   @override
@@ -20,269 +31,261 @@ class SearchPage extends StatefulWidget {
 class _SearchPageState extends State<SearchPage> {
   final _searchController = TextEditingController();
   late String _searchType;
-  PageStatsNovelCover? _searchResults;
-  bool _isLoading = false;
-  List<SearchHistory>? _searchHistories;
-  String? _errorMessage;
+  PageStatsNovelCover? _results;
+  List<SearchHistory> _histories = [];
+  bool _loading = false;
+  String? _error;
+  int _request = 0;
+  String _submittedKey = '';
+  String _submittedType = '';
 
   @override
   void initState() {
     super.initState();
-    _searchType = widget.initialSearchType ?? 'articlename';
-    if (widget.initialSearchKey != null) {
-      _searchController.text = widget.initialSearchKey!;
-      _search(refresh: true);
-    }
-    _loadSearchHistories();
+    _searchType =
+        widget.initialSearchType == 'author' ? 'author' : 'articlename';
+    _searchController.text = widget.initialSearchKey ?? '';
+    _loadHistories();
+    if (_searchController.text.trim().isNotEmpty) _search();
   }
 
   @override
   void dispose() {
+    _request++;
     _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadSearchHistories() async {
+  Future<void> _loadHistories() async {
     try {
-      final histories = await searchHistories();
+      final values = await (widget.historyLoader ?? searchHistories)();
+      if (mounted) setState(() => _histories = values);
+    } catch (_) {}
+  }
+
+  void _resetQuery() {
+    _request++;
+    setState(() {
+      _loading = false;
+      _results = null;
+      _error = null;
+    });
+  }
+
+  Future<void> _search({bool more = false}) async {
+    final key = _searchController.text.trim();
+    if (key.isEmpty) {
+      _resetQuery();
+      return;
+    }
+    if (more &&
+        (_loading ||
+            _results == null ||
+            _results!.currentPage >= _results!.maxPage ||
+            key != _submittedKey ||
+            _searchType != _submittedType)) {
+      return;
+    }
+    final type = _searchType;
+    if (!more && _loading && key == _submittedKey && type == _submittedType) {
+      return;
+    }
+    final page = more ? _results!.currentPage + 1 : 1;
+    final request = ++_request;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _loading = true;
+      _error = null;
+      if (!more) _results = null;
+      _submittedKey = key;
+      _submittedType = type;
+    });
+    try {
+      final result = await (widget.searcher ?? search)(
+            searchType: type,
+            searchKey: key,
+            page: page,
+          )
+          .timeout(
+            const Duration(seconds: 135),
+            onTimeout: () => throw Exception('搜索超时，请检查网络后重试'),
+          );
+      if (!mounted || request != _request) return;
       setState(() {
-        _searchHistories = histories;
+        final records =
+            more ? [..._results!.records, ...result.records] : result.records;
+        final seen = <String>{};
+        _results = PageStatsNovelCover(
+          currentPage: result.currentPage,
+          maxPage: result.maxPage,
+          records: records.where((book) => seen.add(book.aid)).toList(),
+        );
+        _loading = false;
       });
+      _loadHistories();
     } catch (e) {
-      // 忽略加载历史记录失败
+      if (!mounted || request != _request) return;
+      setState(() {
+        _loading = false;
+        _error = e.toString();
+      });
     }
   }
 
-  Future<void> _search({bool refresh = false}) async {
-    if (_searchController.text.isEmpty) {
-      setState(() {
-        _errorMessage = null;
-        _searchResults = null;
-      });
-      return;
-    }
-    if (_isLoading) return;
-
-    print('开始搜索: type=${_searchType}, key=${_searchController.text}, refresh=$refresh');
-
-    setState(() {
-      _isLoading = true;
-      if (refresh) {
-        _searchResults = null;
-        _errorMessage = null;
-      }
-    });
-
-    try {
-      final results = await search(
-        searchType: _searchType,
-        searchKey: _searchController.text,
-        page: refresh ? 1 : (_searchResults?.currentPage ?? 0) + 1,
+  Widget _body() {
+    if (_loading && _results == null) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 20),
+            Text('正在搜索，请稍候…'),
+            SizedBox(height: 8),
+            Text('首次搜索可能需要较长时间'),
+          ],
+        ),
       );
-
-      print('搜索成功: 找到 ${results.records.length} 条结果');
-
-      if (!mounted) return;
-
-      setState(() {
-        if (refresh) {
-          _searchResults = results;
-        } else {
-          _searchResults = PageStatsNovelCover(
-            currentPage: results.currentPage,
-            maxPage: results.maxPage,
-            records: [..._searchResults!.records, ...results.records],
-          );
-        }
-        _isLoading = false;
-        _errorMessage = null;
-      });
-
-      // 刷新搜索历史
-      _loadSearchHistories();
-    } catch (e) {
-      print('搜索失败: $e');
-      if (!mounted) return;
-      
-      setState(() {
-        _isLoading = false;
-        _errorMessage = e.toString();
-        _searchResults = null;  // 确保清除搜索结果
-      });
     }
+    if (_error != null && _results == null) {
+      return Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.wifi_off_rounded, size: 40),
+              const SizedBox(height: 16),
+              const Text('搜索未完成'),
+              const SizedBox(height: 8),
+              Text(_error!, textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: _search,
+                icon: const Icon(Icons.refresh),
+                label: const Text('重试'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (_results != null) {
+      if (_results!.records.isEmpty) {
+        return const Center(child: Text('没有找到相关书籍，试试其他关键词'));
+      }
+      return Column(
+        children: [
+          Expanded(
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (notification) {
+                if (notification is ScrollEndNotification &&
+                    notification.metrics.extentAfter < 200 &&
+                    _error == null) {
+                  _search(more: true);
+                }
+                return false;
+              },
+              child: GridView.builder(
+                key: ValueKey('$_submittedType:$_submittedKey'),
+                padding: const EdgeInsets.all(12),
+                gridDelegate: const BookGridDelegate(
+                  childAspectRatio: 207 / 307,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                ),
+                itemCount: _results!.records.length,
+                itemBuilder:
+                    (context, i) => NovelCoverCard(novel: _results!.records[i]),
+              ),
+            ),
+          ),
+          if (_loading) const LinearProgressIndicator(),
+          if (!_loading && _results!.currentPage < _results!.maxPage)
+            TextButton(
+              onPressed: () => _search(more: true),
+              child: Text(_error == null ? '加载更多' : '加载失败，点击重试'),
+            ),
+        ],
+      );
+    }
+    if (_searchController.text.trim().isEmpty && _histories.isNotEmpty) {
+      return ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: _histories.length,
+        itemBuilder: (context, i) {
+          final history = _histories[i];
+          return ListTile(
+            leading: Icon(
+              history.searchType == 'author'
+                  ? Icons.person_outline
+                  : Icons.history,
+            ),
+            title: Text(history.searchKey),
+            subtitle: Text(history.searchType == 'author' ? '作者搜索' : '书名搜索'),
+            onTap: () {
+              _searchController.text = history.searchKey;
+              _searchType = history.searchType;
+              _search();
+            },
+          );
+        },
+      );
+    }
+    return const Center(child: Text('输入关键词，点击搜索或键盘上的搜索键'));
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('搜索'),
-        actions: [
-          SegmentedButton<String>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(value: 'articlename', label: Text('书名')),
-              ButtonSegment(value: 'author', label: Text('作者')),
-            ],
-            selected: {_searchType},
-            onSelectionChanged: (Set<String> selection) {
-              setState(() {
-                _searchType = selection.first;
-                _searchController.clear();
-                _searchResults = null;
-                _errorMessage = null;
-              });
-            },
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: Column(
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('搜索')),
+    body: SafeArea(
+      top: false,
+      child: Column(
         children: [
-          // 搜索框
           Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
             child: TextField(
               controller: _searchController,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
-                hintText: '搜索小说或作者',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+                hintText: _searchType == 'author' ? '输入作者名' : '输入书名',
+                prefixIcon: IconButton(
+                  tooltip: '搜索',
+                  icon: const Icon(Icons.search),
+                  onPressed: _search,
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                suffixIcon: IconButton(
+                  tooltip: '执行搜索',
+                  icon: const Icon(Icons.arrow_forward_rounded),
+                  onPressed: _search,
+                ),
               ),
-              onSubmitted: (value) {
-                if (value.isNotEmpty) {
-                  _search(refresh: true);
-                }
-              },
+              onChanged: (_) => _resetQuery(),
+              onSubmitted: (_) => _search(),
             ),
           ),
-          // 搜索结果或搜索历史
-          if (_searchController.text.isEmpty && _searchHistories != null && _searchHistories!.isNotEmpty)
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: _searchHistories!.length,
-                itemBuilder: (context, index) {
-                  final history = _searchHistories![index];
-                  return ListTile(
-                    leading: Icon(
-                      history.searchType == 'articlename'
-                          ? Icons.book
-                          : Icons.person,
-                      color: history.searchType == 'articlename'
-                          ? Colors.blue
-                          : Colors.green,
-                    ),
-                    title: Text(
-                      history.searchKey,
-                      style: TextStyle(
-                        color: history.searchType == 'articlename'
-                            ? Colors.blue
-                            : Colors.green,
-                      ),
-                    ),
-                    subtitle: Text(
-                      history.searchType == 'articlename' ? '书名搜索' : '作者搜索',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                    onTap: () {
-                      _searchController.text = history.searchKey;
-                      setState(() {
-                        _searchType = history.searchType;
-                      });
-                      _search(refresh: true);
-                    },
-                  );
+          if (MediaQuery.sizeOf(context).height -
+                  MediaQuery.viewInsetsOf(context).bottom >
+              280)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SegmentedButton<String>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: 'articlename', label: Text('书名')),
+                  ButtonSegment(value: 'author', label: Text('作者')),
+                ],
+                selected: {_searchType},
+                onSelectionChanged: (selection) {
+                  _searchType = selection.first;
+                  _resetQuery();
                 },
-              ),
-            )
-          // 错误状态
-          else if (_errorMessage != null)
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: () => _search(refresh: true),
-                child: ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    SizedBox(
-                      height: MediaQuery.of(context).size.height - 100,
-                      child: Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.start,
-                          children: [
-                            const Icon(Icons.error_outline, size: 48, color: Colors.grey),
-                            const SizedBox(height: 16),
-                            Text(
-                              '搜索失败 (下拉刷新)',
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              _errorMessage!,
-                              style: Theme.of(context).textTheme.bodyMedium,
-                              textAlign: TextAlign.start,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          // 搜索结果
-          else if (_searchResults != null)
-            Expanded(
-              child: NotificationListener<ScrollNotification>(
-                onNotification: (notification) {
-                  if (notification is ScrollEndNotification &&
-                      notification.metrics.pixels >=
-                          notification.metrics.maxScrollExtent - 200 &&
-                      !_isLoading &&
-                      _searchResults!.currentPage < _searchResults!.maxPage) {
-                    _search();
-                  }
-                  return true;
-                },
-                child: GridView.builder(
-                  padding: const EdgeInsets.all(8),
-                  gridDelegate: const BookGridDelegate(
-                    childAspectRatio: 207 / 307,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
-                  ),
-                  itemCount: _searchResults!.records.length +
-                      (_searchResults!.currentPage < _searchResults!.maxPage
-                          ? 1
-                          : 0),
-                  itemBuilder: (context, index) {
-                    if (index >= _searchResults!.records.length) {
-                      return const Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(16.0),
-                          child: CircularProgressIndicator(),
-                        ),
-                      );
-                    }
-                    final novel = _searchResults!.records[index];
-                    return NovelCoverCard(novel: novel);
-                  },
-                ),
-              ),
-            )
-          // 空状态
-          else
-            const Expanded(
-              child: Center(
-                child: Text('输入关键词开始搜索'),
               ),
             ),
+          const SizedBox(height: 12),
+          Expanded(child: _body()),
         ],
       ),
-    );
-  }
+    ),
+  );
 }

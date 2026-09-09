@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/cached_image.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 
@@ -50,7 +51,7 @@ class NovelCard extends StatelessWidget {
       height: height,
       fit: fit,
       borderRadius: borderRadius,
-      elevation: elevation,
+      elevation: usesMaterialYou ? 0 : elevation,
       padding: padding,
       showAuthor: showAuthor,
     );
@@ -87,7 +88,8 @@ class NovelCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       elevation: elevation,
       shape: RoundedRectangleBorder(
-        borderRadius: borderRadius ?? BorderRadius.circular(4),
+        borderRadius:
+            borderRadius ?? BorderRadius.circular(usesMaterialYou ? 16 : 4),
       ),
       child: InkWell(
         onTap: onTap,
@@ -103,7 +105,7 @@ class NovelCard extends StatelessWidget {
               ),
             ),
             Padding(
-              padding: padding ?? const EdgeInsets.all(4.0),
+              padding: padding ?? EdgeInsets.all(usesMaterialYou ? 10 : 4),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -113,7 +115,8 @@ class NovelCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: showAuthor ? null : 12,
-                      fontWeight: showAuthor ? FontWeight.bold : FontWeight.w500,
+                      fontWeight:
+                          showAuthor ? FontWeight.bold : FontWeight.w500,
                     ),
                   ),
                   if (showAuthor && author != null) ...[
@@ -138,4 +141,4 @@ class NovelCard extends StatelessWidget {
 
     return card;
   }
-} 
+}

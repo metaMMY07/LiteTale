@@ -24,7 +24,7 @@ use tokio::time::{sleep, Duration};
 
 const DEFAULT_API_HOST: &str = "https://www.wenku8.net";
 const APP_HOST: &str = "http://app.wenku8.com";
-const SEARCH_INDEX_PROPERTY: &str = "search_index_v1";
+const SEARCH_INDEX_PROPERTY: &str = "search_index_v2_all_books";
 const SEARCH_INDEX_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;
 const SEARCH_FALLBACK_PAGE_SIZE: usize = 20;
 
@@ -1152,6 +1152,8 @@ impl Wenku8Client {
 
     async fn search_index_page(&self, page: i32) -> Result<PageStats<SearchIndexEntry>> {
         let url = format!(
+            // The completed-book catalog is the public Wenku8 endpoint. The
+            // ongoing-book variant redirects to login for anonymous clients.
             "{}/modules/article/articlelist.php?fullflag=1&page={page}&charset=gbk",
             self.load_api_host().await
         );
@@ -1318,7 +1320,9 @@ impl Wenku8Client {
         search_key: &str,
         page: i32,
     ) -> Result<PageStats<NovelCover>> {
-        let cache = self.load_search_index().await?;
+        let cache = tokio::time::timeout(Duration::from_secs(120), self.load_search_index())
+            .await
+            .map_err(|_| anyhow!("搜索数据加载超时，请检查网络后重试"))??;
         let normalized_key = search_key.trim().to_lowercase();
         let mut matches = cache
             .entries
