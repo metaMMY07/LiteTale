@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/novels-app-icon.svg" width="160" alt="LiteTale icon">
+  <img src="docs/litetale-app-icon.svg" width="160" alt="LiteTale icon">
   <h1>LiteTale</h1>
 
 [![license](https://img.shields.io/github/license/metaMMY07/LiteTale)](LICENSE)
