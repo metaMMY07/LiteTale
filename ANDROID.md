@@ -23,7 +23,7 @@ on Windows. Set `JAVA_HOME`, `ANDROID_HOME`, `CARGO_HOME`, `RUSTUP_HOME`, and
 rustup target add aarch64-linux-android x86_64-linux-android
 flutter pub get
 flutter test
-flutter build apk --release --target-platform android-arm64,android-x64 --split-per-abi --build-name 0.0.18-dev.1 --build-number 18
+flutter build apk --release --target-platform android-arm64,android-x64 --split-per-abi --build-name 0.0.18 --build-number 19
 ```
 
 APK output: `build/app/outputs/flutter-apk/`. Install the arm64-v8a APK on
