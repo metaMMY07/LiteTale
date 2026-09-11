@@ -1,15 +1,15 @@
 # LiteTale Android development
 
-Android uses the existing Wild Flutter/Rust reader and Wenku8 backend. The UI
+Android uses the existing Wild Flutter/Rust reader with selectable Wenku8 and LightNovelShelf sources. The UI
 uses Material 3, Android wallpaper colors (Android 12+), a violet fallback palette and six selectable accents,
 system UI fonts, rounded cards, and a phone-friendly login form. The Android
-recommendation feed only requests Wenku8; the existing desktop supplemental feed
-remains available. Bookcase fallback parsing is shared by Android WebView and
+recommendation feed only requests the selected provider. First launch opens guest mode;
+provider selection and independent logins live in settings. Bookcase fallback parsing is shared by Android WebView and
 Windows WebView2.
 
 Design references: [Wild](https://github.com/niuhuan/wild) and the early Flutter
 version of [Novella](https://github.com/celia-sh/Novella). Novella is a visual
-reference; its backend and account system are not used.
+reference; its archived source also documents LightNovelShelf API and chapter font conventions.
 
 ## Build
 
@@ -23,7 +23,7 @@ on Windows. Set `JAVA_HOME`, `ANDROID_HOME`, `CARGO_HOME`, `RUSTUP_HOME`, and
 rustup target add aarch64-linux-android x86_64-linux-android
 flutter pub get
 flutter test
-flutter build apk --release --target-platform android-arm64,android-x64 --split-per-abi --build-name 0.0.17-dev.1 --build-number 17
+flutter build apk --release --target-platform android-arm64,android-x64 --split-per-abi --build-name 0.0.18-dev.1 --build-number 18
 ```
 
 APK output: `build/app/outputs/flutter-apk/`. Install the arm64-v8a APK on

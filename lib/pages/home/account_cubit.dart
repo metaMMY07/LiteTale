@@ -1,5 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:wild/src/rust/api/wenku8.dart' as wenku8;
+import 'package:wild/sources/source_api.dart' as wenku8;
 import 'package:wild/src/rust/wenku8/models.dart';
 
 enum AccountStatus { initial, loading, loaded, error }

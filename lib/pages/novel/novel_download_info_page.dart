@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:wild/src/rust/api/wenku8.dart';
+import 'package:wild/sources/source_api.dart';
 import 'package:wild/widgets/cached_image.dart';
 import 'package:wild/pages/novel/novel_download_info_cubit.dart';
 import 'package:wild/pages/novel/reader_page.dart';

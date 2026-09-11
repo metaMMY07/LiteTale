@@ -3,7 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/models/reader_page.dart';
 import 'package:wild/services/reader_paginator.dart';
 import 'package:wild/pages/novel/line_height_cubit.dart';
-import 'package:wild/src/rust/api/wenku8.dart';
+import 'package:wild/sources/source_api.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
 import 'package:wild/pages/novel/paragraph_spacing_cubit.dart';
 import '../../src/rust/wenku8/models.dart';
@@ -13,6 +13,7 @@ import 'package:wild/pages/novel/left_padding_cubit.dart';
 import 'package:wild/pages/novel/right_padding_cubit.dart';
 
 class ReaderCubit extends Cubit<ReaderState> {
+  int _request = 0;
   final NovelInfo novelInfo;
   String initialAid;
   String initialCid;
@@ -62,6 +63,7 @@ class ReaderCubit extends Cubit<ReaderState> {
   }
 
   Future<void> loadChapter({String? aid, String? cid, int? initialPage}) async {
+    final request = ++_request;
     try {
       emit(ReaderLoading(super.state.showControls));
       initialAid = aid ?? initialAid;
@@ -73,6 +75,7 @@ class ReaderCubit extends Cubit<ReaderState> {
       final chapterTitle = _findChapterTitle(targetAid, targetCid);
       final volume = _findVolume(targetAid, targetCid);
       final content = await chapterContent(aid: targetAid, cid: targetCid);
+      if (isClosed || request != _request) return;
 
       final fontSize = fontSizeCubit.state;
       final paragraphSpacing = paragraphSpacingCubit.state;
@@ -114,6 +117,7 @@ class ReaderCubit extends Cubit<ReaderState> {
         author: novelInfo.author,
       );
 
+      if (isClosed || request != _request) return;
       emit(
         ReaderLoaded(
           aid: targetAid,
@@ -126,11 +130,13 @@ class ReaderCubit extends Cubit<ReaderState> {
         ),
       );
     } catch (e) {
+      if (isClosed || request != _request) return;
       emit(ReaderError(e.toString()));
     }
   }
 
   Future reloadCurrentPage() async {
+    final request = ++_request;
     try {
       var currentPageIndex =
           super.state is ReaderLoaded
@@ -143,6 +149,7 @@ class ReaderCubit extends Cubit<ReaderState> {
 
       final chapterTitle = _findChapterTitle(targetAid, targetCid);
       final content = await chapterContent(aid: targetAid, cid: targetCid);
+      if (isClosed || request != _request) return;
 
       final fontSize = fontSizeCubit.state;
       final paragraphSpacing = paragraphSpacingCubit.state;
@@ -174,6 +181,7 @@ class ReaderCubit extends Cubit<ReaderState> {
         ),
       );
     } catch (e) {
+      if (isClosed || request != _request) return;
       emit(ReaderError(e.toString()));
     }
   }
@@ -347,6 +355,7 @@ class ReaderCubit extends Cubit<ReaderState> {
       fontSize: fontSize,
       paragraphSpacing: paragraphSpacing,
       lineHeight: lineHeight,
+      fontFamily: chapterFont(aid, cid),
     );
   }
 

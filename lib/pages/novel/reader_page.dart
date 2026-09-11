@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wild/sources/source_api.dart' show chapterFont;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/novel/paragraph_spacing_cubit.dart';
 import 'package:wild/pages/novel/reader_cubit.dart';
@@ -515,13 +516,13 @@ class _TextPage extends StatelessWidget {
                         width: canvasWidth,
                         child: Text.rich(
                           strutStyle: StrutStyle(
-                            fontFamily: appFontFamily,
+                            fontFamily: chapterFont(context.read<ReaderCubit>().initialAid, context.read<ReaderCubit>().initialCid) ?? appFontFamily,
                             height: lineHeight,
                           ),
                           TextSpan(
                             text: texts[i],
                             style: TextStyle(
-                              fontFamily: appFontFamily,
+                              fontFamily: chapterFont(context.read<ReaderCubit>().initialAid, context.read<ReaderCubit>().initialCid) ?? appFontFamily,
                               fontSize: fontSize,
                               height: lineHeight,
                               letterSpacing: 0.5,

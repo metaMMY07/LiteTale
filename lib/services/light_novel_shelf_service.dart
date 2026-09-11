@@ -74,7 +74,15 @@ class LightNovelShelfService {
     return request;
   }
 
-  Future<List<LightNovelShelfBook>> _fetchLatestBooks() async {
+  Future<List<LightNovelShelfBook>> _fetchLatestBooks() async =>
+      decodeLightNovelShelfLatestBooks(await invoke('GetLatestBookList', {
+        'Page': 1, 'Size': 6, 'Order': 'latest',
+        'IgnoreJapanese': false, 'IgnoreAI': false,
+      }));
+
+  /// SignalR invocation shared by the feed and the native source adapter.
+  Future<Object?> invoke(String method, Map<String, Object?> arguments,
+      {String? token}) async {
     final client =
         HttpClient()..connectionTimeout = const Duration(seconds: 12);
     WebSocket? socket;
@@ -85,6 +93,8 @@ class LightNovelShelfService {
         headers: {
           HttpHeaders.userAgentHeader: 'LiteTale/0.0.17',
           'x-id': _createUuid(),
+          if (token != null && token.isNotEmpty)
+            HttpHeaders.authorizationHeader: 'Bearer $token',
         },
         customClient: client,
       ).timeout(const Duration(seconds: 12));
@@ -101,9 +111,9 @@ class LightNovelShelfService {
         '${jsonEncode({
           'type': 1,
           'invocationId': invocationId,
-          'target': 'GetLatestBookList',
+          'target': method,
           'arguments': [
-            {'Page': 1, 'Size': 6, 'Order': 'latest', 'IgnoreJapanese': false, 'IgnoreAI': false},
+            arguments,
             {'UseGzip': false},
           ],
         })}$_recordSeparator',
@@ -113,7 +123,7 @@ class LightNovelShelfService {
         messages,
         invocationId,
       ).timeout(const Duration(seconds: 12));
-      return decodeLightNovelShelfLatestBooks(result);
+      return result;
     } finally {
       try {
         await messages?.cancel();

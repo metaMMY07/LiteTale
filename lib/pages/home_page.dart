@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:wild/sources/book_source.dart';
+import 'package:wild/pages/auth_cubit.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/home/more_page.dart';
@@ -6,7 +8,7 @@ import 'package:wild/pages/home/index_page.dart';
 import 'package:wild/pages/home/history_cubit.dart';
 import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/pages/update_cubit.dart';
-import 'package:wild/src/rust/api/wenku8.dart';
+import 'package:wild/sources/source_api.dart';
 
 import 'home/bookshelf_page.dart';
 import 'home/history_page.dart';
@@ -27,12 +29,15 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _historyCubit = HistoryCubit()..load();
     // 加载书架数据
-    context.read<BookshelfCubit>().loadBookcases();
+    _loadBookshelf();
+    activeSource.addListener(_sourceChanged);
+    sourceRevision.addListener(_sourceChanged);
     // 自动签到
     _autoSign();
   }
 
   Future<void> _autoSign() async {
+    if (activeSource.value != SourceId.wenku8 || context.read<AuthCubit>().state.status != AuthStatus.authenticated) return;
     try {
       final signed = await autoSign();
       if (signed && mounted) {
@@ -57,8 +62,27 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    activeSource.removeListener(_sourceChanged);
+    sourceRevision.removeListener(_sourceChanged);
     _historyCubit.close();
     super.dispose();
+  }
+
+  void _loadBookshelf() {
+    final shelf = context.read<BookshelfCubit>();
+    if (activeSource.value == SourceId.wenku8 && context.read<AuthCubit>().state.status != AuthStatus.authenticated) {
+      shelf.resetForGuest();
+    } else {
+      shelf.loadBookcases();
+    }
+  }
+
+  void _sourceChanged() {
+    if (!mounted) return;
+    setState(() {});
+    _loadBookshelf();
+    _historyCubit.load();
+    _autoSign();
   }
 
   void _onDestinationSelected(int index) {
@@ -82,11 +106,11 @@ class _HomePageState extends State<HomePage> {
           return Scaffold(
             body: IndexedStack(
               index: _currentIndex,
-              children: const [
-                IndexPage(),
-                BookshelfPage(),
-                HistoryPage(),
-                MorePage(),
+              children: [
+                IndexPage(key: ValueKey('index:${activeSource.value}:${sourceRevision.value}')),
+                BookshelfPage(key: ValueKey('shelf:${activeSource.value}:${sourceRevision.value}')),
+                HistoryPage(key: ValueKey('history:${activeSource.value}:${sourceRevision.value}')),
+                MorePage(key: ValueKey(activeSource.value)),
               ],
             ),
             bottomNavigationBar: NavigationBar(

@@ -106,7 +106,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('关于 novels'), 200);
+    await tester.scrollUntilVisible(find.text('关于 LiteTale'), 200);
     expect(tester.takeException(), isNull);
   });
 }

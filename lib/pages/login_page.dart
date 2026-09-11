@@ -109,7 +109,11 @@ class _LoginPageState extends State<LoginPage> {
               context,
             ).showSnackBar(SnackBar(content: Text(message)));
           } else if (state.status == AuthStatus.authenticated) {
-            Navigator.of(context).pushReplacementNamed('/home');
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).pop(true);
+            } else {
+              Navigator.of(context).pushReplacementNamed('/home');
+            }
           }
         },
         builder: (context, state) {

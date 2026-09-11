@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:wild/theme/material_you.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/light_novel_shelf_browser_page.dart';
 import 'package:wild/services/light_novel_shelf_service.dart';
@@ -18,7 +17,7 @@ class RecommendPage extends StatelessWidget {
     return BlocProvider(
       create:
           (context) => RecommendCubit(
-            loadShelf: usesMaterialYou ? (_) async => [] : null,
+            loadShelf: (_) async => [],
           )..load(),
       child: Scaffold(
         body: BlocBuilder<RecommendCubit, RecommendState>(

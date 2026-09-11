@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:wild/cubits/app_accent_cubit.dart';
+import 'package:wild/sources/source_api.dart' show loadSourceSelection;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -41,6 +42,8 @@ class _InitPageState extends State<InitPage> {
     if (!mounted) return;
 
     // 初始化所有 Cubit
+    await loadSourceSelection();
+    if (!mounted) return;
     final fontSizeCubit = context.read<FontSizeCubit>();
     final paragraphSpacingCubit = context.read<ParagraphSpacingCubit>();
     final lineHeightCubit = context.read<LineHeightCubit>();
@@ -68,13 +71,7 @@ class _InitPageState extends State<InitPage> {
     ]);
     if (!mounted) return;
 
-    if (authCubit.state.status == AuthStatus.authenticated) {
-      // 如果已经登录，跳转到首页
-      Navigator.pushReplacementNamed(context, '/home');
-    } else {
-      // 如果未登录，跳转到登录页
-      Navigator.pushReplacementNamed(context, '/login');
-    }
+    Navigator.pushReplacementNamed(context, '/home');
   }
 
   @override

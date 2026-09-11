@@ -10,6 +10,7 @@ List<ReaderPage> paginateReaderContent({
   required double fontSize,
   required double paragraphSpacing,
   required double lineHeight,
+  String? fontFamily,
 }) {
   if (canvasWidth <= 0 ||
       canvasHeight <= 0 ||
@@ -39,11 +40,11 @@ List<ReaderPage> paginateReaderContent({
     while (paragraph.isNotEmpty) {
       final painter = TextPainter(
         textDirection: TextDirection.ltr,
-        strutStyle: StrutStyle(fontFamily: appFontFamily, height: lineHeight),
+        strutStyle: StrutStyle(fontFamily: fontFamily ?? appFontFamily, height: lineHeight),
         text: TextSpan(
           text: paragraph,
           style: TextStyle(
-            fontFamily: appFontFamily,
+            fontFamily: fontFamily ?? appFontFamily,
             fontSize: fontSize,
             height: lineHeight,
             letterSpacing: 0.5,

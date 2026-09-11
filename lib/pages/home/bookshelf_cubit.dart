@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
-import 'package:wild/src/rust/api/wenku8.dart';
+import 'package:wild/sources/source_api.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
 
@@ -88,6 +88,11 @@ class BookshelfState {
 }
 
 class BookshelfCubit extends Cubit<BookshelfState> {
+  int _request = 0;
+  void resetForGuest() {
+    _request++;
+    emit(BookshelfState(tip: '请在设置中登录文库8', status: BookshelfStatus.success, bookcases: const [], bookcaseContents: const {}));
+  }
   BookshelfCubit() : super(BookshelfState(
     tip: '',
     status: BookshelfStatus.initial,
@@ -96,9 +101,11 @@ class BookshelfCubit extends Cubit<BookshelfState> {
   ));
 
   Future<void> loadBookcases() async {
+    final request = ++_request;
     try {
-      emit(state.copyWith(status: BookshelfStatus.loading));
+      emit(BookshelfState(tip: '', status: BookshelfStatus.loading, bookcases: const [], bookcaseContents: const {}));
       final bookcases = await bookcaseList();
+      if (isClosed || request != _request) return;
       if (bookcases.isEmpty) {
         emit(state.copyWith(
           status: BookshelfStatus.success,
@@ -112,6 +119,7 @@ class BookshelfCubit extends Cubit<BookshelfState> {
 
       // 先載入第一個書架，立即 emit 讓 UI 顯示
       final firstBk = await bookInCase(caseId: bookcases.first.id);
+      if (isClosed || request != _request) return;
       contents[bookcases.first.id] = firstBk.items;
       emit(state.copyWith(
         tip: firstBk.tip,
@@ -124,6 +132,7 @@ class BookshelfCubit extends Cubit<BookshelfState> {
       // 後續書架在背景繼續載入，每載完一個就更新
       for (int i = 1; i < bookcases.length; i++) {
         final bk = await bookInCase(caseId: bookcases[i].id);
+        if (isClosed || request != _request) return;
         contents[bookcases[i].id] = bk.items;
         emit(state.copyWith(
           tip: bk.tip,
@@ -131,6 +140,7 @@ class BookshelfCubit extends Cubit<BookshelfState> {
         ));
       }
     } catch (e) {
+      if (isClosed || request != _request) return;
       final msg = e.toString();
       // CF 封鎖或 wenku8 非標準 TLS 斷線 → 改用 WebView 載入。
       if (shouldUseWenku8WebViewFallback(e)) {
@@ -266,10 +276,12 @@ class BookshelfCubit extends Cubit<BookshelfState> {
 
   /// 背景靜默刷新書架，失敗時不改變 UI 狀態
   Future<void> _refreshBookcasesInBackground() async {
+    final request = _request;
     try {
       final contents = <String, List<BookcaseItem>>{};
       for (final bookcase in state.bookcases) {
         final bk = await bookInCase(caseId: bookcase.id);
+        if (isClosed || request != _request) return;
         contents[bookcase.id] = bk.items;
       }
       emit(state.copyWith(bookcaseContents: contents));

@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
-import 'package:wild/src/rust/api/wenku8.dart';
+import 'package:wild/sources/source_api.dart';
 
 enum AuthStatus { initial, authenticated, unauthenticated, loading, error }
 enum CheckcodeStatus { initial, loading, success, error }

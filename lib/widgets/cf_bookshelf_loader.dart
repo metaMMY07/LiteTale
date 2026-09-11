@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/wenku_webview.dart';
-import 'package:wild/src/rust/api/wenku8.dart' show getSessionCookieString;
+import 'package:wild/sources/source_api.dart' show getSessionCookieString;
 import 'package:wild/src/rust/wenku8/models.dart';
 
 /// Android WebView / Windows WebView2 书架加载器。

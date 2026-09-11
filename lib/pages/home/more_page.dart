@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wild/sources/book_source.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/pages/auth_cubit.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -140,7 +141,7 @@ class MorePage extends StatelessWidget {
                   BlocBuilder<AuthCubit, AuthState>(
                     builder:
                         (context, auth) => Text(
-                          auth.username ?? '你的阅读空间',
+                          activeSource.value == SourceId.wenku8 ? auth.username ?? '你的阅读空间' : '轻书架阅读空间',
                           style: Theme.of(context).textTheme.headlineSmall
                               ?.copyWith(color: colors.onPrimaryContainer),
                         ),
@@ -167,9 +168,9 @@ class MorePage extends StatelessWidget {
                 ),
                 entry(
                   Icons.person_outline_rounded,
-                  '文库8账户',
+                  '书源与账号',
                   '管理登录与账户信息',
-                  () => open(const AccountPage()),
+                  () => open(const SettingsPage()),
                 ),
               ],
             ),

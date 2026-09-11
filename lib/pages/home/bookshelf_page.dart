@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:wild/sources/book_source.dart';
+import 'package:wild/sources/source_api.dart' show coverForBook;
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
@@ -431,6 +433,7 @@ class _BookCard extends StatelessWidget {
   }
 
   String _getCoverUrl(String aid) {
+    if (sourceOf(aid) == SourceId.lightNovelShelf) return coverForBook(aid);
     try {
       final id = int.parse(aid);
       return 'https://img.wenku8.com/image/${id ~/ 1000}/$aid/${aid}s.jpg';

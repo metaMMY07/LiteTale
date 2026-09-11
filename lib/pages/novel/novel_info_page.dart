@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:wild/sources/book_source.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:wild/src/rust/api/wenku8.dart' as w8;
+import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/src/rust/frb_generated.dart';
 import 'package:wild/widgets/cached_image.dart';
 import 'package:flutter_html/flutter_html.dart';
@@ -68,7 +69,8 @@ class NovelInfoPage extends StatelessWidget {
                 }
                 return IconButton(
                   icon: const Icon(Icons.download_outlined),
-                  onPressed: () => _navigateToDownload(context),
+                  tooltip: sourceOf(novelId) == SourceId.wenku8 ? '离线下载' : '轻书架下载请使用该站授权入口',
+                  onPressed: sourceOf(novelId) == SourceId.wenku8 ? () => _navigateToDownload(context) : null,
                 );
               },
             ),
@@ -240,6 +242,10 @@ class _NovelInfoContent extends StatelessWidget {
                   label: '评论',
                   value: '',
                   onTap: () {
+                    if (sourceOf(novelId) != SourceId.wenku8) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('该书源的评论请前往轻书架查看')));
+                      return;
+                    }
                     Navigator.of(context).pushNamed(
                       '/novel/reviews',
                       arguments: { 'aid': novelId, 'title': novelInfo.title },

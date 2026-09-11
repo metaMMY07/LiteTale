@@ -42,3 +42,21 @@ android {
 flutter {
     source = "../.."
 }
+
+// WOFF2 decoding links the NDK C++ runtime. Package the runtime from the same
+// NDK as the Rust build, including its 16 KB compatible ELF alignment.
+val runtimeLibraries = layout.buildDirectory.dir("generated/ndkRuntimeLibraries")
+val copyNdkRuntime by tasks.registering(Copy::class) {
+    val host = when {
+        System.getProperty("os.name").startsWith("Windows") -> "windows-x86_64"
+        System.getProperty("os.name").startsWith("Mac") -> "darwin-x86_64"
+        else -> "linux-x86_64"
+    }
+    val sysroot = android.sdkDirectory.resolve("ndk/${android.ndkVersion}/toolchains/llvm/prebuilt/$host/sysroot/usr/lib")
+    mapOf("arm64-v8a" to "aarch64-linux-android", "x86_64" to "x86_64-linux-android", "armeabi-v7a" to "arm-linux-androideabi").forEach { (abi, triple) ->
+        from(sysroot.resolve("$triple/libc++_shared.so")) { into(abi) }
+    }
+    into(runtimeLibraries)
+}
+android.sourceSets.getByName("main").jniLibs.srcDir(runtimeLibraries)
+tasks.named("preBuild").configure { dependsOn(copyNdkRuntime) }

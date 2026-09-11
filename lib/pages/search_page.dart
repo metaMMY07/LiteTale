@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
-import '../src/rust/api/wenku8.dart';
+import 'package:wild/sources/source_api.dart';
 import '../widgets/novel_cover_card.dart';
 
 typedef NovelSearch =

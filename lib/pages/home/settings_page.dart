@@ -1,15 +1,15 @@
 import 'dart:io';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/app_color_settings.dart';
+import 'package:wild/widgets/source_settings.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/cubits/screen_up_on_reading_property.dart';
 import 'package:wild/cubits/screen_up_on_scroll_property.dart';
-import 'package:wild/pages/auth_cubit.dart';
 import 'package:wild/pages/novel/theme_cubit.dart';
 import 'package:wild/pages/novel/reader_type_cubit.dart';
-import 'package:wild/src/rust/api/wenku8.dart';
+import 'package:wild/sources/source_api.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/cubits/volume_control_cubit.dart';
 
@@ -25,6 +25,7 @@ class SettingsPage extends StatelessWidget {
           return ListView(
             children: [
               const SizedBox(height: 8),
+              const SourceSettings(),
               if (usesMaterialYou)
                 const Card(
                   margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -160,7 +161,7 @@ class SettingsPage extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                       child: Text(
-                        'API Host 设置',
+                        '文库8镜像地址',
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(fontWeight: FontWeight.bold),
                       ),
@@ -172,7 +173,7 @@ class SettingsPage extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('API 主机地址'),
+                              const Text('仅影响文库8；书源切换请使用上方设置'),
                               const SizedBox(height: 8),
                               TextField(
                                 controller: TextEditingController(text: apiHost),
@@ -314,51 +315,6 @@ class SettingsPage extends StatelessWidget {
                       },
                     ),
                   ],
-                ),
-              ),
-              // 退出登录
-              Card(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: ListTile(
-                  leading: const Icon(Icons.logout, color: Colors.red),
-                  title: const Text(
-                    '退出登录',
-                    style: TextStyle(color: Colors.red),
-                  ),
-                  onTap: () {
-                    showDialog(
-                      context: context,
-                      builder:
-                          (context) => AlertDialog(
-                            title: const Text('退出登录'),
-                            content: const Text('确定要退出登录吗？'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context),
-                                child: const Text('取消'),
-                              ),
-                              TextButton(
-                                onPressed: () async {
-                                  Navigator.pop(context);
-                                  await logout();
-                                  if (context.mounted) {
-                                    // 更新 AuthCubit 状态
-                                    context.read<AuthCubit>().logout();
-                                    // 清空导航栈并跳转到登录页
-                                    Navigator.of(
-                                      context,
-                                    ).pushNamedAndRemoveUntil(
-                                      '/login',
-                                      (route) => false,
-                                    );
-                                  }
-                                },
-                                child: const Text('确定'),
-                              ),
-                            ],
-                          ),
-                    );
-                  },
                 ),
               ),
             ],

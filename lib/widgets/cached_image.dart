@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:wild/src/rust/api/wenku8.dart';
+import 'package:wild/sources/source_api.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'dart:ui' as ui;
+import 'package:http/http.dart' as http;
 
 class CachedImageProvider extends ImageProvider<CachedImageProvider> {
   final String url;
@@ -28,6 +29,15 @@ class CachedImageProvider extends ImageProvider<CachedImageProvider> {
 
   Future<ui.Codec> _loadAsync(CachedImageProvider key) async {
     assert(key == this);
+    final uri = Uri.tryParse(url);
+    if (uri == null || !['https', 'http'].contains(uri.scheme)) throw const FormatException('图片地址无效');
+    final wenku = ['wenku8.net', 'wenku8.com', 'wenku8.cc'].any((host) => uri.host == host || uri.host.endsWith('.$host'));
+    if (!wenku) {
+      final response = await http.get(uri, headers: {'Referer': 'https://www.lightnovel.app/'})
+          .timeout(const Duration(seconds: 25));
+      if (response.statusCode != 200) throw const FormatException('图片加载失败');
+      return ui.instantiateImageCodec(response.bodyBytes);
+    }
     final path = await downloadImage(url: url);
     return ui.instantiateImageCodec(await File(path).readAsBytes());
   }

@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:wild/pages/auth_cubit.dart';
+import 'package:wild/sources/book_source.dart';
+import 'package:wild/pages/shelf_catalog_page.dart';
+import 'package:wild/pages/home/settings_page.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
 
 import '../../src/rust/api/database.dart';
-import '../../src/rust/api/wenku8.dart';
+import 'package:wild/sources/source_api.dart';
 import '../../src/rust/wenku8/models.dart';
 import '../../widgets/cached_image.dart';
 import 'category_page.dart';
@@ -78,25 +83,28 @@ class _IndexPageState extends State<IndexPage>
                 ),
               TabBar(
                 controller: _tabController,
-                tabs: const [
-                  Tab(text: '推荐'),
-                  Tab(text: '分类'),
-                  Tab(text: '排行'),
-                  Tab(text: '完结'),
+                tabs: [
+                  const Tab(text: '推荐'),
+                  const Tab(text: '分类'),
+                  const Tab(text: '排行'),
+                  Tab(text: activeSource.value == SourceId.wenku8 ? '完结' : '全部'),
                 ],
               ),
             ],
           ),
         ),
       ),
-      body: TabBarView(
+      body: activeSource.value == SourceId.wenku8 && context.read<AuthCubit>().state.status != AuthStatus.authenticated
+        ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.auto_stories_outlined, size: 48), const SizedBox(height: 16),
+          const Text('欢迎使用 LiteTale'), const SizedBox(height: 8),
+          const Text('在设置中选择书源并登录，即可浏览和阅读。', textAlign: TextAlign.center), const SizedBox(height: 16),
+          FilledButton.tonal(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())), child: const Text('选择书源')),
+        ]))) : TabBarView(
         controller: _tabController,
-        children: const [
-          RecommendPage(),
-          CategoryPage(),
-          ToplistPage(),
-          ArticlelistPage(),
-        ],
+        children: activeSource.value == SourceId.wenku8 ? const [
+          RecommendPage(), CategoryPage(), ToplistPage(), ArticlelistPage(),
+        ] : const [RecommendPage(), ShelfCatalogPage(mode: 'category'), ShelfCatalogPage(mode: 'rank'), ShelfCatalogPage(mode: 'all')],
       ),
     );
   }

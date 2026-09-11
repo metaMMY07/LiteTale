@@ -1,7 +1,7 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../src/rust/wenku8/models.dart';
-import '../../src/rust/api/wenku8.dart' as w8;
+import 'package:wild/sources/source_api.dart' as w8;
 
 // 状态基类
 abstract class HtmlReaderState extends Equatable {
@@ -197,10 +197,12 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
 
       // 加载章节内容
       final rawContent = await w8.chapterContent(aid: targetAid, cid: targetCid);
+      if (isClosed) return;
       final parsedContent = _parseContent(rawContent);
-      
+
       // 更新阅读历史
       await _updateHistory(targetAid, targetCid, chapterTitle);
+      if (isClosed) return;
 
       emit(HtmlReaderLoaded(
         aid: targetAid,
@@ -211,6 +213,7 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
         volumes: initialVolumes,
       ));
     } catch (e) {
+      if (isClosed) return;
       emit(HtmlReaderError(e.toString()));
     }
   }
@@ -299,4 +302,4 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
       await loadChapter(aid: prevAid, cid: prevCid);
     }
   }
-} 
+}

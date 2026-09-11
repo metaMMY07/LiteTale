@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:wild/src/rust/api/wenku8.dart' as w8;
+import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/src/rust/wenku8/models.dart' as w8;
 import 'package:wild/widgets/novel_card.dart';
 

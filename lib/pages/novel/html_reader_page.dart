@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wild/sources/source_api.dart' show chapterFont;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../src/rust/wenku8/models.dart';
 import 'html_reader_cubit.dart';
@@ -427,7 +428,10 @@ class _ReaderContent extends StatelessWidget {
             child: Text(
               content.text,
               style: TextStyle(
-                fontFamily: appFontFamily,
+                fontFamily: () {
+                  final state = context.read<HtmlReaderCubit>().state;
+                  return state is HtmlReaderLoaded ? chapterFont(state.aid, state.cid) ?? appFontFamily : appFontFamily;
+                }(),
                 fontSize: fontSize,
                 height: lineHeight,
                 color: textColor,

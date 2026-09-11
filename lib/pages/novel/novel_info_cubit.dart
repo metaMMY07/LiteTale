@@ -1,5 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:wild/src/rust/api/wenku8.dart' as w8;
+import 'package:wild/sources/source_api.dart' as w8;
 
 import '../../src/rust/wenku8/models.dart';
 import '../../src/rust/api/database.dart';
@@ -42,18 +42,21 @@ class NovelInfoCubit extends Cubit<NovelInfoState> {
       final novelInfo = await w8.novelInfo(aid: novelId);
       _volumes = await w8.novelReader(aid: novelId);
       final readingHistory = await w8.novelHistoryById(novelId: novelId);
+      if (isClosed) return;
       emit(NovelInfoLoaded(
         novelInfo: novelInfo,
         volumes: _volumes,
         readingHistory: readingHistory,
       ));
     } catch (e) {
+      if (isClosed) return;
       emit(NovelInfoError(e.toString()));
     }
   }
 
   Future<void> loadHistory() async {
     final readingHistory = await w8.novelHistoryById(novelId: novelId);
+    if (isClosed) return;
     if (state is NovelInfoLoaded) {
       final currentState = state as NovelInfoLoaded;
       emit(NovelInfoLoaded(
@@ -63,4 +66,4 @@ class NovelInfoCubit extends Cubit<NovelInfoState> {
       ));
     }
   }
-} 
+}

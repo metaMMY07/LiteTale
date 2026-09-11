@@ -3,7 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/novel/novel_download_cubit.dart';
 import 'package:wild/widgets/cached_image.dart';
 import 'package:wild/pages/novel/novel_download_info_page.dart';
-import 'package:wild/src/rust/api/wenku8.dart' as w8;
+import 'package:wild/sources/source_api.dart' as w8;
 
 class NovelDownloadPage extends StatelessWidget {
   const NovelDownloadPage({super.key});

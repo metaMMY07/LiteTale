@@ -1,17 +1,28 @@
 <div align="center">
   <img src="windows/runner/resources/app_icon.png" width="160" alt="novels icon">
-  <h1>novels</h1>
+  <h1>LiteTale</h1>
 
 [![license](https://img.shields.io/github/license/MMY-SYSU/novels)](LICENSE)
 [![release](https://img.shields.io/github/v/release/MMY-SYSU/novels)](https://github.com/MMY-SYSU/novels/releases)
 [![downloads](https://img.shields.io/github/downloads/MMY-SYSU/novels/total)](https://github.com/MMY-SYSU/novels/releases)
 </div>
 
-`novels` 是基于 [niuhuan/wild](https://github.com/niuhuan/wild) 源代码开发的轻小说阅读器修改版。感谢 Wild 原作者和所有贡献者提供的开源项目。
+`LiteTale` 是基于 [niuhuan/wild](https://github.com/niuhuan/wild) 的 Android 轻小说阅读器，保留原项目及贡献者的来源和许可。Android 使用 Material You 界面。
 
 ## 当前版本
 
-版本：`v0.0.15`
+版本：`0.0.18-dev.1`（Android 测试版）
+
+- 首次打开进入游客首页，在“设置 → 书源与账号”选择文库8或轻书架，再登录对应账号。
+- 一次展示一个书源，保留各自登录状态及上次选择；搜索、书架和阅读历史按书源隔离。
+- 轻书架书籍、目录、正文与插图使用现有原生页面；其专用 WOFF2 字体经 Rust 转为 TTF 后加载。
+- 轻书架收藏暂存本机，云书架同步和授权离线下载未接入；账号权限仍由书源服务决定。
+- 保留插图分页、搜索提交修复，以及壁纸取色和六种可选主题色。
+
+Windows 本机构建入口：`powershell -ExecutionPolicy Bypass -File tools/build_android.ps1`。
+当前主工程位于 `D:\Projects\LiteTale`。交接及验证边界见 [Luna 交接](docs/LUNA_HANDOFF_0.0.18.md)。
+
+## 旧版记录：v0.0.15
 
 - 接入轻书架近期录入，书库、个人书架和详情统一界面样式
 - 修复全屏推荐页右侧空列，优化各页面封面布局与缩放

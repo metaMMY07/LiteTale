@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:wild/src/rust/api/wenku8.dart' as w8;
+import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/widgets/cached_image.dart';
 
