@@ -9,11 +9,11 @@
 
 <div align="center">
   <p><strong>应用界面预览</strong></p>
-  <img src="docs/screenshots/settings-source-themes.jpg" width="32%" alt="设置、书源与主题配色">
-  <img src="docs/screenshots/my-page.jpg" width="32%" alt="我的页面">
-  <img src="docs/screenshots/discover-ranking.jpg" width="32%" alt="发现与排行榜">
-  <img src="docs/screenshots/reader-text.jpg" width="32%" alt="正文阅读器">
-  <img src="docs/screenshots/reader-illustration.jpg" width="32%" alt="插图阅读器">
+  <p><img src="docs/screenshots/settings-source-themes.jpg" width="34%" alt="设置、书源与主题配色"></p>
+  <p><img src="docs/screenshots/my-page.jpg" width="78%" alt="我的页面"></p>
+  <p><img src="docs/screenshots/discover-ranking.jpg" width="78%" alt="发现与排行榜"></p>
+  <p><img src="docs/screenshots/reader-text.jpg" width="78%" alt="正文阅读器"></p>
+  <p><img src="docs/screenshots/reader-illustration.jpg" width="78%" alt="插图阅读器"></p>
 </div>
 
 `LiteTale` 是基于 [niuhuan/wild](https://github.com/niuhuan/wild) 的 Android 轻小说阅读器，保留原项目及贡献者的来源和许可。Android 使用 Material You 界面。
