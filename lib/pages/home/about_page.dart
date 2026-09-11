@@ -112,7 +112,7 @@ class AboutPage extends StatelessWidget {
                       TextButton.icon(
                         onPressed:
                             () => _launchUrl(
-                              'https://github.com/metaMMY07/novels',
+                              'https://github.com/metaMMY07/LiteTale',
                             ),
                         icon: const Icon(Icons.code),
                         label: const Text('查看 LiteTale 源代码'),
