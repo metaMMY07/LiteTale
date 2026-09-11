@@ -1,10 +1,10 @@
 <div align="center">
-  <img src="windows/runner/resources/app_icon.png" width="160" alt="novels icon">
+  <img src="docs/novels-app-icon.svg" width="160" alt="LiteTale icon">
   <h1>LiteTale</h1>
 
-[![license](https://img.shields.io/github/license/MMY-SYSU/novels)](LICENSE)
-[![release](https://img.shields.io/github/v/release/MMY-SYSU/novels)](https://github.com/MMY-SYSU/novels/releases)
-[![downloads](https://img.shields.io/github/downloads/MMY-SYSU/novels/total)](https://github.com/MMY-SYSU/novels/releases)
+[![license](https://img.shields.io/github/license/metaMMY07/LiteTale)](LICENSE)
+[![release](https://img.shields.io/github/v/release/metaMMY07/LiteTale)](https://github.com/metaMMY07/LiteTale/releases)
+[![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
 `LiteTale` 是基于 [niuhuan/wild](https://github.com/niuhuan/wild) 的 Android 轻小说阅读器，保留原项目及贡献者的来源和许可。Android 使用 Material You 界面。
@@ -20,7 +20,7 @@
 - 保留插图分页、搜索提交修复，以及壁纸取色和六种可选主题色。
 
 Windows 本机构建入口：`powershell -ExecutionPolicy Bypass -File tools/build_android.ps1`。
-当前主工程位于 `D:\Projects\LiteTale`。交接及验证边界见 [Luna 交接](docs/LUNA_HANDOFF_0.0.18.md)。
+构建和测试说明见项目文档与更新记录。
 
 ## 旧版记录：v0.0.15
 
@@ -31,15 +31,15 @@ Windows 本机构建入口：`powershell -ExecutionPolicy Bypass -File tools/bui
 - 修复书架页面一直加载，并增加 Cloudflare WebView 回退
 - 修复正文插图无法显示及旧章节缓存不刷新的问题
 - 全局界面和阅读正文使用霞鹜新致宋字体
-- Windows 应用名称改为 `novels`，并更换应用图标
+- Windows 应用名称改为 `LiteTale`，并更换应用图标
 
-Windows 成品请从 [Releases](https://github.com/MMY-SYSU/novels/releases) 下载。
+Windows 成品请从 [Releases](https://github.com/metaMMY07/LiteTale/releases) 下载。
 
 ## v0.0.15 界面与书源优化
 
 推荐页新增轻书架近期录入的公开书目，参考 Novella 所用的 `api.lightnovel.life` 接口。匿名接口仅提供近期六本；更多书目、详情及阅读会在应用内打开轻书架网站，并按站点要求登录。文库8的搜索、书架和阅读方式不变，两站账号不互通。
 
-内嵌轻书架的书库、个人书架和详情页跟随 novels 的浅色/深色主题及界面字体，书目按窗口宽度自动排布。只调整显示样式，不改动账号、已入库书目和网站的正文阅读设置；外部浏览器仍使用原站界面。
+内嵌轻书架的书库、个人书架和详情页跟随 LiteTale 的浅色/深色主题及界面字体，书目按窗口宽度自动排布。只调整显示样式，不改动账号、已入库书目和网站的正文阅读设置；外部浏览器仍使用原站界面。
 
 推荐卡片按窗口宽度排列；新书源独立加载并使用短期缓存，不影响原推荐页。
 
