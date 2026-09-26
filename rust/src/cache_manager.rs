@@ -13,6 +13,20 @@ use std::pin::Pin;
 use std::time::Duration;
 use tokio::fs as async_fs;
 
+// Database rows and download status can outlive the actual file (interrupted
+// writes, storage cleanup). Validate off the async worker before reusing it.
+async fn is_usable_image(path: std::path::PathBuf) -> bool {
+    tokio::task::spawn_blocking(move || {
+        ImageReader::open(path)
+            .ok()
+            .and_then(|reader| reader.with_guessed_format().ok())
+            .and_then(|reader| reader.decode().ok())
+            .is_some()
+    })
+    .await
+    .unwrap_or(false)
+}
+
 // Cached chapter text written before this parser version has no illustration
 // markers because the old HTML extractor discarded every <img> node.
 const CHAPTER_IMAGE_PARSER_V2_EPOCH: i64 = 1_788_248_849;
@@ -54,7 +68,9 @@ pub async fn get_cached_image(img_url: String) -> crate::Result<String> {
             let novel_dir = Path::new(DOWNLOAD_FOLDER.get().unwrap()).join(&a.novel_id);
             let picture_file_path = novel_dir.join("cover");
             let path = picture_file_path.to_str().unwrap().to_string();
-            return Ok(path);
+            if is_usable_image(picture_file_path).await {
+                return Ok(path);
+            }
         }
     }
 
@@ -63,14 +79,16 @@ pub async fn get_cached_image(img_url: String) -> crate::Result<String> {
             let novel_dir = Path::new(DOWNLOAD_FOLDER.get().unwrap()).join(&a.aid);
             let picture_file_path = novel_dir.join(format!("picture_{}", a.url_md5));
             let path = picture_file_path.to_str().unwrap().to_string();
-            return Ok(path);
+            if is_usable_image(picture_file_path).await {
+                return Ok(path);
+            }
         }
     }
 
     // 检查缓存记录
     if let Some(_cache) = image_cache::Entity::find_by_url(img_url.as_str()).await? {
         // 如果缓存记录存在，尝试读取文件
-        if Path::new(&file_path).exists() {
+        if is_usable_image(Path::new(&file_path).to_path_buf()).await {
             return Ok(file_path);
         }
     }
@@ -85,6 +103,7 @@ pub async fn get_cached_image(img_url: String) -> crate::Result<String> {
     let (width, height) = img.dimensions();
 
     // 保存文件
+    async_fs::create_dir_all(image_cache_dir).await?;
     async_fs::write(&file_path, &buff).await?;
 
     // 保存数据库记录

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/widgets/cached_image.dart';
+import 'package:wild/sources/book_source.dart';
 import 'package:intl/intl.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
 
 import 'history_cubit.dart';
 
@@ -16,7 +18,7 @@ class HistoryPage extends StatelessWidget {
         title: const Text('阅读历史'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.delete_outline),
+            icon: const Icon(Icons.delete_outline_rounded),
             onPressed: () async {
               final confirm = await showDialog<bool>(
                 context: context,
@@ -50,7 +52,7 @@ class HistoryPage extends StatelessWidget {
       body: BlocBuilder<HistoryCubit, HistoryState>(
         builder: (context, state) {
           if (state is HistoryLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const CenteredLoadingIndicator();
           }
           if (state is HistoryError) {
             return Center(child: Text('加载失败: ${state.message}'));
@@ -159,6 +161,7 @@ class _HistoryItem extends StatelessWidget {
             children: [
               CachedImage(
                 url: history.cover,
+                source: sourceOf(history.novelId),
                 width: 80,
                 height: 120,
                 fit: BoxFit.cover,

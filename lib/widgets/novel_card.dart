@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:wild/theme/material_you.dart';
+import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/cached_image.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 
@@ -15,6 +16,7 @@ class NovelCard extends StatelessWidget {
   final double elevation;
   final EdgeInsetsGeometry? padding;
   final bool showAuthor;
+  final SourceId source;
 
   const NovelCard({
     super.key,
@@ -29,6 +31,7 @@ class NovelCard extends StatelessWidget {
     this.elevation = 0.5,
     this.padding,
     this.showAuthor = true,
+    required this.source,
   });
 
   factory NovelCard.fromNovel({
@@ -41,6 +44,7 @@ class NovelCard extends StatelessWidget {
     double elevation = 0.5,
     EdgeInsetsGeometry? padding,
     bool showAuthor = true,
+    required SourceId source,
   }) {
     return NovelCard(
       title: novel.title,
@@ -54,6 +58,7 @@ class NovelCard extends StatelessWidget {
       elevation: usesMaterialYou ? 0 : elevation,
       padding: padding,
       showAuthor: showAuthor,
+      source: source,
     );
   }
 
@@ -67,6 +72,7 @@ class NovelCard extends StatelessWidget {
     double elevation = 0.5,
     EdgeInsetsGeometry? padding,
     bool showAuthor = false,
+    required SourceId source,
   }) {
     return NovelCard(
       title: novel.title,
@@ -79,18 +85,20 @@ class NovelCard extends StatelessWidget {
       elevation: elevation,
       padding: padding,
       showAuthor: showAuthor,
+      source: source,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final card = Card(
+    final cardRadius =
+        borderRadius ?? BorderRadius.circular(usesMaterialYou ? 16 : 4);
+    final logicalCoverWidth =
+        width != null && width!.isFinite && width! > 0 ? width! : 220.0;
+    return Card(
       clipBehavior: Clip.antiAlias,
       elevation: elevation,
-      shape: RoundedRectangleBorder(
-        borderRadius:
-            borderRadius ?? BorderRadius.circular(usesMaterialYou ? 16 : 4),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: cardRadius),
       child: InkWell(
         onTap: onTap,
         child: Column(
@@ -99,9 +107,13 @@ class NovelCard extends StatelessWidget {
             Expanded(
               child: CachedImage(
                 url: coverUrl,
+                source: source,
                 fit: fit,
                 width: width ?? double.infinity,
                 height: height,
+                cacheWidth:
+                    (logicalCoverWidth * MediaQuery.devicePixelRatioOf(context))
+                        .ceil(),
               ),
             ),
             Padding(
@@ -138,7 +150,5 @@ class NovelCard extends StatelessWidget {
         ),
       ),
     );
-
-    return card;
   }
 }

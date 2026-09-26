@@ -5,8 +5,10 @@ import 'package:wild/sources/book_source.dart';
 import 'package:wild/pages/shelf_catalog_page.dart';
 import 'package:wild/pages/home/settings_page.dart';
 import 'package:wild/theme/material_you.dart';
+import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
 
 import '../../src/rust/api/database.dart';
 import 'package:wild/sources/source_api.dart';
@@ -46,12 +48,14 @@ class _IndexPageState extends State<IndexPage>
         title: Text(usesMaterialYou ? '发现' : '轻小说文库'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.search),
+            icon: const Icon(Icons.search_rounded),
             tooltip: '搜索',
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const SearchPage()),
+                HorizontalCoverPageRoute(
+                  builder: (context) => const SearchPage(),
+                ),
               );
             },
           ),
@@ -66,15 +70,21 @@ class _IndexPageState extends State<IndexPage>
                   padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
                   child: Semantics(
                     button: true,
-                    label: '搜索书名、作者',
+                    label:
+                        activeSource.value == SourceId.lnovel
+                            ? '按目录查找繁体书名'
+                            : '搜索书名、作者',
                     child: InkWell(
                       borderRadius: BorderRadius.circular(32),
                       onTap: () => Navigator.pushNamed(context, '/search'),
                       child: IgnorePointer(
                         child: SearchBar(
-                          hintText: '搜索书名、作者',
+                          hintText:
+                              activeSource.value == SourceId.lnovel
+                                  ? '按目录查找繁体书名'
+                                  : '搜索书名、作者',
                           leading: const Icon(Icons.search_rounded),
-                          trailing: const [Icon(Icons.auto_stories_outlined)],
+                          trailing: const [Icon(Icons.auto_stories_rounded)],
                           elevation: const WidgetStatePropertyAll(0),
                         ),
                       ),
@@ -87,25 +97,65 @@ class _IndexPageState extends State<IndexPage>
                   const Tab(text: '推荐'),
                   const Tab(text: '分类'),
                   const Tab(text: '排行'),
-                  Tab(text: activeSource.value == SourceId.wenku8 ? '完结' : '全部'),
+                  Tab(
+                    text: activeSource.value == SourceId.wenku8 ? '完结' : '全部',
+                  ),
                 ],
               ),
             ],
           ),
         ),
       ),
-      body: activeSource.value == SourceId.wenku8 && context.read<AuthCubit>().state.status != AuthStatus.authenticated
-        ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.auto_stories_outlined, size: 48), const SizedBox(height: 16),
-          const Text('欢迎使用 LiteTale'), const SizedBox(height: 8),
-          const Text('在设置中选择书源并登录，即可浏览和阅读。', textAlign: TextAlign.center), const SizedBox(height: 16),
-          FilledButton.tonal(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())), child: const Text('选择书源')),
-        ]))) : TabBarView(
-        controller: _tabController,
-        children: activeSource.value == SourceId.wenku8 ? const [
-          RecommendPage(), CategoryPage(), ToplistPage(), ArticlelistPage(),
-        ] : const [RecommendPage(), ShelfCatalogPage(mode: 'category'), ShelfCatalogPage(mode: 'rank'), ShelfCatalogPage(mode: 'all')],
-      ),
+      body:
+          activeSource.value == SourceId.wenku8 &&
+                  context.read<AuthCubit>().state.status !=
+                      AuthStatus.authenticated
+              ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.auto_stories_outlined, size: 48),
+                      const SizedBox(height: 16),
+                      const Text('欢迎使用 LiteTale'),
+                      const SizedBox(height: 8),
+                      const Text(
+                        '在设置中选择书源并登录，即可浏览和阅读。',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.tonal(
+                        onPressed:
+                            () => Navigator.push(
+                              context,
+                              HorizontalCoverPageRoute(
+                                builder: (_) => const SettingsPage(),
+                              ),
+                            ),
+                        child: const Text('选择书源'),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+              : TabBarView(
+                controller: _tabController,
+                children:
+                    activeSource.value == SourceId.wenku8
+                        ? const [
+                          RecommendPage(),
+                          CategoryPage(),
+                          ToplistPage(),
+                          ArticlelistPage(),
+                        ]
+                        : const [
+                          RecommendPage(),
+                          ShelfCatalogPage(mode: 'category'),
+                          ShelfCatalogPage(mode: 'rank'),
+                          ShelfCatalogPage(mode: 'all'),
+                        ],
+              ),
     );
   }
 }
@@ -297,10 +347,10 @@ class _ToplistPageState extends State<ToplistPage> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.start,
                             children: [
-                              const Icon(
-                                Icons.error_outline,
+                              Icon(
+                                Icons.error_outline_rounded,
                                 size: 48,
-                                color: Colors.grey,
+                                color: Theme.of(context).colorScheme.error,
                               ),
                               const SizedBox(height: 16),
                               Text(
@@ -320,7 +370,7 @@ class _ToplistPageState extends State<ToplistPage> {
                     ),
                   )
                   : _currentPage == null
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const CenteredLoadingIndicator()
                   : NotificationListener<ScrollNotification>(
                     onNotification: (notification) {
                       if (notification is ScrollEndNotification &&
@@ -432,10 +482,10 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.start,
                   children: [
-                    const Icon(
-                      Icons.error_outline,
+                    Icon(
+                      Icons.error_outline_rounded,
                       size: 48,
-                      color: Colors.grey,
+                      color: Theme.of(context).colorScheme.error,
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -455,7 +505,7 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
           ),
         )
         : _currentPage == null
-        ? const Center(child: CircularProgressIndicator())
+        ? const CenteredLoadingIndicator()
         : NotificationListener<ScrollNotification>(
           onNotification: (notification) {
             if (notification is ScrollEndNotification &&

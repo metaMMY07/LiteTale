@@ -4,6 +4,7 @@ import 'package:wild/theme/material_you.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:wild/pages/auth_cubit.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -118,7 +119,7 @@ class _LoginPageState extends State<LoginPage> {
         },
         builder: (context, state) {
           if (state.status == AuthStatus.initial) {
-            return const Center(child: CircularProgressIndicator());
+            return const CenteredLoadingIndicator();
           }
           return SafeArea(
             child: Center(

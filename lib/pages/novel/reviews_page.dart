@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:wild/sources/source_api.dart';
-import 'package:wild/src/rust/wenku8/models.dart';
-import 'package:wild/widgets/cached_image.dart';
-import 'package:intl/intl.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
 
 class ReviewsPage extends StatefulWidget {
   final String aid;
@@ -93,7 +91,7 @@ class _ReviewsPageState extends State<ReviewsPage> {
     }
 
     if (_currentPage == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const CenteredLoadingIndicator();
     }
 
     if (_currentPage!.records.isEmpty) {
@@ -162,4 +160,4 @@ class _ReviewsPageState extends State<ReviewsPage> {
       ),
     );
   }
-} 
+}

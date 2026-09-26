@@ -5,6 +5,7 @@ import 'package:wild/src/rust/api/database.dart' as db;
 import 'book_source.dart';
 import 'light_novel_shelf_source.dart';
 import 'shelf_session.dart';
+import 'lnovel_source.dart';
 
 export 'package:wild/src/rust/api/wenku8.dart'
     hide
@@ -45,9 +46,11 @@ class Wenku8Source implements BookSource {
 }
 
 final shelfSource = LightNovelShelfSource();
+final lnovelSource = LNovelSource();
 final Map<SourceId, BookSource> bookSources = {
   SourceId.wenku8: Wenku8Source(),
   SourceId.lightNovelShelf: shelfSource,
+  SourceId.lnovel: lnovelSource,
 };
 final _detailCache = <String, SourceBookDetail>{};
 final _chapterFonts = <String, String?>{};
@@ -59,8 +62,10 @@ Future<void> _writes = Future.value();
 
 Future<void> loadSourceSelection() async {
   final saved = await db.loadProperty(key: 'litetale.active_source');
-  activeSource.value =
-      saved == 'lightNovelShelf' ? SourceId.lightNovelShelf : SourceId.wenku8;
+  activeSource.value = SourceId.values.firstWhere(
+    (s) => s.name == saved,
+    orElse: () => SourceId.wenku8,
+  );
   try {
     await ShelfSession.instance.load();
   } catch (_) {
@@ -69,10 +74,10 @@ Future<void> loadSourceSelection() async {
 }
 
 Future<void> selectSource(SourceId source) async {
-  activeSource.value = source;
-  await _serial(
-    () => db.saveProperty(key: 'litetale.active_source', value: source.name),
-  );
+  await _serial(() async {
+    await db.saveProperty(key: 'litetale.active_source', value: source.name);
+    activeSource.value = source;
+  });
 }
 
 void clearShelfSessionCache() {
@@ -105,9 +110,9 @@ Future<w8.PageStatsNovelCover> search({
   required int page,
 }) async {
   final source = activeSource.value;
-  if (source == SourceId.lightNovelShelf && page == 1) {
+  if (source != SourceId.wenku8 && page == 1) {
     await _serial(() async {
-      final history = await _jsonList('litetale.lns.search_history');
+      final history = await _jsonList(_searchKey(source));
       history.removeWhere(
         (h) => h['key'] == searchKey && h['type'] == searchType,
       );
@@ -117,7 +122,7 @@ Future<w8.PageStatsNovelCover> search({
         'time': DateTime.now().millisecondsSinceEpoch ~/ 1000,
       });
       await db.saveProperty(
-        key: 'litetale.lns.search_history',
+        key: _searchKey(source),
         value: jsonEncode(history.take(100).toList()),
       );
     });
@@ -125,9 +130,17 @@ Future<w8.PageStatsNovelCover> search({
   return bookSources[source]!.search(searchKey, searchType, page);
 }
 
+String _searchKey(SourceId source) =>
+    'litetale.${source == SourceId.lightNovelShelf ? 'lns' : source.name}.search_history';
+String _shelfKeyFor(SourceId source) =>
+    'litetale.${source == SourceId.lightNovelShelf ? 'lns' : source.name}.local_shelf';
+String _caseId(SourceId source) =>
+    source == SourceId.lightNovelShelf ? 'lns:local' : '${source.name}:local';
+
 Future<List<w8.SearchHistory>> searchHistories() async {
+  final source = activeSource.value;
   if (activeSource.value == SourceId.wenku8) return w8.searchHistories();
-  return (await _jsonList('litetale.lns.search_history'))
+  return (await _jsonList(_searchKey(source)))
       .map(
         (h) => w8.SearchHistory(
           searchType: h['type'] as String,
@@ -179,14 +192,22 @@ Future<void> _serial(Future<void> Function() work) {
   return next;
 }
 
-const _shelfKey = 'litetale.lns.local_shelf';
 Future<List<Bookcase>> bookcaseList() async =>
     activeSource.value == SourceId.wenku8
         ? w8.bookcaseList()
-        : [const Bookcase(id: 'lns:local', title: '轻书架收藏')];
+        : [
+          Bookcase(
+            id: _caseId(activeSource.value),
+            title: '${activeSource.value.label}收藏',
+          ),
+        ];
 Future<BookcaseDto> bookInCase({required String caseId}) async {
-  if (caseId != 'lns:local') return w8.bookInCase(caseId: caseId);
-  final entries = await _jsonList(_shelfKey);
+  final source =
+      SourceId.values
+          .where((s) => s != SourceId.wenku8 && _caseId(s) == caseId)
+          .firstOrNull;
+  if (source == null) return w8.bookInCase(caseId: caseId);
+  final entries = await _jsonList(_shelfKeyFor(source));
   for (final book in entries) {
     _shelfCovers[book['id'] as String] = book['cover'] as String? ?? '';
   }
@@ -210,9 +231,11 @@ Future<BookcaseDto> bookInCase({required String caseId}) async {
 
 Future<void> addBookshelf({required String aid}) async {
   if (sourceOf(aid) == SourceId.wenku8) return w8.addBookshelf(aid: aid);
-  final detail = _detailCache[aid] ?? await shelfSource.detail(aid);
+  final source = sourceOf(aid);
+  final shelfKey = _shelfKeyFor(source);
+  final detail = _detailCache[aid] ?? await bookSources[source]!.detail(aid);
   await _serial(() async {
-    final items = await _jsonList(_shelfKey);
+    final items = await _jsonList(shelfKey);
     if (items.any((b) => b['id'] == aid)) return;
     final chapters = detail.volumes.expand((v) => v.chapters);
     items.add({
@@ -223,16 +246,17 @@ Future<void> addBookshelf({required String aid}) async {
       'cid': chapters.isEmpty ? '' : chapters.first.cid,
       'chapter': chapters.isEmpty ? '' : chapters.first.title,
     });
-    await db.saveProperty(key: _shelfKey, value: jsonEncode(items));
+    await db.saveProperty(key: shelfKey, value: jsonEncode(items));
   });
 }
 
 Future<void> deleteBookcase({required String bid}) async {
   if (sourceOf(bid) == SourceId.wenku8) return w8.deleteBookcase(bid: bid);
+  final shelfKey = _shelfKeyFor(sourceOf(bid));
   await _serial(() async {
-    final items = await _jsonList(_shelfKey);
+    final items = await _jsonList(shelfKey);
     items.removeWhere((b) => b['id'] == bid);
-    await db.saveProperty(key: _shelfKey, value: jsonEncode(items));
+    await db.saveProperty(key: shelfKey, value: jsonEncode(items));
   });
 }
 
@@ -241,7 +265,9 @@ Future<void> moveBookcase({
   required String fromBookcaseId,
   required String toBookcaseId,
 }) async {
-  if (fromBookcaseId.startsWith('lns:') || toBookcaseId.startsWith('lns:')) {
+  if (SourceId.values
+      .where((s) => s != SourceId.wenku8)
+      .any((s) => _caseId(s) == fromBookcaseId || _caseId(s) == toBookcaseId)) {
     if (fromBookcaseId == toBookcaseId) return;
     throw StateError('不同书源的收藏不能相互移动');
   }

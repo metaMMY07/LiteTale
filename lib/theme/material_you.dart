@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:wild/theme/horizontal_page_transitions.dart';
 
 bool get usesMaterialYou => defaultTargetPlatform == TargetPlatform.android;
 
@@ -10,19 +11,26 @@ ThemeData materialYouTheme(
   ColorScheme? dynamicScheme,
   Color? seedColor,
 }) {
-  // The compatible dynamic_color plugin supplies the original M3 roles only.
-  // Regenerate from its wallpaper accent to include current tonal surfaces.
-  final colors = ColorScheme.fromSeed(
-    seedColor: seedColor ?? dynamicScheme?.primary ?? const Color(0xFF6750A4),
-    brightness: brightness,
-  );
+  // Preserve Android's actual wallpaper palette when system color is chosen.
+  // Re-seeding from only its primary color loses the platform's tonal roles.
+  final colors =
+      seedColor == null && dynamicScheme != null
+          ? dynamicScheme
+          : ColorScheme.fromSeed(
+            seedColor: seedColor ?? const Color(0xFF6750A4),
+            brightness: brightness,
+          );
   final rounded = RoundedRectangleBorder(
     borderRadius: BorderRadius.circular(24),
   );
   return ThemeData(
     useMaterial3: true,
+    pageTransitionsTheme: horizontalPageTransitionsTheme,
     brightness: brightness,
     colorScheme: colors,
+    // Flutter 3.29 still needs this switch for the updated inline indicators.
+    // ignore: deprecated_member_use
+    progressIndicatorTheme: const ProgressIndicatorThemeData(year2023: false),
     scaffoldBackgroundColor: colors.surface,
     appBarTheme: AppBarTheme(
       centerTitle: false,
@@ -54,6 +62,11 @@ ThemeData materialYouTheme(
       backgroundColor: colors.surfaceContainer,
       indicatorColor: colors.secondaryContainer,
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+    ),
+    listTileTheme: ListTileThemeData(iconColor: colors.onSurfaceVariant),
+    searchBarTheme: SearchBarThemeData(
+      elevation: const WidgetStatePropertyAll(0),
+      backgroundColor: WidgetStatePropertyAll(colors.surfaceContainerHigh),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,

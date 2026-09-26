@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:wild/cubits/app_accent_cubit.dart';
+import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/sources/source_api.dart' show loadSourceSelection;
 
 import 'package:flutter/foundation.dart';
@@ -58,6 +59,7 @@ class _InitPageState extends State<InitPage> {
     // 等待所有 Cubit 初始化完成
     await Future.wait([
       context.read<AppAccentCubit>().load(),
+      context.read<ReaderCurlCubit>().load(),
       fontSizeCubit.loadFontSize(),
       paragraphSpacingCubit.loadSpacing(),
       lineHeightCubit.loadLineHeight(),

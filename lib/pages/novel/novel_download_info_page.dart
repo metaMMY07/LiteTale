@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/widgets/cached_image.dart';
 import 'package:wild/pages/novel/novel_download_info_cubit.dart';
@@ -7,6 +9,7 @@ import 'package:wild/pages/novel/reader_page.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:wild/theme/app_fonts.dart';
+import 'package:wild/theme/horizontal_page_transitions.dart';
 
 class NovelDownloadInfoPage extends StatelessWidget {
   final String novelId;
@@ -64,7 +67,7 @@ class NovelDownloadInfoPage extends StatelessWidget {
         body: BlocBuilder<NovelDownloadInfoCubit, NovelDownloadInfoState>(
           builder: (context, state) {
             if (state is NovelDownloadInfoLoading) {
-              return const Center(child: CircularProgressIndicator());
+              return const CenteredLoadingIndicator();
             }
             if (state is NovelDownloadInfoError) {
               return Center(
@@ -127,7 +130,7 @@ class _NovelDownloadInfoContent extends StatelessWidget {
 
     await Navigator.push(
       context,
-      MaterialPageRoute(
+      HorizontalCoverPageRoute(
         builder:
             (context) => ReaderPage(
               aid: novelId,
@@ -254,6 +257,7 @@ class _NovelHeader extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             child: CachedImage(
               url: download.coverUrl,
+              source: sourceOf(download.novelId),
               width: 120,
               height: 160,
               fit: BoxFit.cover,

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:wild/sources/source_api.dart';
 
 import 'account_cubit.dart';
 
@@ -19,7 +19,7 @@ class AccountPage extends StatelessWidget {
           builder: (context, state) {
             switch (state.status) {
               case AccountStatus.loading:
-                return const Center(child: CircularProgressIndicator());
+                return const CenteredLoadingIndicator();
               case AccountStatus.error:
                 return Center(
                   child: Column(
@@ -132,10 +132,12 @@ class AccountPage extends StatelessWidget {
         children: [
           SizedBox(
             width: 80,
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: Colors.grey,
+            child: Builder(
+              builder: (context) => Text(
+                label,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           ),
@@ -151,4 +153,4 @@ class AccountPage extends StatelessWidget {
       ),
     );
   }
-} 
+}

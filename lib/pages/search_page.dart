@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/sources/source_api.dart';
 import '../widgets/novel_cover_card.dart';
@@ -43,24 +45,45 @@ class _SearchPageState extends State<SearchPage> {
   void initState() {
     super.initState();
     _searchType =
-        widget.initialSearchType == 'author' ? 'author' : 'articlename';
+        widget.initialSearchType == 'author' &&
+                activeSource.value != SourceId.lnovel
+            ? 'author'
+            : 'articlename';
     _searchController.text = widget.initialSearchKey ?? '';
+    activeSource.addListener(_sourceChanged);
+    sourceRevision.addListener(_sourceChanged);
     _loadHistories();
     if (_searchController.text.trim().isNotEmpty) _search();
   }
 
   @override
   void dispose() {
+    activeSource.removeListener(_sourceChanged);
+    sourceRevision.removeListener(_sourceChanged);
     _request++;
     _searchController.dispose();
     super.dispose();
   }
 
   Future<void> _loadHistories() async {
+    final source = activeSource.value;
+    final revision = sourceRevision.value;
     try {
       final values = await (widget.historyLoader ?? searchHistories)();
-      if (mounted) setState(() => _histories = values);
+      if (mounted &&
+          source == activeSource.value &&
+          revision == sourceRevision.value) {
+        setState(() => _histories = values);
+      }
     } catch (_) {}
+  }
+
+  void _sourceChanged() {
+    _searchController.clear();
+    _searchType = 'articlename';
+    _histories = [];
+    _resetQuery();
+    _loadHistories();
   }
 
   void _resetQuery() {
@@ -138,7 +161,7 @@ class _SearchPageState extends State<SearchPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(),
+            ExpressiveLoadingIndicator(),
             SizedBox(height: 20),
             Text('正在搜索，请稍候…'),
             SizedBox(height: 8),
@@ -171,15 +194,25 @@ class _SearchPageState extends State<SearchPage> {
       );
     }
     if (_results != null) {
-      if (_results!.records.isEmpty) {
+      if (_results!.records.isEmpty && activeSource.value != SourceId.lnovel) {
         return const Center(child: Text('没有找到相关书籍，试试其他关键词'));
       }
       return Column(
         children: [
+          if (activeSource.value == SourceId.lnovel)
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(
+                '已查找目录第 ${_results!.currentPage} 页 · ${_results!.records.length} 本匹配\n'
+                '${_results!.currentPage < _results!.maxPage ? '可继续查找后续目录' : '已到目录末页'}',
+                textAlign: TextAlign.center,
+              ),
+            ),
           Expanded(
             child: NotificationListener<ScrollNotification>(
               onNotification: (notification) {
-                if (notification is ScrollEndNotification &&
+                if (activeSource.value != SourceId.lnovel &&
+                    notification is ScrollEndNotification &&
                     notification.metrics.extentAfter < 200 &&
                     _error == null) {
                   _search(more: true);
@@ -204,7 +237,13 @@ class _SearchPageState extends State<SearchPage> {
           if (!_loading && _results!.currentPage < _results!.maxPage)
             TextButton(
               onPressed: () => _search(more: true),
-              child: Text(_error == null ? '加载更多' : '加载失败，点击重试'),
+              child: Text(
+                _error == null
+                    ? (activeSource.value == SourceId.lnovel
+                        ? '继续查找下一页目录'
+                        : '加载更多')
+                    : '加载失败，点击重试',
+              ),
             ),
         ],
       );
@@ -242,6 +281,11 @@ class _SearchPageState extends State<SearchPage> {
       top: false,
       child: Column(
         children: [
+          if (activeSource.value == SourceId.lnovel)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Text('原站搜索暂不可用，按目录逐页查找书名。请使用繁体关键词。'),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
             child: TextField(
@@ -271,9 +315,13 @@ class _SearchPageState extends State<SearchPage> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: SegmentedButton<String>(
                 showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 'articlename', label: Text('书名')),
-                  ButtonSegment(value: 'author', label: Text('作者')),
+                segments: [
+                  const ButtonSegment(value: 'articlename', label: Text('书名')),
+                  ButtonSegment(
+                    value: 'author',
+                    label: const Text('作者'),
+                    enabled: activeSource.value != SourceId.lnovel,
+                  ),
                 ],
                 selected: {_searchType},
                 onSelectionChanged: (selection) {

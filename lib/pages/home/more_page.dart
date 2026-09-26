@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/theme/material_you.dart';
+import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/pages/auth_cubit.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/home/account_page.dart';
@@ -27,7 +28,7 @@ class MorePage extends StatelessWidget {
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
+                    HorizontalCoverPageRoute(
                       builder: (context) => const NovelDownloadPage(),
                     ),
                   );
@@ -40,7 +41,7 @@ class MorePage extends StatelessWidget {
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
+                    HorizontalCoverPageRoute(
                       builder: (context) => const AccountPage(),
                     ),
                   );
@@ -53,7 +54,7 @@ class MorePage extends StatelessWidget {
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
+                    HorizontalCoverPageRoute(
                       builder: (context) => const SettingsPage(),
                     ),
                   );
@@ -101,7 +102,7 @@ class MorePage extends StatelessWidget {
   Widget _mobilePage(BuildContext context, UpdateState state) {
     final colors = Theme.of(context).colorScheme;
     void open(Widget page) =>
-        Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+        Navigator.push(context, HorizontalCoverPageRoute(builder: (_) => page));
     Widget entry(
       IconData icon,
       String title,
@@ -141,7 +142,9 @@ class MorePage extends StatelessWidget {
                   BlocBuilder<AuthCubit, AuthState>(
                     builder:
                         (context, auth) => Text(
-                          activeSource.value == SourceId.wenku8 ? auth.username ?? '你的阅读空间' : '轻书架阅读空间',
+                          activeSource.value == SourceId.wenku8
+                              ? auth.username ?? '你的阅读空间'
+                              : '${activeSource.value.label}阅读空间',
                           style: Theme.of(context).textTheme.headlineSmall
                               ?.copyWith(color: colors.onPrimaryContainer),
                         ),

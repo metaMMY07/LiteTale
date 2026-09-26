@@ -925,11 +925,19 @@ impl Wenku8Client {
     }
 
     pub async fn download_image(&self, url: &str) -> Result<Vec<u8>> {
-        let response = self.client.get(url)
+        // The site still emits HTTP cover URLs. Use TLS for its image CDN,
+        // keeping the original URL as the disk-cache key for existing users.
+        let mut image_url = reqwest::Url::parse(url)?;
+        if image_url.scheme() == "http"
+            && matches!(image_url.host_str(), Some("img.wenku8.com" | "img.wenku8.net" | "img.wenku8.cc"))
+        {
+            image_url.set_scheme("https").map_err(|_| anyhow!("Invalid image scheme"))?;
+        }
+        let request = self.client.get(image_url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
             .header("Referer", "https://www.wenku8.net/")
-            .send()
-            .await?;
+            .timeout(Duration::from_secs(25));
+        let response = send_idempotent_get(request).await?;
 
         if !response.status().is_success() {
             return Err(anyhow!("Failed to download image: {}", response.status()));

@@ -11,6 +11,7 @@ import 'package:wild/pages/novel/reviews_page.dart';
 import 'package:wild/widgets/cf_action_loader.dart';
 import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
 
 import '../../src/rust/wenku8/models.dart';
 import 'novel_info_cubit.dart';
@@ -69,7 +70,7 @@ class NovelInfoPage extends StatelessWidget {
                 }
                 return IconButton(
                   icon: const Icon(Icons.download_outlined),
-                  tooltip: sourceOf(novelId) == SourceId.wenku8 ? '离线下载' : '轻书架下载请使用该站授权入口',
+                  tooltip: sourceOf(novelId) == SourceId.wenku8 ? '离线下载' : '此书源暂不支持离线下载',
                   onPressed: sourceOf(novelId) == SourceId.wenku8 ? () => _navigateToDownload(context) : null,
                 );
               },
@@ -150,7 +151,7 @@ class NovelInfoPage extends StatelessWidget {
         body: BlocBuilder<NovelInfoCubit, NovelInfoState>(
           builder: (context, state) {
             if (state is NovelInfoLoading) {
-              return const Center(child: CircularProgressIndicator());
+              return const CenteredLoadingIndicator();
             }
             if (state is NovelInfoError) {
               return Center(child: Text('加载失败: ${state.message}'));
@@ -222,7 +223,12 @@ class _NovelInfoContent extends StatelessWidget {
 
     return CustomScrollView(
       slivers: [
-        SliverToBoxAdapter(child: _NovelHeader(novelInfo: novelInfo)),
+        SliverToBoxAdapter(
+          child: _NovelHeader(
+            novelInfo: novelInfo,
+            source: sourceOf(novelId),
+          ),
+        ),
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.symmetric(
@@ -243,7 +249,7 @@ class _NovelInfoContent extends StatelessWidget {
                   value: '',
                   onTap: () {
                     if (sourceOf(novelId) != SourceId.wenku8) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('该书源的评论请前往轻书架查看')));
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('该书源的评论请前往原站查看')));
                       return;
                     }
                     Navigator.of(context).pushNamed(
@@ -320,8 +326,9 @@ class _NovelInfoContent extends StatelessWidget {
 
 class _NovelHeader extends StatelessWidget {
   final NovelInfo novelInfo;
+  final SourceId source;
 
-  const _NovelHeader({required this.novelInfo});
+  const _NovelHeader({required this.novelInfo, required this.source});
 
   @override
   Widget build(BuildContext context) {
@@ -332,6 +339,7 @@ class _NovelHeader extends StatelessWidget {
         children: [
           CachedImage(
             url: novelInfo.imgUrl,
+            source: source,
             width: 120,
             height: 160,
             fit: BoxFit.cover,
@@ -349,6 +357,12 @@ class _NovelHeader extends StatelessWidget {
                 const SizedBox(height: 8),
                 InkWell(
                   onTap: () async {
+                    if (source == SourceId.lnovel) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('该书源暂不支持作者查找')),
+                      );
+                      return;
+                    }
                     await Navigator.pushNamed(
                       context,
                       '/search',

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/widgets/cached_image.dart';
@@ -123,6 +124,7 @@ class _NovelDownloadingPageState extends State<NovelDownloadingPage> {
                 children: [
                   CachedImage(
                     url: widget.novelInfo.imgUrl,
+                    source: sourceOf(widget.novelId),
                     width: 80,
                     height: 120,
                     fit: BoxFit.cover,
@@ -210,4 +212,4 @@ class _NovelDownloadingPageState extends State<NovelDownloadingPage> {
       ),
     );
   }
-} 
+}

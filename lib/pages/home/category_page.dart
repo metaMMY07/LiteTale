@@ -4,6 +4,7 @@ import 'package:wild/src/rust/api/database.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
 
 class CategoryPage extends StatefulWidget {
   final String? initialTag;
@@ -288,10 +289,10 @@ class _CategoryPageState extends State<CategoryPage> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.start,
                             children: [
-                              const Icon(
-                                Icons.error_outline,
+                              Icon(
+                                Icons.error_outline_rounded,
                                 size: 48,
-                                color: Colors.grey,
+                                color: Theme.of(context).colorScheme.error,
                               ),
                               const SizedBox(height: 16),
                               Text(
@@ -311,7 +312,7 @@ class _CategoryPageState extends State<CategoryPage> {
                     ),
                   )
                   : _currentPage == null
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const CenteredLoadingIndicator()
                   : NotificationListener<ScrollNotification>(
                     onNotification: (notification) {
                       if (notification is ScrollEndNotification &&

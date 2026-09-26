@@ -6,6 +6,9 @@ import 'package:wild/src/rust/wenku8/models.dart' as w8;
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
 import 'package:wild/widgets/novel_card.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/sources/book_source.dart';
+import 'package:wild/theme/horizontal_page_transitions.dart';
 
 import 'recommend_cubit.dart';
 
@@ -15,15 +18,12 @@ class RecommendPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create:
-          (context) => RecommendCubit(
-            loadShelf: (_) async => [],
-          )..load(),
+      create: (context) => RecommendCubit(loadShelf: (_) async => [])..load(),
       child: Scaffold(
         body: BlocBuilder<RecommendCubit, RecommendState>(
           builder: (context, state) {
             if (state is RecommendLoading) {
-              return const Center(child: CircularProgressIndicator());
+              return const CenteredLoadingIndicator();
             }
             if (state is RecommendError) {
               return Center(child: Text('加载失败: ${state.message}'));
@@ -33,21 +33,9 @@ class RecommendPage extends StatelessWidget {
                 onRefresh:
                     () =>
                         context.read<RecommendCubit>().load(forceRefresh: true),
-                child: ListView.builder(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  itemCount:
-                      state.blocks.length +
-                      (state.lightNovelShelfBooks.isEmpty ? 0 : 1),
-                  itemBuilder: (context, index) {
-                    final hasShelfBooks = state.lightNovelShelfBooks.isNotEmpty;
-                    if (hasShelfBooks && index == 0) {
-                      return _LightNovelShelfBlock(
-                        books: state.lightNovelShelfBooks,
-                      );
-                    }
-                    final block = state.blocks[index - (hasShelfBooks ? 1 : 0)];
-                    return _HomeBlockWidget(block: block);
-                  },
+                child: RecommendationFeed(
+                  blocks: state.blocks,
+                  lightNovelShelfBooks: state.lightNovelShelfBooks,
                 ),
               );
             }
@@ -59,26 +47,47 @@ class RecommendPage extends StatelessWidget {
   }
 }
 
-class _LightNovelShelfBlock extends StatelessWidget {
-  const _LightNovelShelfBlock({required this.books});
+/// One viewport keeps offscreen covers out of layout and image decoding.
+class RecommendationFeed extends StatelessWidget {
+  const RecommendationFeed({
+    super.key,
+    required this.blocks,
+    this.lightNovelShelfBooks = const [],
+  });
 
-  final List<LightNovelShelfBook> books;
+  final List<w8.HomeBlock> blocks;
+  final List<LightNovelShelfBook> lightNovelShelfBooks;
 
-  void _open(BuildContext context, String url, String title) {
+  @override
+  Widget build(BuildContext context) {
+    return CustomScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      slivers: [
+        if (lightNovelShelfBooks.isNotEmpty)
+          ..._LightNovelShelfBlock.slivers(context, lightNovelShelfBooks),
+        for (final block in blocks) ..._HomeBlockWidget.slivers(context, block),
+      ],
+    );
+  }
+}
+
+class _LightNovelShelfBlock {
+  static void _open(BuildContext context, String url, String title) {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      HorizontalCoverPageRoute<void>(
         builder:
             (_) => LightNovelShelfBrowserPage(initialUrl: url, title: title),
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
+  static List<Widget> slivers(
+    BuildContext context,
+    List<LightNovelShelfBook> books,
+  ) {
+    return [
+      SliverToBoxAdapter(
+        child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 8, 0),
           child: Row(
             children: [
@@ -102,52 +111,47 @@ class _LightNovelShelfBlock extends StatelessWidget {
             ],
           ),
         ),
-        Padding(
+      ),
+      SliverToBoxAdapter(
+        child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: Text(
             '来自轻书架 · 详情与阅读需该站账号',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: BookGridDelegate(
-              sectionItemCount: books.length,
-              childAspectRatio: 207 / 330,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-            ),
-            itemCount: books.length,
-            itemBuilder: (context, index) {
-              final book = books[index];
-              return NovelCard(
-                title: book.title,
-                coverUrl: book.coverUrl,
-                author: book.subtitle,
-                onTap: () => _open(context, book.webUrl, book.title),
-              );
-            },
+      ),
+      SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        sliver: SliverGrid.builder(
+          gridDelegate: BookGridDelegate(
+            sectionItemCount: books.length,
+            childAspectRatio: 207 / 330,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
           ),
+          itemCount: books.length,
+          itemBuilder: (context, index) {
+            final book = books[index];
+            return NovelCard(
+              title: book.title,
+              coverUrl: book.coverUrl,
+              source: SourceId.lightNovelShelf,
+              author: book.subtitle,
+              onTap: () => _open(context, book.webUrl, book.title),
+            );
+          },
         ),
-      ],
-    );
+      ),
+    ];
   }
 }
 
-class _HomeBlockWidget extends StatelessWidget {
-  final w8.HomeBlock block;
-
-  const _HomeBlockWidget({required this.block});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
+class _HomeBlockWidget {
+  static List<Widget> slivers(BuildContext context, w8.HomeBlock block) {
+    return [
+      SliverToBoxAdapter(
+        child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Text(
             block.title,
@@ -156,25 +160,23 @@ class _HomeBlockWidget extends StatelessWidget {
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: BookGridDelegate(
-              sectionItemCount: block.list.length,
-              childAspectRatio: 207 / 307,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-            ),
-            itemCount: block.list.length,
-            itemBuilder: (context, index) {
-              final novel = block.list[index];
-              return NovelCoverCard(novel: novel);
-            },
+      ),
+      SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        sliver: SliverGrid.builder(
+          gridDelegate: BookGridDelegate(
+            sectionItemCount: block.list.length,
+            childAspectRatio: 207 / 307,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
           ),
+          itemCount: block.list.length,
+          itemBuilder: (context, index) {
+            final novel = block.list[index];
+            return NovelCoverCard(novel: novel);
+          },
         ),
-      ],
-    );
+      ),
+    ];
   }
 }

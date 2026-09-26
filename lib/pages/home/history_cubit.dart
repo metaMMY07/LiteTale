@@ -38,13 +38,18 @@ class HistoryCubit extends Cubit<HistoryState> {
 
   Future<void> deleteHistory(String novelId) async {
     if (state is! HistoryLoaded) return;
-
+    final request = _request;
+    final original = state as HistoryLoaded;
+    if (!original.histories.any((h) => h.novelId == novelId)) return;
     try {
       await w8.deleteHistoryByNovelId(novelId: novelId);
+      if (isClosed || request != _request || state is! HistoryLoaded) return;
       final currentState = state as HistoryLoaded;
-      final updatedHistories = currentState.histories.where((h) => h.novelId != novelId).toList();
+      final updatedHistories =
+          currentState.histories.where((h) => h.novelId != novelId).toList();
       emit(HistoryLoaded(updatedHistories));
     } catch (e) {
+      if (isClosed || request != _request) return;
       emit(HistoryError(e.toString()));
     }
   }

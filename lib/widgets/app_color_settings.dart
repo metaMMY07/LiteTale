@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:wild/cubits/app_accent_cubit.dart';
 
 void showAppColors(BuildContext context) {
@@ -37,6 +38,39 @@ class AppColorSettings extends StatelessWidget {
           }
         }
 
+        Future<void> chooseCustom() async {
+          var picked =
+              appAccentSeed(selected) ?? Theme.of(context).colorScheme.primary;
+          final result = await showDialog<Color>(
+            context: context,
+            builder:
+                (dialogContext) => AlertDialog(
+                  title: const Text('自定义主题颜色'),
+                  content: SingleChildScrollView(
+                    child: ColorPicker(
+                      pickerColor: picked,
+                      enableAlpha: false,
+                      labelTypes: const [],
+                      onColorChanged: (color) => picked = color,
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text('取消'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext, picked),
+                      child: const Text('应用'),
+                    ),
+                  ],
+                ),
+          );
+          if (result != null && context.mounted) {
+            await choose(customAccentValue(result));
+          }
+        }
+
         return Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -70,6 +104,20 @@ class AppColorSettings extends StatelessWidget {
                           ),
                         )
                         .toList(),
+              ),
+              const SizedBox(height: 12),
+              ActionChip(
+                avatar: CircleAvatar(
+                  backgroundColor:
+                      selected.startsWith('custom:')
+                          ? appAccentSeed(selected)
+                          : Theme.of(context).colorScheme.primary,
+                  radius: 9,
+                ),
+                label: Text(
+                  selected.startsWith('custom:') ? '自定义颜色（已选择）' : '自定义颜色',
+                ),
+                onPressed: chooseCustom,
               ),
               const SizedBox(height: 12),
               Text(

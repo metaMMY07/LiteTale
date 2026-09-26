@@ -28,6 +28,7 @@ void main() {
         brightness: brightness,
       );
       final theme = materialYouTheme(brightness, dynamicScheme: wallpaper);
+      expect(theme.colorScheme, wallpaper);
       expect(
         theme.colorScheme.surfaceContainerLow,
         isNot(theme.colorScheme.surface),

@@ -33,6 +33,7 @@ migrate_working_dir/
 .pub/
 /build/
 /artifacts/
+/.dsh-bridge/
 
 # Symbolication related
 app.*.symbols

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/novel/novel_download_cubit.dart';
 import 'package:wild/widgets/cached_image.dart';
 import 'package:wild/pages/novel/novel_download_info_page.dart';
+import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' as w8;
+import 'package:wild/theme/horizontal_page_transitions.dart';
 
 class NovelDownloadPage extends StatelessWidget {
   const NovelDownloadPage({super.key});
@@ -60,7 +63,7 @@ class _NovelDownloadContent extends StatelessWidget {
       body: BlocBuilder<NovelDownloadCubit, NovelDownloadState>(
         builder: (context, state) {
           if (state.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const CenteredLoadingIndicator();
           }
 
           if (state.error != null) {
@@ -82,9 +85,7 @@ class _NovelDownloadContent extends StatelessWidget {
           }
 
           if (state.downloads.isEmpty) {
-            return const Center(
-              child: Text('暂无下载内容'),
-            );
+            return const Center(child: Text('暂无下载内容'));
           }
 
           return ListView.builder(
@@ -97,10 +98,11 @@ class _NovelDownloadContent extends StatelessWidget {
                   onTap: () async {
                     await Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (context) => NovelDownloadInfoPage(
-                          novelId: download.novelId,
-                        ),
+                      HorizontalCoverPageRoute(
+                        builder:
+                            (context) => NovelDownloadInfoPage(
+                              novelId: download.novelId,
+                            ),
                       ),
                     );
                     if (context.mounted) {
@@ -115,6 +117,7 @@ class _NovelDownloadContent extends StatelessWidget {
                           borderRadius: BorderRadius.circular(8),
                           child: CachedImage(
                             url: download.coverUrl,
+                            source: sourceOf(download.novelId),
                             width: 80,
                             height: 120,
                             fit: BoxFit.cover,
@@ -176,7 +179,9 @@ class _NovelDownloadContent extends StatelessWidget {
                                     _getStatusText(download.downloadStatus),
                                     style: TextStyle(
                                       fontSize: 14,
-                                      color: _getStatusColor(download.downloadStatus),
+                                      color: _getStatusColor(
+                                        download.downloadStatus,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -242,4 +247,4 @@ class _NovelDownloadContent extends StatelessWidget {
         return Colors.grey;
     }
   }
-} 
+}

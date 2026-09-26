@@ -11,6 +11,24 @@ const appAccentColors = <String, (String, Color)>{
   'green': ('森林绿', Color(0xFF526B50)),
 };
 
+final _customAccentPattern = RegExp(r'^custom:#[0-9a-fA-F]{6}$');
+
+/// A system palette has no seed; preset and custom choices have one.
+Color? appAccentSeed(String value) {
+  final preset = appAccentColors[value];
+  if (preset != null) return preset.$2;
+  if (!_customAccentPattern.hasMatch(value)) return null;
+  return Color(0xFF000000 | int.parse(value.substring(8), radix: 16));
+}
+
+String customAccentValue(Color color) =>
+    'custom:#${(color.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
+
+bool _validAccent(String value) =>
+    value == 'system' ||
+    appAccentColors.containsKey(value) ||
+    _customAccentPattern.hasMatch(value);
+
 class AppAccentCubit extends Cubit<String> {
   AppAccentCubit({
     Future<String> Function()? read,
@@ -30,9 +48,7 @@ class AppAccentCubit extends Cubit<String> {
     final revision = _revision;
     try {
       final value = await _read();
-      if (!isClosed &&
-          revision == _revision &&
-          (value == 'system' || appAccentColors.containsKey(value))) {
+      if (!isClosed && revision == _revision && _validAccent(value)) {
         emit(value);
       }
     } catch (_) {
@@ -41,7 +57,7 @@ class AppAccentCubit extends Cubit<String> {
   }
 
   Future<void> select(String value) async {
-    if (value != 'system' && !appAccentColors.containsKey(value)) return;
+    if (!_validAccent(value)) return;
     _revision++;
     emit(value);
     // Preserve selection order when the user taps several colors quickly.

@@ -129,6 +129,17 @@ impl Entity {
     pub async fn save_image_cache(model: Model) -> Result<(), DbErr> {
         let db = database::ACTIVE_DB_CONNECT.get().unwrap().lock().await;
         Entity::insert(model.into_active_model())
+            .on_conflict(
+                sea_orm::sea_query::OnConflict::column(Column::ImgUrl)
+                    .update_columns([
+                        Column::UrlMd5,
+                        Column::Width,
+                        Column::Height,
+                        Column::FileSize,
+                        Column::DownloadTime,
+                    ])
+                    .to_owned(),
+            )
             .exec(db.deref())
             .await?;
         Ok(())

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:wild/theme/material_you.dart';
+import 'package:wild/sources/book_source.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/widgets/cached_image.dart';
 
@@ -10,12 +11,11 @@ class NovelCoverCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    var card = Card(
+    final cardRadius = BorderRadius.circular(usesMaterialYou ? 16 : 4);
+    return Card(
       clipBehavior: Clip.antiAlias,
       elevation: usesMaterialYou ? 0 : .5,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(usesMaterialYou ? 16 : 4),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: cardRadius),
       child: InkWell(
         onTap:
             () => Navigator.pushNamed(
@@ -29,8 +29,11 @@ class NovelCoverCard extends StatelessWidget {
             Expanded(
               child: CachedImage(
                 url: novel.img,
+                source: sourceOf(novel.aid),
                 width: double.infinity,
                 fit: BoxFit.cover,
+                cacheWidth:
+                    (220 * MediaQuery.devicePixelRatioOf(context)).ceil(),
               ),
             ),
             Padding(
@@ -49,6 +52,5 @@ class NovelCoverCard extends StatelessWidget {
         ),
       ),
     );
-    return card;
   }
 }

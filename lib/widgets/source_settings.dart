@@ -6,6 +6,7 @@ import 'package:wild/pages/shelf_login_page.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/shelf_session.dart';
 import 'package:wild/sources/source_api.dart' as api;
+import 'package:wild/theme/horizontal_page_transitions.dart';
 
 /// Kept within settings; the rest of the app shows exactly one provider.
 class SourceSettings extends StatelessWidget {
@@ -51,84 +52,87 @@ class SourceSettings extends StatelessWidget {
                   },
                 ),
                 const SizedBox(height: 12),
-                BlocBuilder<AuthCubit, AuthState>(
-                  builder:
-                      (context, auth) => ValueListenableBuilder<bool>(
-                        valueListenable: ShelfSession.instance.signedIn,
-                        builder: (context, shelfSignedIn, _) {
-                          final signedIn =
-                              source == SourceId.wenku8
-                                  ? auth.status == AuthStatus.authenticated
-                                  : shelfSignedIn;
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                signedIn
-                                    ? '${source.label} · 已保存登录'
-                                    : '${source.label} · 未登录',
-                              ),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 12,
-                                children: [
-                                  FilledButton.tonal(
-                                    onPressed: () async {
-                                      await Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder:
-                                              (_) =>
-                                                  source == SourceId.wenku8
-                                                      ? const LoginPage()
-                                                      : const ShelfLoginPage(),
-                                        ),
-                                      );
-                                      // Rebuild visible source pages even if the provider is unchanged.
-                                      sourceRevision.value++;
-                                    },
-                                    child: Text(
-                                      signedIn ? '重新登录' : '登录${source.label}',
-                                    ),
-                                  ),
-                                  if (signedIn)
-                                    TextButton(
+                if (source == SourceId.lnovel)
+                  const Text('公开书源 · 无需登录\n收藏与阅读记录保存在本机')
+                else
+                  BlocBuilder<AuthCubit, AuthState>(
+                    builder:
+                        (context, auth) => ValueListenableBuilder<bool>(
+                          valueListenable: ShelfSession.instance.signedIn,
+                          builder: (context, shelfSignedIn, _) {
+                            final signedIn =
+                                source == SourceId.wenku8
+                                    ? auth.status == AuthStatus.authenticated
+                                    : shelfSignedIn;
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  signedIn
+                                      ? '${source.label} · 已保存登录'
+                                      : '${source.label} · 未登录',
+                                ),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 12,
+                                  children: [
+                                    FilledButton.tonal(
                                       onPressed: () async {
-                                        try {
-                                          if (source == SourceId.wenku8) {
-                                            await api.logout();
-                                            if (context.mounted) {
-                                              context
-                                                  .read<AuthCubit>()
-                                                  .logout();
-                                            }
-                                          } else {
-                                            await ShelfSession.instance
-                                                .logout();
-                                            api.clearShelfSessionCache();
-                                          }
-                                          sourceRevision.value++;
-                                        } catch (_) {
-                                          if (context.mounted) {
-                                            ScaffoldMessenger.of(
-                                              context,
-                                            ).showSnackBar(
-                                              const SnackBar(
-                                                content: Text('退出失败，请重试'),
-                                              ),
-                                            );
-                                          }
-                                        }
+                                        await Navigator.push(
+                                          context,
+                                          HorizontalCoverPageRoute(
+                                            builder:
+                                                (_) =>
+                                                    source == SourceId.wenku8
+                                                        ? const LoginPage()
+                                                        : const ShelfLoginPage(),
+                                          ),
+                                        );
+                                        // Rebuild visible source pages even if the provider is unchanged.
+                                        sourceRevision.value++;
                                       },
-                                      child: const Text('退出当前书源'),
+                                      child: Text(
+                                        signedIn ? '重新登录' : '登录${source.label}',
+                                      ),
                                     ),
-                                ],
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                ),
+                                    if (signedIn)
+                                      TextButton(
+                                        onPressed: () async {
+                                          try {
+                                            if (source == SourceId.wenku8) {
+                                              await api.logout();
+                                              if (context.mounted) {
+                                                context
+                                                    .read<AuthCubit>()
+                                                    .logout();
+                                              }
+                                            } else {
+                                              await ShelfSession.instance
+                                                  .logout();
+                                              api.clearShelfSessionCache();
+                                            }
+                                            sourceRevision.value++;
+                                          } catch (_) {
+                                            if (context.mounted) {
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).showSnackBar(
+                                                const SnackBar(
+                                                  content: Text('退出失败，请重试'),
+                                                ),
+                                              );
+                                            }
+                                          }
+                                        },
+                                        child: const Text('退出当前书源'),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                  ),
               ],
             ),
           ),

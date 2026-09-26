@@ -4,6 +4,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/src/rust/wenku8/models.dart' as w8;
 import 'package:wild/widgets/novel_card.dart';
+import 'package:wild/sources/book_source.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
 
 import '../home/recommend_cubit.dart';
 
@@ -15,7 +17,7 @@ class RecommendPage extends StatelessWidget {
     return BlocBuilder<RecommendCubit, RecommendState>(
       builder: (context, state) {
         if (state is RecommendLoading) {
-          return const Center(child: CircularProgressIndicator());
+          return const CenteredLoadingIndicator();
         }
 
         if (state is RecommendError) {
@@ -88,6 +90,7 @@ class _HomeBlockWidget extends StatelessWidget {
               final novel = block.list[index];
               return NovelCard.fromNovelCover(
                 novel: novel,
+                source: sourceOf(novel.aid),
                 onTap: () {
                   Navigator.pushNamed(
                     context,

@@ -23,3 +23,7 @@ Windows 应用图标取自 [celia-sh/Novella](https://github.com/celia-sh/Novell
 Android 集成测试包含上述字体的少量字符 WOFF2 子集，仅用于验证字体转换，不在常规 APK 入口引用。原始字体和 IPA 许可随源码保留。
 
 轻书架章节字体运行时由书源提供。WOFF2 解码使用 `woofwoof`（MIT）及其 WOFF2/Brotli 依赖；版本固定在 `rust/Cargo.lock`，不是将章节字体作为应用资源分发。
+
+## Material 形状
+
+加载指示器使用 [`material_new_shapes`](https://pub.dev/packages/material_new_shapes) 1.0.0 的 Flutter 多边形与 Morph 几何实现，许可为 MIT；版权归 2025 Agbama Gifted，许可文本见 [LICENSES/material_new_shapes-MIT.txt](LICENSES/material_new_shapes-MIT.txt)。形状顺序参考 AndroidX Material 3 的公开实现，应用中的加载组件由本项目实现。

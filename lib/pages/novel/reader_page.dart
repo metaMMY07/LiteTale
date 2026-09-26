@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
 import 'package:wild/sources/source_api.dart' show chapterFont;
+import 'package:wild/sources/book_source.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/novel/paragraph_spacing_cubit.dart';
 import 'package:wild/pages/novel/reader_cubit.dart';
@@ -21,6 +23,10 @@ import 'right_padding_cubit.dart';
 import 'reader_type_cubit.dart';
 import 'package:wild/cubits/reader_background_cubit.dart';
 import 'package:wild/theme/app_fonts.dart';
+import 'package:wild/services/reader_page_controller.dart';
+import 'package:wild/cubits/reader_curl_cubit.dart';
+import 'package:wild/widgets/page_curl_view.dart';
+import 'package:wild/widgets/reader_curl_setting.dart';
 
 class ReaderPage extends StatelessWidget {
   final String aid;
@@ -42,7 +48,6 @@ class ReaderPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    print('ReaderPage building with initialPage: $initialPage');
     final fontSizeCubit = context.read<FontSizeCubit>();
     final paragraphSpacingCubit = context.read<ParagraphSpacingCubit>();
     final lineHeightCubit = context.read<LineHeightCubit>();
@@ -63,27 +68,26 @@ class ReaderPage extends StatelessWidget {
         BlocProvider.value(value: rightPaddingCubit),
         BlocProvider.value(value: readerTypeCubit),
         BlocProvider(
-          create: (context) => ReaderCubit(
-            novelInfo: novelInfo,
-            initialAid: aid,
-            initialCid: cid,
-            initialVolumes: volumes,
-            fontSizeCubit: fontSizeCubit,
-            paragraphSpacingCubit: paragraphSpacingCubit,
-            lineHeightCubit: lineHeightCubit,
-            topBarHeightCubit: topBarHeightCubit,
-            bottomBarHeightCubit: bottomBarHeightCubit,
-            leftPaddingCubit: leftPaddingCubit,
-            rightPaddingCubit: rightPaddingCubit,
-          )..loadChapter(initialPage: initialPage),
+          create:
+              (context) => ReaderCubit(
+                novelInfo: novelInfo,
+                initialAid: aid,
+                initialCid: cid,
+                initialVolumes: volumes,
+                fontSizeCubit: fontSizeCubit,
+                paragraphSpacingCubit: paragraphSpacingCubit,
+                lineHeightCubit: lineHeightCubit,
+                topBarHeightCubit: topBarHeightCubit,
+                bottomBarHeightCubit: bottomBarHeightCubit,
+                leftPaddingCubit: leftPaddingCubit,
+                rightPaddingCubit: rightPaddingCubit,
+              )..loadChapter(initialPage: initialPage),
         ),
       ],
       child: BlocBuilder<ReaderCubit, ReaderState>(
         builder: (context, state) {
           if (state is ReaderLoading) {
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            );
+            return const Scaffold(body: CenteredLoadingIndicator());
           }
           if (state is ReaderError) {
             return Scaffold(
@@ -107,7 +111,13 @@ class ReaderPage extends StatelessWidget {
             );
           }
           if (state is ReaderLoaded) {
-            return _ReaderView(state: state, title: state.title);
+            // A new page list means new pagination. Recreate its controller at
+            // the latest clamped position, cancelling any old turn safely.
+            return _ReaderView(
+              key: ObjectKey(state.pages),
+              state: state,
+              title: state.title,
+            );
           }
           return const SizedBox.shrink();
         },
@@ -120,24 +130,40 @@ class _ReaderView extends StatefulWidget {
   final ReaderLoaded state;
   final String title;
 
-  const _ReaderView({required this.state, required this.title});
+  const _ReaderView({super.key, required this.state, required this.title});
 
   @override
   State<_ReaderView> createState() => _ReaderViewState();
 }
 
 class _ReaderViewState extends State<_ReaderView> {
-  late PageController _pageController;
+  late ReaderPageController _pageController;
+  final _curlKey = GlobalKey<PageCurlViewState>();
+  bool _wasCurlEnabled = false;
+  Size? _lastLayoutSize;
   var preTime = 0;
+
+  /// The open book owns its image policy. Read the book id from the cubit so a
+  /// later source switch in settings cannot re-route this reader's images.
+  SourceId get _bookSource => sourceOf(context.read<ReaderCubit>().initialAid);
+
+  bool get _curlEnabled =>
+      context.read<ReaderCurlCubit>().state &&
+      !MediaQuery.of(context).disableAnimations;
+
+  bool get _isTurning =>
+      _curlEnabled
+          ? (_curlKey.currentState?.isTurning ?? false)
+          : _pageController.isTurning;
 
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(
+    _pageController = ReaderPageController(
       initialPage: widget.state.currentPageIndex,
     );
     setKeepScreenUpOnReading(true);
-    
+
     // 监听音量键事件
     if (Platform.isAndroid || Platform.isIOS) {
       final volumeControlCubit = context.read<VolumeControlCubit>();
@@ -159,7 +185,7 @@ class _ReaderViewState extends State<_ReaderView> {
       delVolumeListen();
       readerControllerEvent.unsubscribe(_onController);
     }
-    
+
     super.dispose();
   }
 
@@ -177,13 +203,10 @@ class _ReaderViewState extends State<_ReaderView> {
     final bottomArea = screenHeight * 0.7;
 
     if (tapX < leftArea || tapY < topArea) {
+      if (_isTurning) return;
       // 点击左侧或上方区域，上一页
       if (widget.state.currentPageIndex > 0) {
-        // _pageController.previousPage(
-        //   duration: const Duration(milliseconds: 300),
-        //   curve: Curves.easeInOut,
-        // );
-        _pageController.jumpToPage(widget.state.currentPageIndex - 1);
+        _turnPage(-1, startY: details.localPosition.dy);
       } else {
         // 如果是第一页，尝试加载上一章
         final currentVolumeIndex = _findCurrentVolumeIndex();
@@ -208,13 +231,10 @@ class _ReaderViewState extends State<_ReaderView> {
         }
       }
     } else if (tapX > rightArea || tapY > bottomArea) {
+      if (_isTurning) return;
       // 点击右侧或下方区域，下一页
       if (widget.state.currentPageIndex < widget.state.pages.length - 1) {
-        // _pageController.nextPage(
-        //   duration: const Duration(milliseconds: 300),
-        //   curve: Curves.easeInOut,
-        // );
-        _pageController.jumpToPage(widget.state.currentPageIndex + 1);
+        _turnPage(1, startY: details.localPosition.dy);
       } else {
         // 如果是最后一页，尝试加载下一章
         final currentVolumeIndex = _findCurrentVolumeIndex();
@@ -270,11 +290,20 @@ class _ReaderViewState extends State<_ReaderView> {
     );
   }
 
+  void _turnPage(int direction, {double? startY}) {
+    if (_curlEnabled) {
+      _curlKey.currentState?.turn(direction, startY: startY);
+    } else {
+      _pageController.turn(direction);
+    }
+  }
+
   void _onController(ReaderControllerEventArgs args) {
+    if (!mounted || _isTurning) return;
     if (args.key == "UP") {
       // 音量上键 - 上一页
       if (widget.state.currentPageIndex > 0) {
-        _pageController.jumpToPage(widget.state.currentPageIndex - 1);
+        _turnPage(-1);
       } else {
         // 如果是第一页，尝试加载上一章
         final currentVolumeIndex = _findCurrentVolumeIndex();
@@ -286,7 +315,7 @@ class _ReaderViewState extends State<_ReaderView> {
     } else if (args.key == "DOWN") {
       // 音量下键 - 下一页
       if (widget.state.currentPageIndex < widget.state.pages.length - 1) {
-        _pageController.jumpToPage(widget.state.currentPageIndex + 1);
+        _turnPage(1);
       } else {
         // 如果是最后一页，尝试加载下一章
         final currentVolumeIndex = _findCurrentVolumeIndex();
@@ -300,11 +329,46 @@ class _ReaderViewState extends State<_ReaderView> {
     }
   }
 
+  Widget _buildReaderPage(BuildContext context, int index, Color textColor) {
+    final page = widget.state.pages[index];
+    if (page.isImage) {
+      return _ImagePage(
+        imageUrl: page.content,
+        source: _bookSource,
+        textColor: textColor,
+        pageNumber: index + 1,
+        pageCount: widget.state.pages.length,
+      );
+    }
+    return _TextPage(
+      content: page.content,
+      textColor: textColor,
+      pageNumber: index + 1,
+      pageCount: widget.state.pages.length,
+    );
+  }
+
+  void _syncCurlMode(bool enabled) {
+    if (_wasCurlEnabled && !enabled) {
+      final old = _pageController;
+      _pageController = ReaderPageController(
+        initialPage: widget.state.currentPageIndex,
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
+    }
+    _wasCurlEnabled = enabled;
+  }
+
   @override
   Widget build(BuildContext context) {
     final mediaQuery = MediaQuery.of(context);
+    if (_lastLayoutSize != null && _lastLayoutSize != mediaQuery.size) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.read<ReaderCubit>().reloadCurrentPage();
+      });
+    }
+    _lastLayoutSize = mediaQuery.size;
     final topPadding = mediaQuery.padding.top;
-    final bottomPadding = mediaQuery.padding.bottom;
 
     final ThemeCubit themeCubit = context.read<ThemeCubit>();
     bool isDarkMode;
@@ -330,11 +394,27 @@ class _ReaderViewState extends State<_ReaderView> {
           builder: (context, backgroundState) {
             String? backgroundImagePath;
             if (isDarkMode && backgroundState.darkBackgroundExists) {
-              backgroundImagePath = context.read<ReaderBackgroundCubit>().getDarkBackgroundPath();
+              backgroundImagePath =
+                  context.read<ReaderBackgroundCubit>().getDarkBackgroundPath();
             } else if (!isDarkMode && backgroundState.lightBackgroundExists) {
-              backgroundImagePath = context.read<ReaderBackgroundCubit>().getLightBackgroundPath();
+              backgroundImagePath =
+                  context
+                      .read<ReaderBackgroundCubit>()
+                      .getLightBackgroundPath();
             }
-            
+
+            final paperDecoration = BoxDecoration(
+              color: backgroundColor.withValues(alpha: 1),
+              image:
+                  backgroundImagePath == null
+                      ? null
+                      : DecorationImage(
+                        image: FileImage(File(backgroundImagePath)),
+                        fit: BoxFit.cover,
+                        opacity: backgroundState.opacity,
+                      ),
+            );
+
             return Scaffold(
               backgroundColor: backgroundColor,
               body: Stack(
@@ -345,91 +425,105 @@ class _ReaderViewState extends State<_ReaderView> {
                       child: Image.file(
                         File(backgroundImagePath),
                         fit: BoxFit.cover,
-                        opacity: AlwaysStoppedAnimation(backgroundState.opacity),
+                        opacity: AlwaysStoppedAnimation(
+                          backgroundState.opacity,
+                        ),
                       ),
                     ),
-              // 阅读内容
-              Positioned.fill(
-                child: GestureDetector(
-                  onTapUp: _handleTap,
-                  child: PageView.builder(
-                    controller: _pageController,
-                    itemCount: widget.state.pages.length,
-                    onPageChanged: (index) {
-                      context.read<ReaderCubit>().onPageChanged(index);
-                    },
-                    itemBuilder: (context, index) {
-                      final page = widget.state.pages[index];
-                      if (page.isImage) {
-                        return _ImagePage(
-                          imageUrl: page.content,
-                          textColor: textColor,
-                          pageNumber: widget.state.currentPageIndex + 1,
-                          pageCount: widget.state.pages.length,
-                        );
-                      }
-                      return _TextPage(
-                        content: page.content,
-                        textColor: textColor,
-                        pageNumber: widget.state.currentPageIndex + 1,
-                        pageCount: widget.state.pages.length,
-                      );
-                    },
-                  ),
-                ),
-              ),
-              // 控制栏
-              if (state.showControls) ...[
-                // 顶部栏
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: Container(
-                    color: Colors.black.withOpacity(0.7),
-                    padding: EdgeInsets.fromLTRB(16, topPadding + 8, 16, 16),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(
-                            Icons.arrow_back,
-                            color: Colors.white,
-                          ),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                        Expanded(
-                          child: Text(
-                            widget.title,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.menu_book,
-                            color: Colors.white,
-                          ),
-                          onPressed: _showChapterList,
-                        ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.settings,
-                            color: Colors.white,
-                          ),
-                          onPressed: _showSettings,
-                        ),
-                      ],
+                  // 阅读内容
+                  Positioned.fill(
+                    child: GestureDetector(
+                      onTapUp: _handleTap,
+                      child: BlocBuilder<ReaderCurlCubit, bool>(
+                        builder: (context, enabled) {
+                          final curlEnabled =
+                              enabled && !mediaQuery.disableAnimations;
+                          _syncCurlMode(curlEnabled);
+                          if (curlEnabled) {
+                            return PageCurlView(
+                              key: _curlKey,
+                              pageCount: widget.state.pages.length,
+                              index: widget.state.currentPageIndex,
+                              paperDecoration: paperDecoration,
+                              paperColor: backgroundColor,
+                              pageBuilder:
+                                  (context, index) => _buildReaderPage(
+                                    context,
+                                    index,
+                                    textColor,
+                                  ),
+                              onPageChanged:
+                                  context.read<ReaderCubit>().onPageChanged,
+                            );
+                          }
+                          return PageView.builder(
+                            controller: _pageController,
+                            itemCount: widget.state.pages.length,
+                            onPageChanged:
+                                context.read<ReaderCubit>().onPageChanged,
+                            itemBuilder:
+                                (context, index) =>
+                                    _buildReaderPage(context, index, textColor),
+                          );
+                        },
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ],
-          ),
-        );
+                  // 控制栏直接显示或隐藏。
+                  if (state.showControls)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: Container(
+                        color: Colors.black.withValues(alpha: 0.7),
+                        padding: EdgeInsets.fromLTRB(
+                          16,
+                          topPadding + 8,
+                          16,
+                          16,
+                        ),
+                        child: Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(
+                                Icons.arrow_back,
+                                color: Colors.white,
+                              ),
+                              onPressed: () => Navigator.pop(context),
+                            ),
+                            Expanded(
+                              child: Text(
+                                widget.title,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(
+                                Icons.menu_book,
+                                color: Colors.white,
+                              ),
+                              onPressed: _showChapterList,
+                            ),
+                            IconButton(
+                              icon: const Icon(
+                                Icons.settings,
+                                color: Colors.white,
+                              ),
+                              onPressed: _showSettings,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
           },
         );
       },
@@ -479,26 +573,15 @@ class _TextPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth =
-        MediaQueryData.fromView(WidgetsBinding.instance.window).size.width;
-    final screenHeight =
-        MediaQueryData.fromView(WidgetsBinding.instance.window).size.height;
-    final topPadding =
-        MediaQueryData.fromView(WidgetsBinding.instance.window).padding.top;
-    final bottomPadding =
-        MediaQueryData.fromView(WidgetsBinding.instance.window).padding.bottom;
+    final mediaQuery = MediaQuery.of(context);
+    final screenWidth = mediaQuery.size.width;
+    final topPadding = mediaQuery.padding.top;
+    final bottomPadding = mediaQuery.padding.bottom;
     final topBarHeight = context.read<TopBarHeightCubit>().state;
-    final bottomBarHeight = context.read<BottomBarHeightCubit>().state;
     final leftPadding = context.read<LeftPaddingCubit>().state;
     final rightPadding = context.read<RightPaddingCubit>().state;
     final leftAndRightPadding = leftPadding + rightPadding;
     final canvasWidth = screenWidth - leftAndRightPadding;
-    final canvasHeight =
-        screenHeight -
-        topPadding -
-        bottomPadding -
-        topBarHeight -
-        bottomBarHeight;
 
     return BlocBuilder<FontSizeCubit, double>(
       builder: (context, fontSize) {
@@ -516,13 +599,23 @@ class _TextPage extends StatelessWidget {
                         width: canvasWidth,
                         child: Text.rich(
                           strutStyle: StrutStyle(
-                            fontFamily: chapterFont(context.read<ReaderCubit>().initialAid, context.read<ReaderCubit>().initialCid) ?? appFontFamily,
+                            fontFamily:
+                                chapterFont(
+                                  context.read<ReaderCubit>().initialAid,
+                                  context.read<ReaderCubit>().initialCid,
+                                ) ??
+                                appFontFamily,
                             height: lineHeight,
                           ),
                           TextSpan(
                             text: texts[i],
                             style: TextStyle(
-                              fontFamily: chapterFont(context.read<ReaderCubit>().initialAid, context.read<ReaderCubit>().initialCid) ?? appFontFamily,
+                              fontFamily:
+                                  chapterFont(
+                                    context.read<ReaderCubit>().initialAid,
+                                    context.read<ReaderCubit>().initialCid,
+                                  ) ??
+                                  appFontFamily,
                               fontSize: fontSize,
                               height: lineHeight,
                               letterSpacing: 0.5,
@@ -563,9 +656,11 @@ class _ImagePage extends StatelessWidget {
   final Color textColor;
   final int pageNumber;
   final int pageCount;
+  final SourceId source;
 
   const _ImagePage({
     required this.imageUrl,
+    required this.source,
     required this.textColor,
     required this.pageNumber,
     required this.pageCount,
@@ -603,7 +698,7 @@ class _ImagePage extends StatelessWidget {
                 maxWidth: screenWidth - leftAndRightPadding,
               ),
               child: Image(
-                image: CachedImageProvider(imageUrl),
+                image: CachedImageProvider(imageUrl, source: source),
                 width: screenWidth - leftAndRightPadding,
                 height: availableHeight,
                 fit: BoxFit.contain,
@@ -612,9 +707,7 @@ class _ImagePage extends StatelessWidget {
                   return Container(
                     width: screenWidth - leftAndRightPadding,
                     color: Colors.grey[200],
-                    child: const Center(
-                      child: CircularProgressIndicator(),
-                    ),
+                    child: const Center(child: CircularProgressIndicator()),
                   );
                 },
                 errorBuilder: (context, error, stackTrace) {
@@ -687,21 +780,22 @@ class _ChapterListState extends State<_ChapterList> {
             _currentChapterGlobalIndex *
             (estimatedItemHeight + estimatedSpacing);
         // 加上之前所有卷标题的高度
-        int volumeIndex = 0;
         for (var i = 0; i < widget.volumes.length; i++) {
           if (i < _findCurrentVolumeIndex()) {
             targetScroll += estimatedVolumeTitleHeight + estimatedSpacing;
-            volumeIndex = i;
           } else {
             break;
           }
         }
 
         // 滚动到目标位置，并稍微向上偏移一点以显示上下文
-        _scrollController.animateTo(
-          targetScroll - 100, // 向上偏移100像素，显示一些上下文
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
+        _scrollController.jumpTo(
+          (targetScroll - 100)
+              .clamp(
+                _scrollController.position.minScrollExtent,
+                _scrollController.position.maxScrollExtent,
+              )
+              .toDouble(),
         );
       }
     });
@@ -872,7 +966,6 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
               enableAlpha: false,
               labelTypes: const [],
               displayThumbColor: true,
-              showLabel: false,
             ),
           ),
           actions: <Widget>[
@@ -948,6 +1041,8 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                   ),
                 ],
               ),
+              const Divider(),
+              const ReaderCurlSetting(),
               const Divider(),
               // 字体大小设置
               BlocBuilder<FontSizeCubit, double>(
@@ -1297,7 +1392,10 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                           },
                         ),
                       ),
-                      Text('${(backgroundState.opacity * 100).round()}%', style: TextStyle()),
+                      Text(
+                        '${(backgroundState.opacity * 100).round()}%',
+                        style: TextStyle(),
+                      ),
                     ],
                   );
                 },
@@ -1318,14 +1416,19 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                         children: [
                           Expanded(
                             child: OutlinedButton.icon(
-                              icon: Icon(backgroundState.lightBackgroundExists 
-                                  ? Icons.image 
-                                  : Icons.add_photo_alternate),
-                              label: Text(backgroundState.lightBackgroundExists 
-                                  ? '更新浅色背景' 
-                                  : '设置浅色背景'),
+                              icon: Icon(
+                                backgroundState.lightBackgroundExists
+                                    ? Icons.image
+                                    : Icons.add_photo_alternate,
+                              ),
+                              label: Text(
+                                backgroundState.lightBackgroundExists
+                                    ? '更新浅色背景'
+                                    : '设置浅色背景',
+                              ),
                               onPressed: () async {
-                                await readerBackgroundCubit.updateLightBackground();
+                                await readerBackgroundCubit
+                                    .updateLightBackground();
                                 await widget.readerCubit.reloadCurrentPage();
                               },
                             ),
@@ -1336,7 +1439,8 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                               icon: const Icon(Icons.delete),
                               label: const Text('删除'),
                               onPressed: () async {
-                                await readerBackgroundCubit.deleteLightBackground();
+                                await readerBackgroundCubit
+                                    .deleteLightBackground();
                                 await widget.readerCubit.reloadCurrentPage();
                               },
                             ),
@@ -1347,14 +1451,19 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                         children: [
                           Expanded(
                             child: OutlinedButton.icon(
-                              icon: Icon(backgroundState.darkBackgroundExists 
-                                  ? Icons.image 
-                                  : Icons.add_photo_alternate),
-                              label: Text(backgroundState.darkBackgroundExists 
-                                  ? '更新深色背景' 
-                                  : '设置深色背景'),
+                              icon: Icon(
+                                backgroundState.darkBackgroundExists
+                                    ? Icons.image
+                                    : Icons.add_photo_alternate,
+                              ),
+                              label: Text(
+                                backgroundState.darkBackgroundExists
+                                    ? '更新深色背景'
+                                    : '设置深色背景',
+                              ),
                               onPressed: () async {
-                                await readerBackgroundCubit.updateDarkBackground();
+                                await readerBackgroundCubit
+                                    .updateDarkBackground();
                                 await widget.readerCubit.reloadCurrentPage();
                               },
                             ),
@@ -1365,7 +1474,8 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                               icon: const Icon(Icons.delete),
                               label: const Text('删除'),
                               onPressed: () async {
-                                await readerBackgroundCubit.deleteDarkBackground();
+                                await readerBackgroundCubit
+                                    .deleteDarkBackground();
                                 await widget.readerCubit.reloadCurrentPage();
                               },
                             ),

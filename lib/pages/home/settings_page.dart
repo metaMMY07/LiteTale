@@ -12,6 +12,7 @@ import 'package:wild/pages/novel/reader_type_cubit.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/cubits/volume_control_cubit.dart';
+import 'package:wild/widgets/reader_curl_setting.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -82,6 +83,8 @@ class SettingsPage extends StatelessWidget {
                       },
                     ),
                     const SizedBox(height: 16),
+                    const ReaderCurlSetting(),
+                    const SizedBox(height: 8),
                     if (Platform.isAndroid || Platform.isIOS) ...[
                       screenUpOnReadingSetting(),
                       screenUpOnScrollSetting(),

@@ -138,18 +138,26 @@ class ReaderCubit extends Cubit<ReaderState> {
   Future reloadCurrentPage() async {
     final request = ++_request;
     try {
-      var currentPageIndex =
-          super.state is ReaderLoaded
-              ? (super.state as ReaderLoaded).currentPageIndex
-              : 0;
-      // emit(ReaderLoading());
-
       final targetAid = initialAid;
       final targetCid = initialCid;
 
       final chapterTitle = _findChapterTitle(targetAid, targetCid);
       final content = await chapterContent(aid: targetAid, cid: targetCid);
       if (isClosed || request != _request) return;
+
+      // Paging remains available while the content request is pending. Read
+      // the latest position now, not the one at the start of that request.
+      final latest = state;
+      if (latest is! ReaderLoaded ||
+          latest.aid != targetAid ||
+          latest.cid != targetCid) {
+        return;
+      }
+      var currentPageIndex = latest.currentPageIndex;
+      final characterOffset = _calculateCharacterCountUpToPage(
+        latest.pages,
+        currentPageIndex - 1,
+      );
 
       final fontSize = fontSizeCubit.state;
       final paragraphSpacing = paragraphSpacingCubit.state;
@@ -165,9 +173,17 @@ class ReaderCubit extends Cubit<ReaderState> {
         lineHeight,
       );
 
-      if (currentPageIndex >= pages.length) {
-        currentPageIndex = pages.length - 1;
+      if (characterOffset > 0) {
+        var count = 0;
+        for (var i = 0; i < pages.length; i++) {
+          if (!pages[i].isImage) count += pages[i].content.length;
+          if (count > characterOffset) {
+            currentPageIndex = i;
+            break;
+          }
+        }
       }
+      currentPageIndex = currentPageIndex.clamp(0, pages.length - 1);
 
       emit(
         ReaderLoaded(
@@ -180,6 +196,7 @@ class ReaderCubit extends Cubit<ReaderState> {
           showControls: super.state.showControls,
         ),
       );
+      await _savePageHistory(state as ReaderLoaded);
     } catch (e) {
       if (isClosed || request != _request) return;
       emit(ReaderError(e.toString()));
@@ -189,28 +206,34 @@ class ReaderCubit extends Cubit<ReaderState> {
   void onPageChanged(int index) {
     if (state is ReaderLoaded) {
       final currentState = state as ReaderLoaded;
+      if (index < 0 || index >= currentState.pages.length) return;
       emit(currentState.copyWith(currentPageIndex: index));
 
-      // 计算从第一页到当前页的累计字数
-      final characterCount = _calculateCharacterCountUpToPage(
-        currentState.pages,
-        index,
-      );
-
-      // 更新阅读历史中的页码
-      updateHistory(
-        novelId: currentState.aid,
-        novelName: novelInfo.title,
-        volumeId: _findVolume(currentState.aid, currentState.cid).id,
-        volumeName: _findVolume(currentState.aid, currentState.cid).title,
-        chapterId: currentState.cid,
-        chapterTitle: currentState.title,
-        progress: characterCount,
-        progressPage: index,
-        cover: novelInfo.imgUrl,
-        author: novelInfo.author,
-      );
+      _savePageHistory(state as ReaderLoaded);
     }
+  }
+
+  Future<void> _savePageHistory(ReaderLoaded currentState) async {
+    final index = currentState.currentPageIndex;
+    // 计算从第一页到当前页的累计字数
+    final characterCount = _calculateCharacterCountUpToPage(
+      currentState.pages,
+      index,
+    );
+
+    // 更新阅读历史中的页码
+    await updateHistory(
+      novelId: currentState.aid,
+      novelName: novelInfo.title,
+      volumeId: _findVolume(currentState.aid, currentState.cid).id,
+      volumeName: _findVolume(currentState.aid, currentState.cid).title,
+      chapterId: currentState.cid,
+      chapterTitle: currentState.title,
+      progress: characterCount,
+      progressPage: index,
+      cover: novelInfo.imgUrl,
+      author: novelInfo.author,
+    );
   }
 
   Future goToPreviousChapter() async {
@@ -327,14 +350,13 @@ class ReaderCubit extends Cubit<ReaderState> {
     double paragraphSpacing,
     double lineHeight,
   ) {
-    final screenWidth =
-        MediaQueryData.fromView(WidgetsBinding.instance.window).size.width;
-    final screenHeight =
-        MediaQueryData.fromView(WidgetsBinding.instance.window).size.height;
-    final topPadding =
-        MediaQueryData.fromView(WidgetsBinding.instance.window).padding.top;
-    final bottomPadding =
-        MediaQueryData.fromView(WidgetsBinding.instance.window).padding.bottom;
+    final metrics = MediaQueryData.fromView(
+      WidgetsBinding.instance.platformDispatcher.views.first,
+    );
+    final screenWidth = metrics.size.width;
+    final screenHeight = metrics.size.height;
+    final topPadding = metrics.padding.top;
+    final bottomPadding = metrics.padding.bottom;
     final topBarHeight = topBarHeightCubit.state;
     final bottomBarHeight = bottomBarHeightCubit.state;
     final leftPadding = leftPaddingCubit.state;

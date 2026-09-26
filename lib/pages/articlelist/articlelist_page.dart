@@ -5,6 +5,8 @@ import '../../cubits/articlelist_cubit.dart';
 import '../../src/rust/wenku8/models.dart';
 import '../../widgets/cached_image.dart';
 import 'package:wild/widgets/novel_card.dart';
+import 'package:wild/sources/book_source.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
 
 class ArticlelistPage extends StatefulWidget {
   const ArticlelistPage({super.key});
@@ -60,7 +62,7 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
           return RefreshIndicator(
             onRefresh: () => context.read<ArticlelistCubit>().loadNovels(refresh: true),
             child: state.novels.isEmpty
-                ? const Center(child: CircularProgressIndicator())
+                ? const CenteredLoadingIndicator()
                 : GridView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.all(8),
@@ -82,6 +84,7 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
                       final novel = state.novels[index];
                       return NovelCard.fromNovel(
                         novel: novel,
+                        source: sourceOf(novel.id),
                         onTap: () {
                           Navigator.pushNamed(
                             context,
@@ -95,7 +98,7 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
           );
         }
 
-        return const Center(child: CircularProgressIndicator());
+        return const CenteredLoadingIndicator();
       },
     );
   }

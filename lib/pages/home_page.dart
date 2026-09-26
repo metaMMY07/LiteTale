@@ -107,10 +107,22 @@ class _HomePageState extends State<HomePage> {
             body: IndexedStack(
               index: _currentIndex,
               children: [
-                IndexPage(key: ValueKey('index:${activeSource.value}:${sourceRevision.value}')),
-                BookshelfPage(key: ValueKey('shelf:${activeSource.value}:${sourceRevision.value}')),
-                HistoryPage(key: ValueKey('history:${activeSource.value}:${sourceRevision.value}')),
-                MorePage(key: ValueKey(activeSource.value)),
+                TickerMode(
+                  enabled: _currentIndex == 0,
+                  child: IndexPage(key: ValueKey('index:${activeSource.value}:${sourceRevision.value}')),
+                ),
+                TickerMode(
+                  enabled: _currentIndex == 1,
+                  child: BookshelfPage(key: ValueKey('shelf:${activeSource.value}:${sourceRevision.value}')),
+                ),
+                TickerMode(
+                  enabled: _currentIndex == 2,
+                  child: HistoryPage(key: ValueKey('history:${activeSource.value}:${sourceRevision.value}')),
+                ),
+                TickerMode(
+                  enabled: _currentIndex == 3,
+                  child: MorePage(key: ValueKey(activeSource.value)),
+                ),
               ],
             ),
             bottomNavigationBar: NavigationBar(
@@ -129,8 +141,8 @@ class _HomePageState extends State<HomePage> {
                   label: usesMaterialYou ? '发现' : '首页',
                 ),
                 const NavigationDestination(
-                  icon: Icon(Icons.book_outlined),
-                  selectedIcon: Icon(Icons.book),
+                  icon: Icon(Icons.bookmarks_outlined),
+                  selectedIcon: Icon(Icons.bookmarks_rounded),
                   label: '书架',
                 ),
                 const NavigationDestination(

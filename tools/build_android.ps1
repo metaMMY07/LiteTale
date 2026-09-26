@@ -1,8 +1,8 @@
 param(
-    [string]$Version = '0.0.18',
-    [int]$BuildNumber = 19,
+    [string]$Version = '0.0.19-dev.13',
+    [int]$BuildNumber = 32,
     [string]$Toolchains = 'D:\CodexToolchains',
-    [string]$AndroidSdk = "$env:LOCALAPPDATA\Android\sdk",
+    [string]$AndroidSdk = 'D:\Codex-Migrated\Android\Sdk',
     [string]$Proxy = 'http://127.0.0.1:10808'
 )
 $ErrorActionPreference = 'Stop'
@@ -25,17 +25,19 @@ if ($Proxy) {
 Set-Location $projectRoot
 $localProperties = "sdk.dir=$($AndroidSdk.Replace('\','\\'))`nflutter.sdk=$($flutterRoot.Replace('\','\\'))`n"
 [IO.File]::WriteAllText((Join-Path $projectRoot 'android\local.properties'), $localProperties)
-& "$flutterRoot\bin\flutter.bat" pub get 2>&1 | Tee-Object -Variable dependencyOutput
-if ($LASTEXITCODE -ne 0) {
+$ErrorActionPreference = 'Continue'
+$dependencyOutput = & "$flutterRoot\bin\flutter.bat" pub get 2>&1
+$dependencyExit = $LASTEXITCODE
+$ErrorActionPreference = 'Stop'
+$dependencyOutput | ForEach-Object { Write-Output $_ }
+if ($dependencyExit -ne 0) {
     # Android builds work without desktop plugin symlinks on this machine.
     # Never suppress a dependency resolution failure.
     $dependencyText = $dependencyOutput -join "`n"
     if ($dependencyText -notmatch 'Got dependencies!' -or $dependencyText -notmatch 'symlink support' -or !(Test-Path '.dart_tool\package_config.json') -or !(Test-Path '.flutter-plugins-dependencies')) {
         throw 'Flutter dependencies were not resolved.'
     }
-    Write-Warning 'Retrying dependency setup after the desktop symlink warning.'
-    & "$flutterRoot\bin\flutter.bat" pub get
-    if ($LASTEXITCODE -ne 0) { throw 'Plugin registration is incomplete; enable Windows Developer Mode and rerun.' }
+    Write-Warning 'Desktop symlinks are unavailable; resolved dependencies and plugin registration are present, so Android build continues with --no-pub.'
 }
 & "$flutterRoot\bin\flutter.bat" build apk --release --target-platform android-arm64,android-x64 --split-per-abi --build-name $Version --build-number $BuildNumber --no-pub
 if ($LASTEXITCODE -ne 0) { throw 'Android release build failed.' }

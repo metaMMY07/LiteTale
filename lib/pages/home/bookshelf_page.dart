@@ -8,6 +8,7 @@ import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/widgets/cf_action_loader.dart';
 import 'package:wild/widgets/cf_bookshelf_loader.dart';
 import 'package:wild/widgets/novel_card.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 
 class BookshelfPage extends StatefulWidget {
@@ -84,15 +85,8 @@ class _BookshelfPageState extends State<BookshelfPage> {
       return Scaffold(
         appBar: AppBar(
           title: const Text('我的书架'),
-          bottom:
-              isCfLoading
-                  ? const PreferredSize(
-                    preferredSize: Size.fromHeight(3),
-                    child: LinearProgressIndicator(),
-                  )
-                  : null,
         ),
-        body: const Center(child: CircularProgressIndicator()),
+        body: const CenteredLoadingIndicator(),
       );
     }
 
@@ -107,7 +101,11 @@ class _BookshelfPageState extends State<BookshelfPage> {
               Column(
                 mainAxisAlignment: MainAxisAlignment.start,
                 children: [
-                  const Icon(Icons.error_outline, size: 48, color: Colors.grey),
+                  Icon(
+                    Icons.error_outline_rounded,
+                    size: 48,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
                   const SizedBox(height: 16),
                   Text(
                     '加载失败 (下拉刷新)',
@@ -402,6 +400,7 @@ class _BookCard extends StatelessWidget {
           NovelCard(
             title: item.title,
             coverUrl: _getCoverUrl(item.aid),
+            source: sourceOf(item.aid),
             padding: const EdgeInsets.all(8.0),
             showAuthor: false,
           ),
@@ -414,16 +413,26 @@ class _BookCard extends StatelessWidget {
                 height: 24,
                 margin: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: isSelected ? Colors.blue : Colors.white,
+                  color:
+                      isSelected
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).colorScheme.surface,
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: isSelected ? Colors.blue : Colors.grey,
+                    color:
+                        isSelected
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).colorScheme.outline,
                     width: 2,
                   ),
                 ),
                 child:
                     isSelected
-                        ? const Icon(Icons.check, size: 16, color: Colors.white)
+                        ? Icon(
+                          Icons.check_rounded,
+                          size: 16,
+                          color: Theme.of(context).colorScheme.onPrimary,
+                        )
                         : null,
               ),
             ),
@@ -433,7 +442,7 @@ class _BookCard extends StatelessWidget {
   }
 
   String _getCoverUrl(String aid) {
-    if (sourceOf(aid) == SourceId.lightNovelShelf) return coverForBook(aid);
+    if (sourceOf(aid) != SourceId.wenku8) return coverForBook(aid);
     try {
       final id = int.parse(aid);
       return 'https://img.wenku8.com/image/${id ~/ 1000}/$aid/${aid}s.jpg';

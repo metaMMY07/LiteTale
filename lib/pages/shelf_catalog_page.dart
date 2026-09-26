@@ -1,7 +1,9 @@
+import 'package:wild/sources/book_source.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/source_api.dart' as api;
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
+import 'package:wild/widgets/expressive_loading_indicator.dart';
 
 /// Uses the same card grid, tabs and color scheme as the Wenku8 catalogue.
 class ShelfCatalogPage extends StatefulWidget {
@@ -19,6 +21,7 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
   bool _loading = false;
   String? _error;
   int _request = 0;
+  final _source = activeSource.value;
   @override
   void initState() {
     super.initState();
@@ -41,12 +44,21 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
     });
     try {
       if (widget.mode == 'category' && _categories.isEmpty) {
-        final categories = await api.shelfSource.categories();
+        final categories =
+            await (_source == SourceId.lnovel
+                ? api.lnovelSource.categories()
+                : api.shelfSource.categories());
         if (!mounted || request != _request) return;
         _categories = categories;
       }
       final result =
-          widget.mode == 'rank'
+          _source == SourceId.lnovel
+              ? await api.lnovelSource.list(
+                page: number,
+                category: _category,
+                popular: widget.mode == 'rank',
+              )
+              : widget.mode == 'rank'
               ? await api.shelfSource.rank(_days)
               : await api.shelfSource.list(page: number, category: _category);
       if (!mounted || request != _request) return;
@@ -101,7 +113,7 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
             ],
           ),
         ),
-      if (widget.mode == 'rank')
+      if (widget.mode == 'rank' && _source != SourceId.lnovel)
         Padding(
           padding: const EdgeInsets.all(12),
           child: SegmentedButton<int>(
@@ -117,12 +129,13 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
             },
           ),
         ),
-      if (widget.mode == 'all')
+      if (widget.mode == 'rank' && _source == SourceId.lnovel)
+        const Padding(padding: EdgeInsets.all(12), child: Text('按原站阅读人气排序')),
+      if (widget.mode == 'all' && _source == SourceId.lightNovelShelf)
         const Padding(
           padding: EdgeInsets.all(12),
           child: Text('轻书架按分卷收录，此处展示全部书籍'),
         ),
-      if (_loading) const LinearProgressIndicator(),
       if (_error != null)
         Padding(
           padding: const EdgeInsets.all(16),
@@ -138,7 +151,9 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
         ),
       Expanded(
         child:
-            _page == null
+            _loading && _page == null
+                ? const CenteredLoadingIndicator()
+                : _page == null
                 ? const SizedBox.shrink()
                 : _page!.records.isEmpty
                 ? const Center(child: Text('暂无书籍'))
@@ -158,7 +173,12 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
                   ),
                 ),
       ),
-      if (_page != null && _page!.currentPage < _page!.maxPage)
+      if (_loading && _page != null)
+        const SizedBox(
+          height: 48,
+          child: Center(child: ExpressiveLoadingIndicator(size: 24)),
+        ),
+      if (!_loading && _page != null && _page!.currentPage < _page!.maxPage)
         TextButton(
           onPressed: _loading ? null : () => _load(more: true),
           child: const Text('加载更多'),

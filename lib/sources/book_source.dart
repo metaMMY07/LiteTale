@@ -4,7 +4,8 @@ import 'package:wild/src/rust/wenku8/models.dart';
 
 enum SourceId {
   wenku8('文库8'),
-  lightNovelShelf('轻书架');
+  lightNovelShelf('轻书架'),
+  lnovel('轻小说百科');
 
   const SourceId(this.label);
   final String label;
@@ -12,7 +13,11 @@ enum SourceId {
 
 /// Existing Wenku8 ids stay unchanged so installed shelves/history still work.
 SourceId sourceOf(String id) =>
-    id.startsWith('lns:') ? SourceId.lightNovelShelf : SourceId.wenku8;
+    id.startsWith('lns:')
+        ? SourceId.lightNovelShelf
+        : id.startsWith('lnv:')
+        ? SourceId.lnovel
+        : SourceId.wenku8;
 String shelfBookId(Object id) => 'lns:$id';
 int remoteShelfId(String id) {
   final match = RegExp(r'^lns:(\d+)$').firstMatch(id);
