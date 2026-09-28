@@ -208,27 +208,7 @@ class _ReaderViewState extends State<_ReaderView> {
       if (widget.state.currentPageIndex > 0) {
         _turnPage(-1, startY: details.localPosition.dy);
       } else {
-        // 如果是第一页，尝试加载上一章
-        final currentVolumeIndex = _findCurrentVolumeIndex();
-        final currentChapterIndex = _findCurrentChapterIndex();
-        if (currentChapterIndex > 0 || currentVolumeIndex > 0) {
-          var now = DateTime.now().millisecondsSinceEpoch;
-          if (now - preTime > 2000) {
-            preTime = now;
-            // 显示提示信息
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('再次点击加载上一章'),
-                duration: Duration(seconds: 2),
-                behavior: SnackBarBehavior.floating,
-                margin: EdgeInsets.only(bottom: 16),
-              ),
-            );
-          } else {
-            preTime = 0;
-            context.read<ReaderCubit>().goToPreviousChapter();
-          }
-        }
+        _handleBoundaryTurn(-1);
       }
     } else if (tapX > rightArea || tapY > bottomArea) {
       if (_isTurning) return;
@@ -236,18 +216,48 @@ class _ReaderViewState extends State<_ReaderView> {
       if (widget.state.currentPageIndex < widget.state.pages.length - 1) {
         _turnPage(1, startY: details.localPosition.dy);
       } else {
-        // 如果是最后一页，尝试加载下一章
-        final currentVolumeIndex = _findCurrentVolumeIndex();
-        final currentChapterIndex = _findCurrentChapterIndex();
-        final volume = widget.state.volumes[currentVolumeIndex];
-        if (currentChapterIndex < volume.chapters.length - 1 ||
-            currentVolumeIndex < widget.state.volumes.length - 1) {
-          context.read<ReaderCubit>().goToNextChapter();
-        }
+        _handleBoundaryTurn(1);
       }
     } else {
       // 点击中央区域，切换菜单栏显示状态
       context.read<ReaderCubit>().toggleControls();
+    }
+  }
+
+  void _handleBoundaryTurn(int direction) {
+    if (direction < 0) {
+      if (widget.state.currentPageIndex != 0) return;
+      final currentVolumeIndex = _findCurrentVolumeIndex();
+      final currentChapterIndex = _findCurrentChapterIndex();
+      if (currentChapterIndex > 0 || currentVolumeIndex > 0) {
+        final now = DateTime.now().millisecondsSinceEpoch;
+        if (now - preTime > 2000) {
+          preTime = now;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('再次点击加载上一章'),
+              duration: Duration(seconds: 2),
+              behavior: SnackBarBehavior.floating,
+              margin: EdgeInsets.only(bottom: 16),
+            ),
+          );
+        } else {
+          preTime = 0;
+          context.read<ReaderCubit>().goToPreviousChapter();
+        }
+      }
+      return;
+    }
+    if (widget.state.currentPageIndex != widget.state.pages.length - 1) {
+      return;
+    }
+    final currentVolumeIndex = _findCurrentVolumeIndex();
+    final currentChapterIndex = _findCurrentChapterIndex();
+    if (currentVolumeIndex < 0) return;
+    final volume = widget.state.volumes[currentVolumeIndex];
+    if (currentChapterIndex < volume.chapters.length - 1 ||
+        currentVolumeIndex < widget.state.volumes.length - 1) {
+      context.read<ReaderCubit>().goToNextChapter();
     }
   }
 
@@ -432,31 +442,37 @@ class _ReaderViewState extends State<_ReaderView> {
                     ),
                   // 阅读内容
                   Positioned.fill(
-                    child: GestureDetector(
-                      onTapUp: _handleTap,
-                      child: BlocBuilder<ReaderCurlCubit, bool>(
-                        builder: (context, enabled) {
-                          final curlEnabled =
-                              enabled && !mediaQuery.disableAnimations;
-                          _syncCurlMode(curlEnabled);
-                          if (curlEnabled) {
-                            return PageCurlView(
-                              key: _curlKey,
-                              pageCount: widget.state.pages.length,
-                              index: widget.state.currentPageIndex,
-                              paperDecoration: paperDecoration,
-                              paperColor: backgroundColor,
-                              pageBuilder:
-                                  (context, index) => _buildReaderPage(
-                                    context,
-                                    index,
-                                    textColor,
-                                  ),
-                              onPageChanged:
-                                  context.read<ReaderCubit>().onPageChanged,
-                            );
-                          }
-                          return PageView.builder(
+                    child: BlocBuilder<ReaderCurlCubit, bool>(
+                      builder: (context, enabled) {
+                        final curlEnabled =
+                            enabled && !mediaQuery.disableAnimations;
+                        _syncCurlMode(curlEnabled);
+                        if (curlEnabled) {
+                          final curl = PageCurlView(
+                            key: _curlKey,
+                            pageCount: widget.state.pages.length,
+                            index: widget.state.currentPageIndex,
+                            paperDecoration: paperDecoration,
+                            paperColor: backgroundColor,
+                            onCenterTap:
+                                context.read<ReaderCubit>().toggleControls,
+                            onBoundaryTurn: _handleBoundaryTurn,
+                            pageBuilder:
+                                (context, index) =>
+                                    _buildReaderPage(context, index, textColor),
+                            onPageChanged:
+                                context.read<ReaderCubit>().onPageChanged,
+                          );
+                          return Platform.isAndroid
+                              ? curl
+                              : GestureDetector(
+                                onTapUp: _handleTap,
+                                child: curl,
+                              );
+                        }
+                        return GestureDetector(
+                          onTapUp: _handleTap,
+                          child: PageView.builder(
                             controller: _pageController,
                             itemCount: widget.state.pages.length,
                             onPageChanged:
@@ -464,9 +480,9 @@ class _ReaderViewState extends State<_ReaderView> {
                             itemBuilder:
                                 (context, index) =>
                                     _buildReaderPage(context, index, textColor),
-                          );
-                        },
-                      ),
+                          ),
+                        );
+                      },
                     ),
                   ),
                   // 控制栏直接显示或隐藏。

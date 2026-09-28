@@ -27,3 +27,7 @@ Android 集成测试包含上述字体的少量字符 WOFF2 子集，仅用于�
 ## Material 形状
 
 加载指示器使用 [`material_new_shapes`](https://pub.dev/packages/material_new_shapes) 1.0.0 的 Flutter 多边形与 Morph 几何实现，许可为 MIT；版权归 2025 Agbama Gifted，许可文本见 [LICENSES/material_new_shapes-MIT.txt](LICENSES/material_new_shapes-MIT.txt)。形状顺序参考 AndroidX Material 3 的公开实现，应用中的加载组件由本项目实现。
+
+## PTQBookPageView / PTQFlipper
+
+Android 仿书翻页移植自 [FantasticPornTaiQiang/PTQFlipper](https://github.com/FantasticPornTaiQiang/PTQFlipper) 的 PTQBookPageView，固定源码版本 `e8901310f0653924ee62dfeb9b3f27612d4fe790`。原版权归 2023 MPGA，按 MIT 许可提供；原许可与版本说明随源码保存在 [`android/ptqbookpageview/`](android/ptqbookpageview/)。本项目增加 Flutter 桥接、页面位图缓存，并按用户要求将翻页背面改为无文字的不透明纸张。

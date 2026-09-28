@@ -9,6 +9,7 @@ import 'package:wild/pages/home/history_cubit.dart';
 import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/pages/update_cubit.dart';
 import 'package:wild/sources/source_api.dart';
+import 'package:wild/widgets/fluid_navigation_bar.dart';
 
 import 'home/bookshelf_page.dart';
 import 'home/history_page.dart';
@@ -37,7 +38,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _autoSign() async {
-    if (activeSource.value != SourceId.wenku8 || context.read<AuthCubit>().state.status != AuthStatus.authenticated) return;
+    if (activeSource.value != SourceId.wenku8 ||
+        context.read<AuthCubit>().state.status != AuthStatus.authenticated) {
+      return;
+    }
     try {
       final signed = await autoSign();
       if (signed && mounted) {
@@ -70,7 +74,8 @@ class _HomePageState extends State<HomePage> {
 
   void _loadBookshelf() {
     final shelf = context.read<BookshelfCubit>();
-    if (activeSource.value == SourceId.wenku8 && context.read<AuthCubit>().state.status != AuthStatus.authenticated) {
+    if (activeSource.value == SourceId.wenku8 &&
+        context.read<AuthCubit>().state.status != AuthStatus.authenticated) {
       shelf.resetForGuest();
     } else {
       shelf.loadBookcases();
@@ -103,21 +108,64 @@ class _HomePageState extends State<HomePage> {
       value: _historyCubit,
       child: BlocBuilder<UpdateCubit, UpdateState>(
         builder: (context, state) {
+          final destinations = [
+            FluidNavigationDestination(
+              icon:
+                  usesMaterialYou
+                      ? Icons.explore_outlined
+                      : Icons.home_outlined,
+              selectedIcon:
+                  usesMaterialYou ? Icons.explore_rounded : Icons.home,
+              label: usesMaterialYou ? '发现' : '首页',
+            ),
+            const FluidNavigationDestination(
+              icon: Icons.bookmarks_outlined,
+              selectedIcon: Icons.bookmarks_rounded,
+              label: '书架',
+            ),
+            const FluidNavigationDestination(
+              icon: Icons.history_outlined,
+              selectedIcon: Icons.history_rounded,
+              label: '历史',
+            ),
+            FluidNavigationDestination(
+              icon:
+                  usesMaterialYou
+                      ? Icons.person_outline_rounded
+                      : Icons.more_horiz_outlined,
+              selectedIcon:
+                  usesMaterialYou ? Icons.person_rounded : Icons.more_horiz,
+              label: usesMaterialYou ? '我的' : '更多',
+              showBadge: state.updateInfo != null,
+            ),
+          ];
           return Scaffold(
             body: IndexedStack(
               index: _currentIndex,
               children: [
                 TickerMode(
                   enabled: _currentIndex == 0,
-                  child: IndexPage(key: ValueKey('index:${activeSource.value}:${sourceRevision.value}')),
+                  child: IndexPage(
+                    key: ValueKey(
+                      'index:${activeSource.value}:${sourceRevision.value}',
+                    ),
+                  ),
                 ),
                 TickerMode(
                   enabled: _currentIndex == 1,
-                  child: BookshelfPage(key: ValueKey('shelf:${activeSource.value}:${sourceRevision.value}')),
+                  child: BookshelfPage(
+                    key: ValueKey(
+                      'shelf:${activeSource.value}:${sourceRevision.value}',
+                    ),
+                  ),
                 ),
                 TickerMode(
                   enabled: _currentIndex == 2,
-                  child: HistoryPage(key: ValueKey('history:${activeSource.value}:${sourceRevision.value}')),
+                  child: HistoryPage(
+                    key: ValueKey(
+                      'history:${activeSource.value}:${sourceRevision.value}',
+                    ),
+                  ),
                 ),
                 TickerMode(
                   enabled: _currentIndex == 3,
@@ -125,52 +173,33 @@ class _HomePageState extends State<HomePage> {
                 ),
               ],
             ),
-            bottomNavigationBar: NavigationBar(
-              selectedIndex: _currentIndex,
-              onDestinationSelected: _onDestinationSelected,
-              destinations: [
-                NavigationDestination(
-                  icon: Icon(
-                    usesMaterialYou
-                        ? Icons.explore_outlined
-                        : Icons.home_outlined,
-                  ),
-                  selectedIcon: Icon(
-                    usesMaterialYou ? Icons.explore : Icons.home,
-                  ),
-                  label: usesMaterialYou ? '发现' : '首页',
-                ),
-                const NavigationDestination(
-                  icon: Icon(Icons.bookmarks_outlined),
-                  selectedIcon: Icon(Icons.bookmarks_rounded),
-                  label: '书架',
-                ),
-                const NavigationDestination(
-                  icon: Icon(Icons.history_outlined),
-                  selectedIcon: Icon(Icons.history),
-                  label: '历史',
-                ),
-                NavigationDestination(
-                  icon: Badge(
-                    isLabelVisible: state.updateInfo != null,
-                    label: const Text('新'),
-                    child: Icon(
-                      usesMaterialYou
-                          ? Icons.person_outline_rounded
-                          : Icons.more_horiz_outlined,
+            bottomNavigationBar:
+                usesMaterialYou
+                    ? FluidNavigationBar(
+                      destinations: destinations,
+                      selectedIndex: _currentIndex,
+                      onDestinationSelected: _onDestinationSelected,
+                    )
+                    : NavigationBar(
+                      selectedIndex: _currentIndex,
+                      onDestinationSelected: _onDestinationSelected,
+                      destinations: [
+                        for (final destination in destinations)
+                          NavigationDestination(
+                            icon: Badge(
+                              isLabelVisible: destination.showBadge,
+                              label: const Text('新'),
+                              child: Icon(destination.icon),
+                            ),
+                            selectedIcon: Badge(
+                              isLabelVisible: destination.showBadge,
+                              label: const Text('新'),
+                              child: Icon(destination.selectedIcon),
+                            ),
+                            label: destination.label,
+                          ),
+                      ],
                     ),
-                  ),
-                  selectedIcon: Badge(
-                    isLabelVisible: state.updateInfo != null,
-                    label: const Text('新'),
-                    child: Icon(
-                      usesMaterialYou ? Icons.person_rounded : Icons.more_horiz,
-                    ),
-                  ),
-                  label: usesMaterialYou ? '我的' : '更多',
-                ),
-              ],
-            ),
           );
         },
       ),

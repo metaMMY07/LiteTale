@@ -43,6 +43,10 @@ flutter {
     source = "../.."
 }
 
+dependencies {
+    implementation(project(":ptqbookpageview"))
+}
+
 // WOFF2 decoding links the NDK C++ runtime. Package the runtime from the same
 // NDK as the Rust build, including its 16 KB compatible ELF alignment.
 val runtimeLibraries = layout.buildDirectory.dir("generated/ndkRuntimeLibraries")

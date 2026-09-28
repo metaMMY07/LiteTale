@@ -3,7 +3,7 @@ package opensource.wild
 import android.os.*
 import android.view.*
 import androidx.annotation.NonNull
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
@@ -21,13 +21,19 @@ import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
 
     private val scope = CoroutineScope(EmptyCoroutineContext)
     private val uiThreadHandler = Handler(Looper.getMainLooper())
     
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        flutterEngine.platformViewsController.registry.registerViewFactory(
+            "litetale/ptq_curl",
+            PTQPageCurlPlatformViewFactory(flutterEngine.dartExecutor.binaryMessenger),
+        )
+        LauncherIconChannel(this, flutterEngine.dartExecutor.binaryMessenger)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "methods").setMethodCallHandler { call, result ->
             result.withCoroutine {
@@ -75,14 +81,14 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun androidDataLocal(): String {
-        val localFile = File(context!!.filesDir.absolutePath, "data.local")
+        val localFile = File(filesDir.absolutePath, "data.local")
         if (localFile.exists()) {
             val path = String(FileInputStream(localFile).use { it.readBytes() })
             if (File(path).isDirectory) {
                 return path
             }
         }
-        return context!!.filesDir.absolutePath
+        return filesDir.absolutePath
     }
 
     private fun getKeepScreenOn() =

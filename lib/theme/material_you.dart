@@ -66,7 +66,10 @@ ThemeData materialYouTheme(
     listTileTheme: ListTileThemeData(iconColor: colors.onSurfaceVariant),
     searchBarTheme: SearchBarThemeData(
       elevation: const WidgetStatePropertyAll(0),
-      backgroundColor: WidgetStatePropertyAll(colors.surfaceContainerHigh),
+      backgroundColor: WidgetStatePropertyAll(colors.surfaceContainerHighest),
+      side: WidgetStatePropertyAll(
+        BorderSide(color: colors.outlineVariant, width: 1.2),
+      ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,

@@ -1,6 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
-  <title>LiteTale 应用图标</title>
-  <rect width="512" height="512" rx="112" fill="#141118"/>
-  <rect x="133" y="100" width="246" height="312" rx="28" fill="#D0BDFD"/>
-  <path fill="#141118" d="M166 133h76v118l-38-25-38 25z"/>
+  <title>LiteTale 书本与书签图标</title>
+  <defs><linearGradient id="cover"><stop stop-color="#C5A8E9"/><stop offset="1" stop-color="#E9DCFA"/></linearGradient></defs>
+  <rect width="512" height="512" rx="112" fill="#FAF7FF"/>
+  <path d="M122 53h284q28 0 28 28v353q0 28-28 28H106q-28 0-28-28V97q0-44 44-44z" fill="#4D3A6B"/>
+  <path d="M122 69h284q12 0 12 12v314q0 12-12 12H106q-12 0-12-12V97q0-28 28-28z" fill="url(#cover)"/>
+  <rect x="138" y="68" width="18" height="341" rx="5" fill="#4D3A6B"/>
+  <rect x="94" y="397" width="324" height="50" rx="25" fill="#4D3A6B"/>
+  <rect x="97" y="414" width="319" height="32" rx="16" fill="#D7C4EA"/>
+  <path d="M185 68h67v118l-33-23-34 23z" fill="#4D3A6B"/>
+  <path d="M199 70h39v90l-19-14-20 14z" fill="#C5A8E9"/>
+  <rect x="180" y="266" width="218" height="94" rx="47" fill="#4D3A6B"/>
+  <rect x="195" y="281" width="188" height="64" rx="32" fill="#F8F4FD"/>
+  <path d="M228 308h123m-123 24h123" stroke="#4D3A6B" stroke-width="12" stroke-linecap="round"/>
 </svg>

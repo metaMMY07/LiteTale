@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/app_color_settings.dart';
+import 'package:wild/widgets/launcher_icon_settings.dart';
 import 'package:wild/widgets/source_settings.dart';
 
 import 'package:flutter/material.dart';
@@ -31,6 +32,11 @@ class SettingsPage extends StatelessWidget {
                 const Card(
                   margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: AppColorSettings(),
+                ),
+              if (usesMaterialYou)
+                const Card(
+                  margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: LauncherIconSettings(),
                 ),
               // 阅读器设置
               Card(
@@ -98,7 +104,9 @@ class SettingsPage extends StatelessWidget {
                             title: const Text('音量键翻页'),
                             value: isEnabled,
                             onChanged: (value) {
-                              context.read<VolumeControlCubit>().updateVolumeControl(value);
+                              context
+                                  .read<VolumeControlCubit>()
+                                  .updateVolumeControl(value);
                             },
                           );
                         },
@@ -179,7 +187,9 @@ class SettingsPage extends StatelessWidget {
                               const Text('仅影响文库8；书源切换请使用上方设置'),
                               const SizedBox(height: 8),
                               TextField(
-                                controller: TextEditingController(text: apiHost),
+                                controller: TextEditingController(
+                                  text: apiHost,
+                                ),
                                 decoration: const InputDecoration(
                                   hintText: '留空使用默认地址',
                                   border: OutlineInputBorder(),
@@ -187,9 +197,13 @@ class SettingsPage extends StatelessWidget {
                                 ),
                                 onSubmitted: (value) async {
                                   try {
-                                    await context.read<ApiHostCubit>().updateApiHost(value);
+                                    await context
+                                        .read<ApiHostCubit>()
+                                        .updateApiHost(value);
                                     if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
                                         const SnackBar(
                                           content: Text('API Host 已更新'),
                                           duration: Duration(seconds: 2),
@@ -198,7 +212,9 @@ class SettingsPage extends StatelessWidget {
                                     }
                                   } catch (e) {
                                     if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
                                         SnackBar(
                                           content: Text('更新失败: $e'),
                                           duration: const Duration(seconds: 2),
@@ -215,9 +231,13 @@ class SettingsPage extends StatelessWidget {
                                     child: OutlinedButton.icon(
                                       onPressed: () async {
                                         try {
-                                          await context.read<ApiHostCubit>().resetToDefault();
+                                          await context
+                                              .read<ApiHostCubit>()
+                                              .resetToDefault();
                                           if (context.mounted) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
                                               const SnackBar(
                                                 content: Text('已重置为默认地址'),
                                                 duration: Duration(seconds: 2),
@@ -226,10 +246,14 @@ class SettingsPage extends StatelessWidget {
                                           }
                                         } catch (e) {
                                           if (context.mounted) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
                                               SnackBar(
                                                 content: Text('重置失败: $e'),
-                                                duration: const Duration(seconds: 2),
+                                                duration: const Duration(
+                                                  seconds: 2,
+                                                ),
                                               ),
                                             );
                                           }

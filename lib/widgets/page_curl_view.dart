@@ -1,12 +1,19 @@
+import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 
-/// A reader page turn with a blank, opaque reverse side.
+/// PTQFlipper page curl on Android, with a blank, opaque reverse side.
 ///
-/// The fold uses both the drag's initial height and its current position.
-/// Children stay in repaint boundaries while a drag only updates the clip
-/// and painting geometry; the caller owns the committed page index.
+/// Reader pages are cached as bitmaps when their content changes. The native
+/// component handles touch, geometry and drawing without re-laying out text on
+/// every drag frame. Other platforms retain the lightweight reader fallback.
 class PageCurlView extends StatefulWidget {
   const PageCurlView({
     super.key,
@@ -16,6 +23,8 @@ class PageCurlView extends StatefulWidget {
     required this.onPageChanged,
     required this.paperDecoration,
     required this.paperColor,
+    this.onCenterTap,
+    this.onBoundaryTurn,
   }) : assert(pageCount > 0);
 
   final int pageCount;
@@ -24,6 +33,8 @@ class PageCurlView extends StatefulWidget {
   final ValueChanged<int> onPageChanged;
   final Decoration paperDecoration;
   final Color paperColor;
+  final VoidCallback? onCenterTap;
+  final ValueChanged<int>? onBoundaryTurn;
 
   @override
   State<PageCurlView> createState() => PageCurlViewState();
@@ -41,7 +52,35 @@ class PageCurlViewState extends State<PageCurlView>
   double _height = 1;
   bool _settling = false;
 
-  bool get isTurning => _direction != 0 || _settling;
+  // PTQFlipper owns the actual curl on Android. Flutter pages are rasterized
+  // only when pagination changes; no Dart geometry runs on drag frames.
+  final Map<int, GlobalKey> _nativeKeys = {};
+  final Map<int, Uint8List> _nativePages = {};
+  final Set<int> _nativeRequestedPages = {};
+  MethodChannel? _nativeChannel;
+  bool _nativeReady = false;
+  bool _nativeInteractive = false;
+  int? _nativeReadyIndex;
+  bool _nativeTurning = false;
+  int? _nativeOptimisticIndex;
+  int? _pendingNativeDirection;
+  double? _pendingNativeStartY;
+  double _loadingDragDx = 0;
+  double _loadingDragStartY = 0;
+  bool _nativeCaptureScheduled = false;
+  bool _nativeCaptureRunning = false;
+  bool _nativeCaptureAgain = false;
+  int _nativeCaptureFailures = 0;
+  int _nativeGeneration = 0;
+  Size? _nativeViewportSize;
+
+  bool get isTurning =>
+      Platform.isAndroid
+          ? _nativeTurning || _pendingNativeDirection != null
+          : _direction != 0 || _settling;
+
+  @visibleForTesting
+  bool get isNativeInteractive => _nativeInteractive;
 
   @override
   void initState() {
@@ -56,17 +95,471 @@ class PageCurlViewState extends State<PageCurlView>
 
   @override
   void dispose() {
+    _nativeChannel?.setMethodCallHandler(null);
     _progress.dispose();
     _foldPoint.dispose();
     super.dispose();
   }
 
+  @override
+  void didUpdateWidget(covariant PageCurlView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!Platform.isAndroid) return;
+    final paperChanged =
+        widget.paperDecoration != oldWidget.paperDecoration ||
+        widget.paperColor != oldWidget.paperColor;
+    if (paperChanged || widget.pageCount != oldWidget.pageCount) {
+      _nativeGeneration++;
+      _nativePages.clear();
+      _nativeRequestedPages.clear();
+      _nativeReady = false;
+      _nativeInteractive = false;
+      _nativeReadyIndex = null;
+      _nativeOptimisticIndex = null;
+      _pendingNativeDirection = null;
+      _nativeCaptureFailures = 0;
+      _nativeChannel?.setMethodCallHandler(null);
+      _nativeChannel = null;
+    }
+    if (paperChanged ||
+        widget.pageCount != oldWidget.pageCount ||
+        widget.index != oldWidget.index) {
+      if (widget.index != oldWidget.index) {
+        _nativeOptimisticIndex = null;
+        _nativeInteractive = _nativeReadyIndex == widget.index;
+      }
+      if (paperChanged || widget.pageCount != oldWidget.pageCount) {
+        _nativeTurning = false;
+      }
+      _nativeChannel?.invokeMethod('setState', _nativeState);
+      _scheduleNativeCapture();
+    }
+  }
+
+  Map<String, Object> get _nativeState => {
+    'pageCount': widget.pageCount,
+    'index': widget.index,
+    'paperColor': widget.paperColor.toARGB32(),
+  };
+
+  List<int> get _nativeVisibleIndices {
+    // Capturing the current page before its neighbors makes a newly opened
+    // book visible immediately. A second page ahead is warmed after the
+    // first turn becomes available so rapid forward taps need no PNG readback.
+    return <int>{
+      widget.index,
+      if (_nativeReady && widget.index + 1 < widget.pageCount) widget.index + 1,
+      if (_nativeReady && widget.index > 0) widget.index - 1,
+      if (_nativeInteractive && widget.index + 2 < widget.pageCount)
+        widget.index + 2,
+      if (_nativeInteractive && widget.index > 1) widget.index - 2,
+      ..._nativeRequestedPages.where(
+        (index) => index >= 0 && index < widget.pageCount,
+      ),
+    }.toList();
+  }
+
+  void _scheduleNativeCapture() {
+    if (_nativeCaptureScheduled || _nativeCaptureFailures >= 3) return;
+    _nativeCaptureScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _nativeCaptureScheduled = false;
+      if (mounted) _captureNativePages();
+    });
+    // A retry can be scheduled after the last frame has gone idle. Explicitly
+    // request another painted frame before reading a RepaintBoundary.
+    WidgetsBinding.instance.scheduleFrame();
+  }
+
+  Future<void> _captureNativePages() async {
+    if (_nativeCaptureRunning) {
+      _nativeCaptureAgain = true;
+      return;
+    }
+    _nativeCaptureRunning = true;
+    final generation = _nativeGeneration;
+    var capturedAny = false;
+    try {
+      // The platform view is inserted once the current page has been
+      // rasterized. Wait for its channel before capturing further pages so
+      // none are cached without being delivered to Android.
+      if (_nativeReady && _nativeChannel == null) return;
+      for (final index in _nativeVisibleIndices) {
+        if (!mounted || generation != _nativeGeneration) break;
+        if (_nativePages.containsKey(index)) continue;
+        final boundary = _nativeKeys[index]?.currentContext?.findRenderObject();
+        if (boundary is! RenderRepaintBoundary) {
+          _nativeCaptureAgain = true;
+          continue;
+        }
+        // toImage asserts if this boundary still has a pending layout/paint.
+        // Wait for the next frame instead of treating normal startup as a
+        // failed capture (the getter itself is only valid in debug builds).
+        var needsFrame = false;
+        assert(() {
+          needsFrame = boundary.debugNeedsLayout || boundary.debugNeedsPaint;
+          return true;
+        }());
+        if (needsFrame) {
+          _nativeCaptureAgain = true;
+          continue;
+        }
+        final ratio = View.of(context).devicePixelRatio;
+        final image = await boundary.toImage(pixelRatio: ratio);
+        try {
+          final data = await image.toByteData(format: ui.ImageByteFormat.png);
+          if (data == null) throw StateError('Page image encoding failed');
+          if (!mounted || generation != _nativeGeneration) break;
+          final bytes = data.buffer.asUint8List();
+          _nativePages[index] = bytes;
+          capturedAny = true;
+          _nativeRequestedPages.remove(index);
+          await _nativeChannel?.invokeMethod<void>('setPage', {
+            'index': index,
+            'bytes': bytes,
+          });
+          if (!_nativeReady && index == widget.index) {
+            setState(() => _nativeReady = true);
+            break;
+          }
+        } finally {
+          image.dispose();
+        }
+      }
+      if (!mounted || generation != _nativeGeneration) return;
+      _nativeCaptureFailures = 0;
+      if (!_nativeReady && _nativePages.containsKey(widget.index)) {
+        setState(() => _nativeReady = true);
+      }
+      if (capturedAny && _nativeReady && _nativeChannel != null) {
+        // The PNG is now owned by Android. Remove its low-opacity Flutter
+        // duplicate so a drag does not composite several full-screen pages.
+        setState(() {});
+      }
+      // Keep a small window so a reverse turn can reuse the previous PNG.
+      _nativePages.removeWhere(
+        (index, _) =>
+            (index - widget.index).abs() > 3 &&
+            !_nativeRequestedPages.contains(index),
+      );
+    } catch (error) {
+      _nativeCaptureFailures++;
+      debugPrint('PTQ page capture failed: $error');
+      if (_nativeCaptureFailures < 3 && mounted) {
+        Future<void>.delayed(const Duration(milliseconds: 40), () {
+          if (mounted) _scheduleNativeCapture();
+        });
+      }
+    } finally {
+      _nativeCaptureRunning = false;
+      if (_nativeCaptureAgain && mounted) {
+        _nativeCaptureAgain = false;
+        _scheduleNativeCapture();
+      }
+    }
+  }
+
+  Future<void> _turnNative(int direction, {double? startY}) async {
+    if (_nativeTurning ||
+        _pendingNativeDirection != null ||
+        !_canTurn(direction)) {
+      return;
+    }
+    if (_nativeOptimisticIndex != null ||
+        !_nativeInteractive ||
+        _nativeChannel == null) {
+      // On a newly opened book, PNG readback and Android bitmap decoding can
+      // take longer than a tap. Show the requested page immediately with the
+      // existing Flutter page while the curl cache warms in the background.
+      // Once ready, later turns use the native paper animation as usual.
+      final target = (_nativeOptimisticIndex ?? widget.index) + direction;
+      _nativeOptimisticIndex = target;
+      widget.onPageChanged(target);
+      return;
+    }
+    _nativeTurning = true;
+    try {
+      final accepted = await _nativeChannel!.invokeMethod<bool>('turn', {
+        'direction': direction,
+        'startY': ((startY ?? _height / 2) / _height).clamp(0.0, 1.0),
+      });
+      if (accepted == false) {
+        _nativeTurning = false;
+        final readyIndex = await _nativeChannel!.invokeMethod<int>(
+          'getReadyIndex',
+        );
+        if (mounted && readyIndex != widget.index && _canTurn(direction)) {
+          _nativeInteractive = false;
+          _pendingNativeDirection = direction;
+          _pendingNativeStartY = startY;
+          setState(() {});
+        }
+      }
+      // Guard an interrupted native gesture or detached view.
+      Future<void>.delayed(const Duration(seconds: 2), () {
+        if (mounted) _nativeTurning = false;
+      });
+    } catch (error) {
+      _nativeTurning = false;
+      debugPrint('PTQ page turn failed: $error');
+    }
+  }
+
+  void _markNativeReady(int index) {
+    _nativeReadyIndex = index;
+    if (!mounted || index != widget.index) return;
+    if (!_nativeInteractive) setState(() => _nativeInteractive = true);
+    final direction = _pendingNativeDirection;
+    if (direction == null) return;
+    final startY = _pendingNativeStartY;
+    _pendingNativeDirection = null;
+    _pendingNativeStartY = null;
+    // Remove the loading-page overlay before the native tap animation starts.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_canTurn(direction)) {
+        _turnNative(direction, startY: startY);
+      } else {
+        widget.onBoundaryTurn?.call(direction);
+      }
+    });
+  }
+
+  void _loadingTurn(int direction, double startY) {
+    if (_nativeTurning || _pendingNativeDirection != null) return;
+    if (_canTurn(direction)) {
+      _turnNative(direction, startY: startY);
+    } else {
+      widget.onBoundaryTurn?.call(direction);
+    }
+  }
+
+  void _loadingTap(Offset position) {
+    if (position.dx < _width * 0.30 || position.dy < _height * 0.30) {
+      _loadingTurn(-1, position.dy);
+    } else if (position.dx > _width * 0.70 || position.dy > _height * 0.70) {
+      _loadingTurn(1, position.dy);
+    } else {
+      widget.onCenterTap?.call();
+    }
+  }
+
+  Future<void> _handleNativeCall(MethodCall call) async {
+    if (!mounted) return;
+    switch (call.method) {
+      case 'turnStarted':
+        _nativeTurning = true;
+      case 'turnFinished':
+        _nativeTurning = false;
+      case 'ready':
+        _markNativeReady((call.arguments as Map)['index'] as int);
+      case 'pageChanged':
+        final index = (call.arguments as Map)['index'] as int;
+        if (index >= 0 && index < widget.pageCount && index != widget.index) {
+          widget.onPageChanged(index);
+        }
+      case 'turnLimit':
+        _nativeTurning = false;
+        widget.onBoundaryTurn?.call(
+          (call.arguments as Map)['direction'] as int,
+        );
+      case 'centerTap':
+        widget.onCenterTap?.call();
+      case 'pageNeeded':
+        final index = (call.arguments as Map)['index'] as int;
+        if (index >= 0 && index < widget.pageCount) {
+          final cached = _nativePages[index];
+          if (cached != null && _nativeChannel != null) {
+            try {
+              await _nativeChannel!.invokeMethod<void>('setPage', {
+                'index': index,
+                'bytes': cached,
+              });
+              _nativeRequestedPages.remove(index);
+            } catch (error) {
+              debugPrint('PTQ cached page restore failed: $error');
+              _nativePages.remove(index);
+              _nativeRequestedPages.add(index);
+              setState(() {});
+              _scheduleNativeCapture();
+            }
+          } else {
+            _nativeRequestedPages.add(index);
+            setState(() {});
+            _scheduleNativeCapture();
+          }
+        }
+    }
+  }
+
+  Widget _buildNative(BuildContext context) {
+    _scheduleNativeCapture();
+    final visible = _nativeVisibleIndices;
+    // Native PNGs keep the nearby history; offscreen Flutter page widgets do
+    // not need a GlobalKey for every page the reader has ever visited.
+    _nativeKeys.removeWhere((index, _) => !visible.contains(index));
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewport = Size(constraints.maxWidth, constraints.maxHeight);
+        if (viewport.width > 0 &&
+            viewport.height > 0 &&
+            _nativeViewportSize != viewport) {
+          // Orientation and window-size changes can happen after the first
+          // page was rasterized. Never stretch a portrait PNG across a
+          // landscape curl (or keep its expensive stale bitmap cache).
+          if (_nativeViewportSize != null) {
+            _nativeGeneration++;
+            _nativePages.clear();
+            _nativeRequestedPages.clear();
+            _nativeReady = false;
+            _nativeInteractive = false;
+            _nativeReadyIndex = null;
+            _nativeOptimisticIndex = null;
+            _nativeTurning = false;
+            _nativeCaptureFailures = 0;
+            _nativeChannel?.setMethodCallHandler(null);
+            _nativeChannel = null;
+          }
+          _nativeViewportSize = viewport;
+          // LayoutBuilder can rebuild for new constraints without rebuilding
+          // PageCurlView itself, so its earlier capture callback has already
+          // run. Start a new capture for the resized page explicitly.
+          _scheduleNativeCapture();
+        }
+        _width = constraints.maxWidth;
+        _height = constraints.maxHeight;
+        final viewGeneration = _nativeGeneration;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            for (final index in visible.where(
+              (index) => !_nativePages.containsKey(index),
+            ))
+              // Keep the boundary painted so toImage can rasterize its page,
+              // but keep their composited opacity negligible underneath the
+              // native curl. Otherwise text from both layers overlaps at the
+              // curved edge (especially with dense landscape typography).
+              Opacity(
+                opacity: !_nativeReady && index == widget.index ? 1 : 0.01,
+                child: RepaintBoundary(
+                  key: _nativeKeys.putIfAbsent(index, GlobalKey.new),
+                  child: DecoratedBox(
+                    decoration: widget.paperDecoration,
+                    child: SizedBox.expand(
+                      child: widget.pageBuilder(context, index),
+                    ),
+                  ),
+                ),
+              ),
+            if (_nativeReady)
+              AndroidView(
+                key: const ValueKey('ptq-curl-android-view'),
+                viewType: 'litetale/ptq_curl',
+                // Send the full down/move/up stream to PTQ immediately. The
+                // default arena policy can wait until pointer-up and turns a
+                // live curl into a tap-only animation.
+                gestureRecognizers: {
+                  Factory<OneSequenceGestureRecognizer>(
+                    EagerGestureRecognizer.new,
+                  ),
+                },
+                creationParamsCodec: const StandardMessageCodec(),
+                creationParams: _nativeState,
+                onPlatformViewCreated: (id) {
+                  if (!mounted || viewGeneration != _nativeGeneration) return;
+                  final channel = MethodChannel('litetale/ptq_curl/$id');
+                  _nativeChannel = channel;
+                  channel.setMethodCallHandler(_handleNativeCall);
+                  // The reader may have moved to another page while Android
+                  // was creating this view. Creation params are a snapshot.
+                  unawaited(
+                    channel
+                        .invokeMethod<void>('setState', _nativeState)
+                        .catchError((Object error) {
+                          debugPrint('PTQ initial state sync failed: $error');
+                        }),
+                  );
+                  for (final entry in _nativePages.entries) {
+                    unawaited(
+                      channel
+                          .invokeMethod<void>('setPage', {
+                            'index': entry.key,
+                            'bytes': entry.value,
+                          })
+                          .catchError((Object error) {
+                            debugPrint(
+                              'PTQ initial page upload failed: $error',
+                            );
+                          }),
+                    );
+                  }
+                  _scheduleNativeCapture();
+                  unawaited(
+                    channel
+                        .invokeMethod<int>('getReadyIndex')
+                        .then((index) {
+                          if (index != null) _markNativeReady(index);
+                        })
+                        .catchError((Object error) {
+                          debugPrint('PTQ readiness query failed: $error');
+                        }),
+                  );
+                },
+              ),
+            if (!_nativeInteractive)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapUp: (details) => _loadingTap(details.localPosition),
+                  onHorizontalDragStart: (details) {
+                    _loadingDragDx = 0;
+                    _loadingDragStartY = details.localPosition.dy;
+                  },
+                  onHorizontalDragUpdate: (details) {
+                    _loadingDragDx += details.delta.dx;
+                  },
+                  onHorizontalDragEnd: (details) {
+                    final velocity = details.primaryVelocity ?? 0;
+                    // The horizontal recognizer has already crossed touch
+                    // slop. Requiring another distance/velocity threshold
+                    // here makes short deliberate swipes look ignored.
+                    if (_loadingDragDx == 0 && velocity == 0) {
+                      return;
+                    }
+                    _loadingTurn(
+                      _loadingDragDx != 0
+                          ? (_loadingDragDx < 0 ? 1 : -1)
+                          : (velocity < 0 ? 1 : -1),
+                      _loadingDragStartY,
+                    );
+                  },
+                  child:
+                      _nativeReady
+                          ? DecoratedBox(
+                            decoration: widget.paperDecoration,
+                            child: SizedBox.expand(
+                              child: widget.pageBuilder(context, widget.index),
+                            ),
+                          )
+                          : const SizedBox.expand(),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   bool _canTurn(int direction) =>
       direction != 0 &&
-      widget.index + direction >= 0 &&
-      widget.index + direction < widget.pageCount;
+      (_nativeOptimisticIndex ?? widget.index) + direction >= 0 &&
+      (_nativeOptimisticIndex ?? widget.index) + direction < widget.pageCount;
 
   Future<void> turn(int direction, {double? startY}) async {
+    if (Platform.isAndroid) {
+      await _turnNative(direction, startY: startY);
+      return;
+    }
     if (isTurning || !_canTurn(direction)) return;
     if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) {
       widget.onPageChanged(widget.index + direction);
@@ -153,6 +646,7 @@ class PageCurlViewState extends State<PageCurlView>
 
   @override
   Widget build(BuildContext context) {
+    if (Platform.isAndroid) return _buildNative(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         _width = constraints.maxWidth;

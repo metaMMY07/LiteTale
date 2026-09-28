@@ -1,3 +1,9 @@
 <resources>
-    <color name="novels_icon_background">#141118</color>
+    <color name="litetale_icon_bg_iris">#FAF7FF</color>
+    <color name="litetale_icon_bg_blue">#F5F9FF</color>
+    <color name="litetale_icon_bg_rose">#FFF7FA</color>
+    <color name="litetale_icon_bg_orange">#FFFAF3</color>
+    <color name="litetale_icon_bg_teal">#F2FBF9</color>
+    <color name="litetale_icon_bg_green">#F7FAF3</color>
+    <color name="novels_icon_background">#FAF7FF</color>
 </resources>
