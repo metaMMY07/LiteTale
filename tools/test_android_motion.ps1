@@ -61,8 +61,15 @@ try {
     $service = [UriBuilder]$deviceService
     $service.Host = '127.0.0.1'
     $service.Port = [int]$hostPort
-    & $flutter drive --profile --no-pub --driver test_driver/android_motion.dart --target $Target --use-existing-app $service.Uri.AbsoluteUri --keep-app-running -d $Device
-    if ($LASTEXITCODE -ne 0) { throw 'Device tests failed; app left installed.' }
+    $ErrorActionPreference = 'Continue'
+    & $flutter drive --profile --no-pub --driver test_driver/android_motion.dart --target $Target --use-existing-app $service.Uri.AbsoluteUri --keep-app-running -d $Device 2>&1 | Tee-Object -Variable driveOutput
+    $driveExit = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    # The integration driver can exit successfully even when the device test
+    # reports failure in its log. Do not present that case as a passed test.
+    if ($driveExit -ne 0 -or ($driveOutput -join "`n") -match 'Some tests failed\.|\[E\]') {
+        throw 'Device tests failed; app left installed.'
+    }
 } finally {
     & $adb -s $Device forward --remove "tcp:$hostPort"
 }

@@ -1,85 +1,55 @@
 <div align="center">
-  <img src="docs/litetale-app-icon.svg" width="160" alt="LiteTale icon">
+  <img src="docs/litetale-app-icon.svg" width="144" alt="LiteTale 应用图标">
   <h1>LiteTale</h1>
+  <p>基于 Wild 的 Material You Android 轻小说阅读器</p>
 
 [![license](https://img.shields.io/github/license/metaMMY07/LiteTale)](LICENSE)
 [![release](https://img.shields.io/github/v/release/metaMMY07/LiteTale)](https://github.com/metaMMY07/LiteTale/releases)
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
+## Android 0.1.3
+
+**发现页标签分隔更清楚，右上角可快速切换深浅色。** 搜索仍从下方的搜索框进入；仿书翻页默认关闭，可在阅读设置中自行开启。
+
+[下载 ARM64 手机／平板版](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.3/LiteTale-0.1.3-arm64-v8a.apk) · [下载 x86_64 模拟器版](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.3/LiteTale-0.1.3-x86_64.apk) · [更新记录与校验值](docs/releases/0.1.3.md)
+
+APK 使用当前项目的调试证书签名；重新安装或升级时需要保持签名一致。正式渠道分发前应配置专用发布密钥。
+
+### 界面预览
+
+以下图片来自 Android 测试截图，均为竖屏。
+
 <div align="center">
-  <p><strong>应用界面预览</strong></p>
-  <p><img src="docs/screenshots/settings-source-themes.jpg" width="34%" alt="设置、书源与主题配色"></p>
-  <p><img src="docs/screenshots/my-page.jpg" width="78%" alt="我的页面"></p>
-  <p><img src="docs/screenshots/discover-ranking.jpg" width="78%" alt="发现与排行榜"></p>
-  <p><img src="docs/screenshots/reader-text.jpg" width="78%" alt="正文阅读器"></p>
-  <p><img src="docs/screenshots/reader-illustration.jpg" width="78%" alt="插图阅读器"></p>
+  <img src="docs/qa/0.1.3/light-portrait.png" width="31%" alt="浅色模式下的发现页和书单">
+  <img src="docs/qa/0.1.3/dark-portrait.png" width="31%" alt="深色模式下的发现页和书单">
+  <img src="docs/qa/0.1.2/dark-my.png" width="31%" alt="深色模式下的 LiteTale 我的页面">
 </div>
-
-`LiteTale` 是基于 [niuhuan/wild](https://github.com/niuhuan/wild) 的 Android 轻小说阅读器，保留原项目及贡献者的来源和许可。Android 使用 Material You 界面。
-
-## 当前版本
-
-版本：`0.1.1`（Android 正式版）
-
-`0.1.1` 改进曲面翻页的点击和滑动响应：新书位图缓存尚未就绪时立即显示请求的页面，缓存就绪后使用原生曲面翻页；窗口旋转后也会重建正确尺寸的页面位图。高分辨率页面减少网格计算与重复绘制。曲面翻页默认关闭，仍可使用原翻页方式。主题、六种图标配色、三书源与全屏页面左右覆盖转场继续保留。安装包和校验值见 [0.1.1 更新记录](docs/releases/0.1.1.md)。
-
-**实验性功能提示：仿真翻页目前仍不稳定，可能出现卡顿、掉帧或响应延迟；可在阅读设置中关闭并使用普通翻页。**
-
-- 首次打开进入游客首页，在“设置 → 书源与账号”选择文库8或轻书架并登录对应账号；轻小说百科公开内容免登录。
-- 轻小说百科提供公开目录与原生阅读；原站书名搜索失效时按目录逐页查找繁体书名，收藏保存在本机，暂不支持作者搜索、站点账号和离线下载。
-- 一次展示一个书源，保留各自登录状态及上次选择；搜索、书架和阅读历史按书源隔离。
-- 轻书架书籍、目录、正文与插图使用现有原生页面；其专用 WOFF2 字体经 Rust 转为 TTF 后加载。
-- 轻书架收藏暂存本机，云书架同步和授权离线下载未接入；账号权限仍由书源服务决定。
-- 保留插图分页、搜索提交修复，以及壁纸取色、六种预设色和自定义主题色。
-
-Windows 本机构建入口：`powershell -ExecutionPolicy Bypass -File tools/build_android.ps1`。
-构建和测试说明见项目文档与更新记录。
-
-## 旧版记录：v0.0.15
-
-- 接入轻书架近期录入，书库、个人书架和详情统一界面样式
-- 修复全屏推荐页右侧空列，优化各页面封面布局与缩放
-
-- 修复搜索请求返回 `403 Forbidden` 的问题
-- 修复书架页面一直加载，并增加 Cloudflare WebView 回退
-- 修复正文插图无法显示及旧章节缓存不刷新的问题
-- 全局界面和阅读正文使用霞鹜新致宋字体
-- Windows 应用名称改为 `LiteTale`，并更换应用图标
-
-Windows 成品请从 [Releases](https://github.com/metaMMY07/LiteTale/releases) 下载。
-
-## v0.0.15 界面与书源优化
-
-推荐页新增轻书架近期录入的公开书目，参考 Novella 所用的 `api.lightnovel.life` 接口。匿名接口仅提供近期六本；更多书目、详情及阅读会在应用内打开轻书架网站，并按站点要求登录。文库8的搜索、书架和阅读方式不变，两站账号不互通。
-
-内嵌轻书架的书库、个人书架和详情页跟随 LiteTale 的浅色/深色主题及界面字体，书目按窗口宽度自动排布。只调整显示样式，不改动账号、已入库书目和网站的正文阅读设置；外部浏览器仍使用原站界面。
-
-推荐卡片按窗口宽度排列；新书源独立加载并使用短期缓存，不影响原推荐页。
 
 ## 功能
 
-- 小说阅读、章节跳转、阅读进度保存和继续阅读
-- 书架分类、多选、移动与删除
-- 按书名或作者搜索，并保存搜索历史
-- 分类、排行榜、评论、登录和自动签到
-- 阅读主题、字号、行高、段落间距、自动滚动等设置
+- 一次使用一个书源；可在设置中切换文库8、轻书架或轻小说百科，各自保存登录状态。
+- 书架、搜索和阅读历史按书源隔离，保持统一的 LiteTale 界面。
+- Material You 动态配色与六种应用图标配色，可切换深浅色主题。
+- 支持小说阅读、目录跳转、进度保存、插图阅读与常规翻页；可选仿书翻页仍属实验功能。
+- 全屏页面使用左右覆盖转场；底部导航带有毛玻璃背景。
 
 ## 构建
 
-项目需要 Flutter、Rust 与 Flutter Rust Bridge 对应的构建环境。
+项目需要 Flutter、Rust 与 Flutter Rust Bridge 对应的构建环境。Windows 本机构建入口：
 
-```bash
-flutter pub get
-flutter build windows --release
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/build_android.ps1
 ```
+
+Android 构建和测试说明见 [ANDROID.md](ANDROID.md) 与 [更新记录](CHANGELOG.md)。
 
 ## 来源与许可
 
 - 本项目基于 [Wild](https://github.com/niuhuan/wild) 修改，Wild 及其衍生代码按 [GNU GPL v3](LICENSE) 发布。
-- Windows 应用图标来自 [celia-sh/Novella](https://github.com/celia-sh/Novella)，按其 [GNU AGPL v3](LICENSES/AGPL-3.0.txt) 许可使用。
+- Windows 应用图标来自 [celia-sh/Novella](https://github.com/celia-sh/Novella)，按 [GNU AGPL v3](LICENSES/AGPL-3.0.txt) 许可使用。
 - 内置霞鹜新致宋 Plus 字体按字体文件声明的 [IPA Font License v1.0](LICENSES/IPA.txt) 使用。
-- 详细来源和本版修改范围见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 [CHANGELOG.md](CHANGELOG.md)。
+- 详细来源和修改范围见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 [CHANGELOG.md](CHANGELOG.md)。
 
 分发或继续修改本项目时，请保留原作者、上游项目和许可证声明，并按相应许可证提供源代码及字体许可文本。
 

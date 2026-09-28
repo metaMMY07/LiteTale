@@ -140,6 +140,7 @@ class _HomePageState extends State<HomePage> {
             ),
           ];
           return Scaffold(
+            extendBody: usesMaterialYou,
             body: IndexedStack(
               index: _currentIndex,
               children: [

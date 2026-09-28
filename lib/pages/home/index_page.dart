@@ -4,6 +4,7 @@ import 'package:wild/pages/auth_cubit.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/pages/shelf_catalog_page.dart';
 import 'package:wild/pages/home/settings_page.dart';
+import 'package:wild/pages/novel/theme_cubit.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
@@ -41,27 +42,98 @@ class _IndexPageState extends State<IndexPage>
     super.dispose();
   }
 
+  Widget _buildDiscoveryTabs(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final tabs = TabBar(
+      controller: _tabController,
+      indicatorPadding:
+          usesMaterialYou ? const EdgeInsets.only(bottom: 5) : EdgeInsets.zero,
+      tabs: [
+        const Tab(text: '推荐'),
+        const Tab(text: '分类'),
+        const Tab(text: '排行'),
+        Tab(text: activeSource.value == SourceId.wenku8 ? '完结' : '全部'),
+      ],
+    );
+    if (!usesMaterialYou) return tabs;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.surfaceContainer,
+          border: Border.all(color: colors.outlineVariant),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Row(
+                    children: [
+                      for (var index = 0; index < 4; index++) ...[
+                        const Expanded(child: SizedBox.shrink()),
+                        if (index < 3)
+                          Container(
+                            width: 1,
+                            height: 26,
+                            color: colors.outline.withValues(alpha: 0.45),
+                          ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              tabs,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(usesMaterialYou ? '发现' : '轻小说文库'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.search_rounded),
-            tooltip: '搜索',
-            onPressed: () {
-              Navigator.push(
-                context,
-                HorizontalCoverPageRoute(
-                  builder: (context) => const SearchPage(),
-                ),
-              );
-            },
-          ),
+          if (usesMaterialYou)
+            IconButton(
+              icon: Icon(
+                Theme.of(context).brightness == Brightness.dark
+                    ? Icons.light_mode_rounded
+                    : Icons.dark_mode_rounded,
+              ),
+              tooltip:
+                  Theme.of(context).brightness == Brightness.dark
+                      ? '切换浅色模式'
+                      : '切换深色模式',
+              onPressed:
+                  () => context.read<ThemeCubit>().setThemeMode(
+                    Theme.of(context).brightness == Brightness.dark
+                        ? ReaderThemeMode.light
+                        : ReaderThemeMode.dark,
+                  ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.search_rounded),
+              tooltip: '搜索',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  HorizontalCoverPageRoute(
+                    builder: (context) => const SearchPage(),
+                  ),
+                );
+              },
+            ),
         ],
         bottom: PreferredSize(
-          preferredSize: Size.fromHeight(usesMaterialYou ? 124 : 48),
+          preferredSize: Size.fromHeight(usesMaterialYou ? 132 : 48),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -91,17 +163,7 @@ class _IndexPageState extends State<IndexPage>
                     ),
                   ),
                 ),
-              TabBar(
-                controller: _tabController,
-                tabs: [
-                  const Tab(text: '推荐'),
-                  const Tab(text: '分类'),
-                  const Tab(text: '排行'),
-                  Tab(
-                    text: activeSource.value == SourceId.wenku8 ? '完结' : '全部',
-                  ),
-                ],
-              ),
+              _buildDiscoveryTabs(context),
             ],
           ),
         ),

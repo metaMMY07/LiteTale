@@ -1,6 +1,10 @@
-import 'dart:ui' show lerpDouble;
+import 'dart:ui' show ImageFilter, lerpDouble;
 
 import 'package:flutter/material.dart';
+
+const _iconSlotTop = 10.0;
+const _iconSlotHeight = 40.0;
+const _indicatorHeight = 34.0;
 
 class FluidNavigationDestination {
   const FluidNavigationDestination({
@@ -75,118 +79,137 @@ class _FluidNavigationBarState extends State<FluidNavigationBar>
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final isLight = theme.brightness == Brightness.light;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final labelStyle = Theme.of(context).textTheme.labelMedium;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerHigh,
-        border: Border(
-          top: BorderSide(color: colors.outlineVariant.withValues(alpha: 0.8)),
+    final labelStyle = theme.textTheme.labelMedium;
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: (isLight ? colors.surfaceContainerHigh : colors.surface)
+                .withValues(alpha: 0.72),
+            border: Border(
+              top: BorderSide(
+                color: colors.outline.withValues(alpha: isLight ? 0.28 : 0.34),
+              ),
+            ),
+          ),
+          child: _navigationContent(
+            colors: colors,
+            isLight: isLight,
+            reduceMotion: reduceMotion,
+            labelStyle: labelStyle,
+          ),
         ),
       ),
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 78,
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: RepaintBoundary(
-                  child: CustomPaint(
-                    painter: _FluidIndicatorPainter(
-                      animation: _indicator,
-                      fromIndex: _fromIndex,
-                      toIndex: _toIndex,
-                      count: widget.destinations.length,
-                      color: colors.primaryContainer,
-                    ),
+    );
+  }
+
+  Widget _navigationContent({
+    required ColorScheme colors,
+    required bool isLight,
+    required bool reduceMotion,
+    required TextStyle? labelStyle,
+  }) {
+    return SafeArea(
+      top: false,
+      child: SizedBox(
+        height: 78,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  painter: _FluidIndicatorPainter(
+                    animation: _indicator,
+                    fromIndex: _fromIndex,
+                    toIndex: _toIndex,
+                    count: widget.destinations.length,
+                    color: isLight ? colors.primary : colors.primaryContainer,
                   ),
                 ),
               ),
-              Row(
-                children: [
-                  for (
-                    var index = 0;
-                    index < widget.destinations.length;
-                    index++
-                  )
-                    Expanded(
-                      child: Semantics(
-                        button: true,
-                        selected: index == widget.selectedIndex,
-                        label: widget.destinations[index].label,
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            splashFactory: NoSplash.splashFactory,
-                            overlayColor: WidgetStateProperty.all(
-                              Colors.transparent,
-                            ),
-                            onTap: () => widget.onDestinationSelected(index),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                SizedBox(
-                                  height: 40,
-                                  child: Center(
-                                    child: AnimatedScale(
-                                      scale:
-                                          index == widget.selectedIndex
-                                              ? 1.08
-                                              : 1,
-                                      duration:
-                                          reduceMotion
-                                              ? Duration.zero
-                                              : const Duration(
-                                                milliseconds: 190,
-                                              ),
-                                      curve: Curves.easeOutCubic,
-                                      child: Badge(
-                                        isLabelVisible:
-                                            widget
+            ),
+            Row(
+              children: [
+                for (var index = 0; index < widget.destinations.length; index++)
+                  Expanded(
+                    child: Semantics(
+                      button: true,
+                      selected: index == widget.selectedIndex,
+                      label: widget.destinations[index].label,
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          splashFactory: NoSplash.splashFactory,
+                          overlayColor: WidgetStateProperty.all(
+                            Colors.transparent,
+                          ),
+                          onTap: () => widget.onDestinationSelected(index),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: _iconSlotTop),
+                              SizedBox(
+                                height: _iconSlotHeight,
+                                child: Center(
+                                  child: AnimatedScale(
+                                    scale:
+                                        index == widget.selectedIndex
+                                            ? 1.08
+                                            : 1,
+                                    duration:
+                                        reduceMotion
+                                            ? Duration.zero
+                                            : const Duration(milliseconds: 190),
+                                    curve: Curves.easeOutCubic,
+                                    child: Badge(
+                                      isLabelVisible:
+                                          widget.destinations[index].showBadge,
+                                      label: const Text('新'),
+                                      child: Icon(
+                                        index == widget.selectedIndex
+                                            ? widget
                                                 .destinations[index]
-                                                .showBadge,
-                                        label: const Text('新'),
-                                        child: Icon(
-                                          index == widget.selectedIndex
-                                              ? widget
-                                                  .destinations[index]
-                                                  .selectedIcon
-                                              : widget.destinations[index].icon,
-                                          size: 25,
-                                          color:
-                                              index == widget.selectedIndex
-                                                  ? colors.onPrimaryContainer
-                                                  : colors.onSurfaceVariant,
-                                        ),
+                                                .selectedIcon
+                                            : widget.destinations[index].icon,
+                                        size: 25,
+                                        color:
+                                            index == widget.selectedIndex
+                                                ? (isLight
+                                                    ? colors.onPrimary
+                                                    : colors.onPrimaryContainer)
+                                                : colors.onSurfaceVariant,
                                       ),
                                     ),
                                   ),
                                 ),
-                                Text(
-                                  widget.destinations[index].label,
-                                  style: labelStyle?.copyWith(
-                                    color:
-                                        index == widget.selectedIndex
-                                            ? colors.onSurface
-                                            : colors.onSurfaceVariant,
-                                    fontWeight:
-                                        index == widget.selectedIndex
-                                            ? FontWeight.w700
-                                            : FontWeight.w500,
-                                  ),
+                              ),
+                              Text(
+                                widget.destinations[index].label,
+                                style: labelStyle?.copyWith(
+                                  color:
+                                      index == widget.selectedIndex
+                                          ? colors.onSurface
+                                          : colors.onSurfaceVariant,
+                                  fontWeight:
+                                      index == widget.selectedIndex
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
                     ),
-                ],
-              ),
-            ],
-          ),
+                  ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -225,7 +248,14 @@ class _FluidIndicatorPainter extends CustomPainter {
     final movingRight = endCenter >= startCenter;
     final left = lerpDouble(startLeft, endLeft, movingRight ? trail : lead)!;
     final right = lerpDouble(startRight, endRight, movingRight ? lead : trail)!;
-    final rect = Rect.fromLTRB(left, 10, right, 44);
+    final indicatorTop =
+        _iconSlotTop + (_iconSlotHeight - _indicatorHeight) / 2;
+    final rect = Rect.fromLTRB(
+      left,
+      indicatorTop,
+      right,
+      indicatorTop + _indicatorHeight,
+    );
     canvas.drawRRect(
       RRect.fromRectAndRadius(rect, const Radius.circular(24)),
       Paint()..color = color,
