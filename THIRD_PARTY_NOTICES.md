@@ -1,5 +1,11 @@
 # 第三方来源说明
 
+## LightNovelReader 设置界面
+
+设置的分组、主题与纸张预览、数据操作和统计布局参考 [dmzz-yyhyy/LightNovelReader](https://github.com/dmzz-yyhyy/LightNovelReader) 的 `1.1.0`，固定提交为 `a972c991d5b64db95830d8de77986da8cf456044`，与用户提供的截图对应。参考项目按 Apache License 2.0 发布，许可文本见 [LICENSES/LightNovelReader-Apache-2.0.txt](LICENSES/LightNovelReader-Apache-2.0.txt)。原版权归 LightNovelReader 作者及贡献者。
+
+LiteTale 使用 Flutter 与自己的存储、阅读器、书源和更新接口重新适配；没有将上游的 Kotlin/Room 数据库、`.lnr` 格式、账号、AppCenter 或社区端点迁入。可在 [固定版本源码](https://github.com/dmzz-yyhyy/LightNovelReader/tree/a972c991d5b64db95830d8de77986da8cf456044) 查看对应实现。
+
 ## Wild
 
 本项目是 [niuhuan/wild](https://github.com/niuhuan/wild) 的修改版本，保留上游 Git 提交历史。原项目及其贡献者的代码按 GNU General Public License v3.0 发布，完整许可见仓库根目录的 [LICENSE](LICENSE)。

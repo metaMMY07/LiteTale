@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart' as mobile;
 import 'package:webview_windows/webview_windows.dart' as windows;
 
@@ -15,6 +16,7 @@ class WenkuWebView {
   Future<void> initialize({
     required VoidCallback onLoaded,
     required void Function(String) onError,
+    bool Function(String)? allowMainFrameNavigation,
   }) async {
     if (Platform.isWindows) {
       final version = await windows.WebviewController.getWebViewVersion();
@@ -56,6 +58,13 @@ class WenkuWebView {
       await controller.setJavaScriptMode(mobile.JavaScriptMode.unrestricted);
       await controller.setNavigationDelegate(
         mobile.NavigationDelegate(
+          onNavigationRequest:
+              (request) =>
+                  !request.isMainFrame ||
+                          allowMainFrameNavigation == null ||
+                          allowMainFrameNavigation(request.url)
+                      ? mobile.NavigationDecision.navigate
+                      : mobile.NavigationDecision.prevent,
           onPageFinished: (_) => onLoaded(),
           onWebResourceError: (error) {
             if (error.isForMainFrame == true) {
@@ -89,6 +98,20 @@ class WenkuWebView {
       }
     }
     return value;
+  }
+
+  Future<String> currentUrl() async {
+    final value = await executeScript('location.href');
+    return value?.toString() ?? '';
+  }
+
+  /// Keep cookies in the platform store; never export website session values.
+  Future<void> persistSession() async {
+    if (Platform.isAndroid) {
+      await const MethodChannel(
+        'litetale/web_session',
+      ).invokeMethod<void>('flushCookies');
+    }
   }
 
   Widget build() =>

@@ -33,6 +33,7 @@ internal class PTQBookPageBitmapController(@IntRange(from = 0L) var totalPage: I
     // use them directly instead of rendering three Compose pages into another
     // set of full-screen bitmaps before the first gesture is accepted.
     var directBitmapAt: ((Int) -> Bitmap?)? = null
+    var directLeafBitmapAt: ((Int, Boolean) -> Bitmap?)? = null
 
     //当前页面
     var currentPage = 0
@@ -158,6 +159,9 @@ internal class PTQBookPageBitmapController(@IntRange(from = 0L) var totalPage: I
         }
         return bitmapBuffer[which]!!
     }
+
+    fun getLeafBitmapCurrent(which: Int, right: Boolean): Bitmap =
+        directLeafBitmapAt?.invoke(currentPage + which - 1, right) ?: getBitmapCurrent(which)
 
     fun isRenderOk(): Boolean {
         val direct = directBitmapAt ?: return needBitmapPages.isEmpty()

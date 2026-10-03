@@ -1,5 +1,6 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/sources/source_api.dart' as w8;
+import 'package:wild/sources/shelf_session.dart';
 
 import '../../src/rust/wenku8/models.dart';
 import '../../src/rust/api/database.dart';
@@ -24,8 +25,9 @@ class NovelInfoLoaded extends NovelInfoState {
 
 class NovelInfoError extends NovelInfoState {
   final String message;
+  final bool loginRequired;
 
-  NovelInfoError(this.message);
+  NovelInfoError(this.message, {this.loginRequired = false});
 }
 
 class NovelInfoCubit extends Cubit<NovelInfoState> {
@@ -50,7 +52,7 @@ class NovelInfoCubit extends Cubit<NovelInfoState> {
       ));
     } catch (e) {
       if (isClosed) return;
-      emit(NovelInfoError(e.toString()));
+      emit(NovelInfoError(e.toString(), loginRequired: e is ShelfSignInRequired));
     }
   }
 

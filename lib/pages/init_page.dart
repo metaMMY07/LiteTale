@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:wild/cubits/app_accent_cubit.dart';
 import 'package:wild/cubits/reader_curl_cubit.dart';
+import 'package:wild/cubits/font_settings_cubit.dart';
 import 'package:wild/sources/source_api.dart' show loadSourceSelection;
 
 import 'package:flutter/foundation.dart';
@@ -18,8 +19,15 @@ import 'package:wild/pages/novel/top_bar_height_cubit.dart';
 import 'package:wild/pages/novel/bottom_bar_height_cubit.dart';
 import 'package:wild/cubits/reader_background_cubit.dart';
 import 'package:wild/cubits/volume_control_cubit.dart';
+import 'package:wild/cubits/screen_up_on_reading_property.dart';
+import 'package:wild/cubits/screen_up_on_scroll_property.dart';
+import 'package:wild/pages/novel/left_padding_cubit.dart';
+import 'package:wild/pages/novel/right_padding_cubit.dart';
 
 import '../methods.dart';
+import 'package:wild/settings/settings_preferences.dart';
+import 'package:wild/settings/reading_statistics.dart';
+import 'package:wild/settings/app_logs.dart';
 
 class InitPage extends StatefulWidget {
   const InitPage({super.key});
@@ -58,8 +66,12 @@ class _InitPageState extends State<InitPage> {
 
     // 等待所有 Cubit 初始化完成
     await Future.wait([
+      context.read<FontSettingsCubit>().initialize(root),
       context.read<AppAccentCubit>().load(),
       context.read<ReaderCurlCubit>().load(),
+      context.read<SettingsPreferencesCubit>().initialize(),
+      context.read<ReadingStatisticsCubit>().initialize(),
+      AppLogs.instance.initialize(root),
       fontSizeCubit.loadFontSize(),
       paragraphSpacingCubit.loadSpacing(),
       lineHeightCubit.loadLineHeight(),
@@ -67,11 +79,17 @@ class _InitPageState extends State<InitPage> {
       authCubit.init(),
       topBarHeightCubit.loadHeight(),
       bottomBarHeightCubit.loadHeight(),
+      context.read<LeftPaddingCubit>().loadPadding(),
+      context.read<RightPaddingCubit>().loadPadding(),
       readerTypeCubit.loadType(),
       readerBackgroundCubit.init(root),
       volumeControlCubit.init(),
+      initScreenUpOnReading().then<void>((_) {}),
+      initScreenUpOnScroll().then<void>((_) {}),
     ]);
     if (!mounted) return;
+    AppLogs.instance.level =
+        context.read<SettingsPreferencesCubit>().state.logLevel;
 
     Navigator.pushReplacementNamed(context, '/home');
   }
@@ -101,7 +119,10 @@ class _InitPageState extends State<InitPage> {
                 ),
               ),
               const SizedBox(height: 24),
-              Text('LiteTale', style: Theme.of(context).textTheme.headlineLarge),
+              Text(
+                'LiteTale',
+                style: Theme.of(context).textTheme.headlineLarge,
+              ),
               const SizedBox(height: 32),
               const SizedBox(
                 width: 24,

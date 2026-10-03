@@ -1,5 +1,6 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/services/light_novel_shelf_service.dart';
+import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/src/rust/wenku8/models.dart' as w8;
 
@@ -12,8 +13,13 @@ class RecommendLoading extends RecommendState {}
 class RecommendLoaded extends RecommendState {
   final List<w8.HomeBlock> blocks;
   final List<LightNovelShelfBook> lightNovelShelfBooks;
+  final bool isWenku8WebViewFallback;
 
-  RecommendLoaded(this.blocks, {this.lightNovelShelfBooks = const []});
+  RecommendLoaded(
+    this.blocks, {
+    this.lightNovelShelfBooks = const [],
+    this.isWenku8WebViewFallback = false,
+  });
 }
 
 class RecommendError extends RecommendState {
@@ -38,6 +44,23 @@ class RecommendCubit extends Cubit<RecommendState> {
   final Future<List<LightNovelShelfBook>> Function(bool forceRefresh)
   _loadShelf;
   int _loadGeneration = 0;
+
+  /// Applies a validated Wenku8 DOM result and invalidates older API retries.
+  /// Source checking here prevents a late WebView result from entering another
+  /// source's discovery state.
+  bool showWenku8WebViewFallback(List<w8.HomeBlock> blocks) {
+    if (isClosed ||
+        activeSource.value != SourceId.wenku8 ||
+        blocks.isEmpty ||
+        blocks.every((block) => block.list.isEmpty)) {
+      return false;
+    }
+    ++_loadGeneration;
+    emit(
+      RecommendLoaded(List.unmodifiable(blocks), isWenku8WebViewFallback: true),
+    );
+    return true;
+  }
 
   Future<void> load({bool forceRefresh = false}) async {
     final generation = ++_loadGeneration;

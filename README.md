@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/litetale-app-icon.svg" width="144" alt="LiteTale 应用图标">
+  <img src="assets/icon_previews/iris.png" width="144" alt="LiteTale 应用图标">
   <h1>LiteTale</h1>
   <p>基于 Wild 的 Material You Android 轻小说阅读器</p>
 
@@ -8,31 +8,21 @@
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
-## Android 0.1.3
+## Android 正式版 v0.1.15
 
-**发现页标签分隔更清楚，右上角可快速切换深浅色。** 搜索仍从下方的搜索框进入；仿书翻页默认关闭，可在阅读设置中自行开启。
+LiteTale Android 稳定版现已发布。应用以统一的 Material You 界面阅读轻小说，并分别保存各书源的账号与阅读数据。
 
-[下载 ARM64 手机／平板版](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.3/LiteTale-0.1.3-arm64-v8a.apk) · [下载 x86_64 模拟器版](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.3/LiteTale-0.1.3-x86_64.apk) · [更新记录与校验值](docs/releases/0.1.3.md)
+[下载 ARM64 手机／平板版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.15/LiteTale-0.1.15-arm64-v8a.apk) · [下载 x86_64 模拟器版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.15/LiteTale-0.1.15-x86_64.apk) · [查看正式版发布页与校验值](https://github.com/metaMMY07/LiteTale/releases/tag/v0.1.15)
 
-APK 使用当前项目的调试证书签名；重新安装或升级时需要保持签名一致。正式渠道分发前应配置专用发布密钥。
+### 功能
 
-### 界面预览
+- 在文库8、轻书架与轻小说百科之间切换；每个书源的登录状态、书架和阅读记录分别保存。
+- 支持书籍搜索、详情、目录与阅读。文库8会复用同站网页登录会话；站点验证与网络策略可能影响个别请求。
+- 分别导入全局界面字体和阅读字体，支持 TTF／OTF；加密章节继续使用书源所需字体，避免乱码。
+- 提供 Material You 动态配色、深浅色主题和多种应用图标配色。
+- 支持平板横屏双页阅读、阅读进度保存和插图查看；仿真翻页可在阅读设置中开关。
 
-以下图片来自 Android 测试截图，均为竖屏。
-
-<div align="center">
-  <img src="docs/qa/0.1.3/light-portrait.png" width="31%" alt="浅色模式下的发现页和书单">
-  <img src="docs/qa/0.1.3/dark-portrait.png" width="31%" alt="深色模式下的发现页和书单">
-  <img src="docs/qa/0.1.2/dark-my.png" width="31%" alt="深色模式下的 LiteTale 我的页面">
-</div>
-
-## 功能
-
-- 一次使用一个书源；可在设置中切换文库8、轻书架或轻小说百科，各自保存登录状态。
-- 书架、搜索和阅读历史按书源隔离，保持统一的 LiteTale 界面。
-- Material You 动态配色与六种应用图标配色，可切换深浅色主题。
-- 支持小说阅读、目录跳转、进度保存、插图阅读与常规翻页；可选仿书翻页仍属实验功能。
-- 全屏页面使用左右覆盖转场；底部导航带有毛玻璃背景。
+APK 使用与既有版本相同的 Android Debug 签名，适合直接安装和从同签名版本升级；目前不用于 Google Play 等商店分发。
 
 ## 构建
 
@@ -42,14 +32,14 @@ APK 使用当前项目的调试证书签名；重新安装或升级时需要保�
 powershell -ExecutionPolicy Bypass -File tools/build_android.ps1
 ```
 
-Android 构建和测试说明见 [ANDROID.md](ANDROID.md) 与 [更新记录](CHANGELOG.md)。
+Android 构建说明见 [ANDROID.md](ANDROID.md)，版本历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 来源与许可
 
 - 本项目基于 [Wild](https://github.com/niuhuan/wild) 修改，Wild 及其衍生代码按 [GNU GPL v3](LICENSE) 发布。
 - Windows 应用图标来自 [celia-sh/Novella](https://github.com/celia-sh/Novella)，按 [GNU AGPL v3](LICENSES/AGPL-3.0.txt) 许可使用。
 - 内置霞鹜新致宋 Plus 字体按字体文件声明的 [IPA Font License v1.0](LICENSES/IPA.txt) 使用。
-- 详细来源和修改范围见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 [CHANGELOG.md](CHANGELOG.md)。
+- 详细来源和修改范围见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 分发或继续修改本项目时，请保留原作者、上游项目和许可证声明，并按相应许可证提供源代码及字体许可文本。
 

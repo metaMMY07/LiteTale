@@ -70,6 +70,7 @@ fun PTQBookPageView(
     config: PTQBookPageViewConfig = PTQBookPageViewConfig(),
     state: PTQBookPageViewState,
     directBitmapAt: ((Int) -> Bitmap?)? = null,
+    directLeafBitmapAt: ((Int, Boolean) -> Bitmap?)? = null,
     onSynchronizedPage: ((Int) -> Unit)? = null,
     ptqBookPageViewScope: PTQBookPageViewScope.() -> Unit
 ) {
@@ -80,6 +81,7 @@ fun PTQBookPageView(
             mutableStateOf(PTQBookPageBitmapController(state.pageCount))
         }
         controller.directBitmapAt = directBitmapAt
+        controller.directLeafBitmapAt = directLeafBitmapAt
 
         DisposableEffect(Unit) {
             onDispose {

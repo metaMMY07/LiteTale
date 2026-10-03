@@ -7,6 +7,7 @@ import 'package:wild/pages/novel/novel_download_info_page.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/theme/horizontal_page_transitions.dart';
+import 'package:wild/widgets/left_aligned_scrollable.dart';
 
 class NovelDownloadPage extends StatelessWidget {
   const NovelDownloadPage({super.key});
@@ -88,7 +89,9 @@ class _NovelDownloadContent extends StatelessWidget {
             return const Center(child: Text('暂无下载内容'));
           }
 
-          return ListView.builder(
+          return LeftAlignedListView.builder(
+            topInset: 8,
+            bottomInset: 8,
             itemCount: state.downloads.length,
             itemBuilder: (context, index) {
               final download = state.downloads[index];

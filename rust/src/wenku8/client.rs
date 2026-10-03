@@ -42,6 +42,41 @@ struct SearchIndexCache {
 
 static SEARCH_INDEX_CACHE: Lazy<RwLock<Option<SearchIndexCache>>> = Lazy::new(|| RwLock::new(None));
 static SEARCH_INDEX_REFRESH_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+static AUTH_REQUEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+fn validate_captcha_response(status: u16, content_type: &str, body: &[u8]) -> Result<Vec<u8>> {
+    if !(200..300).contains(&status) {
+        return Err(anyhow!("captcha_fetch_failed HTTP {status}"));
+    }
+    if !content_type.to_ascii_lowercase().starts_with("image/") {
+        let category = index_error_response_category(status, content_type, body);
+        return Err(anyhow!("captcha_fetch_failed: {category}"));
+    }
+    if body.is_empty() || body.len() > 512 * 1024 {
+        return Err(anyhow!("captcha_fetch_failed: invalid image size"));
+    }
+    let mut reader = image::io::Reader::new(std::io::Cursor::new(body)).with_guessed_format()?;
+    if !matches!(reader.format(), Some(image::ImageFormat::Png | image::ImageFormat::Jpeg |
+        image::ImageFormat::Gif | image::ImageFormat::WebP)) {
+        return Err(anyhow!("captcha_fetch_failed: unsupported image format"));
+    }
+    let mut limits = image::io::Limits::default();
+    limits.max_image_width = Some(1024);
+    limits.max_image_height = Some(512);
+    limits.max_alloc = Some(4 * 1024 * 1024);
+    reader.limits(limits);
+    reader.decode().context("captcha_fetch_failed: invalid image")?;
+    Ok(body.to_vec())
+}
+
+fn login_error_message(body: &str) -> &'static str {
+    if body.contains("用户不存在") || body.contains("用戶不存在") { "用户不存在" }
+    else if body.contains("密码错误") || body.contains("密碼錯誤") { "密码错误" }
+    else if body.contains("验证码过期") || body.contains("驗證碼過期") { "验证码过期" }
+    else if body.contains("校验码错误") || body.contains("校驗碼錯誤") ||
+        body.contains("验证码错误") || body.contains("驗證碼錯誤") { "验证码错误" }
+    else { "登录结果未能确认，请打开站点查看。" }
+}
 
 fn is_retryable_get_error(error: &reqwest::Error) -> bool {
     let message = error.to_string().to_ascii_lowercase();
@@ -53,6 +88,30 @@ fn is_retryable_get_error(error: &reqwest::Error) -> bool {
         || message.contains("unexpected-eof")
         || message.contains("connection reset")
         || message.contains("connection closed")
+}
+
+fn index_error_response_category(status: u16, content_type: &str, body: &[u8]) -> &'static str {
+    let preview = String::from_utf8_lossy(&body[..body.len().min(32 * 1024)]).to_ascii_lowercase();
+    if status == 403
+        && [
+            "__cf_chl",
+            "cf-chl-",
+            "challenge-form",
+            "just a moment",
+            "attention required",
+            "sorry, you have been blocked",
+        ]
+        .iter()
+        .any(|marker| preview.contains(marker))
+    {
+        "Cloudflare challenge/block HTML"
+    } else if status == 403 {
+        "access-denied response"
+    } else if content_type.to_ascii_lowercase().contains("text/html") {
+        "HTML error response"
+    } else {
+        "non-HTML error response"
+    }
 }
 
 /// Retry idempotent GET requests when Wenku8 closes a TLS connection early.
@@ -110,7 +169,7 @@ impl Wenku8Client {
     }
 
     // 👇 新增：統一產生常用標頭（帶 User-Agent / Referer / Accept 等）
-    fn default_headers_sync(ua: &str) -> HeaderMap {
+    fn default_headers_sync(ua: &str, api_host: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(
             USER_AGENT,
@@ -123,7 +182,7 @@ impl Wenku8Client {
         );
         headers.insert(
             ACCEPT,
-            HeaderValue::from_static("image/avif,image/webp,image/apng,image/*,*/*;q=0.8"),
+            HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
         );
         headers.insert(
             ACCEPT_LANGUAGE,
@@ -131,7 +190,8 @@ impl Wenku8Client {
         );
         headers.insert(
             REFERER,
-            HeaderValue::from_static("https://www.wenku8.net/login.php"),
+            HeaderValue::from_str(&format!("{api_host}/login.php"))
+                .unwrap_or(HeaderValue::from_static("https://www.wenku8.net/login.php")),
         );
         headers.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
         headers
@@ -164,42 +224,60 @@ impl Wenku8Client {
     // 先訪問首頁與 login.php，讓伺服器種初始 Cookie（包含 CF 的 __cflb 等）
     pub async fn init_session(&self) -> Result<()> {
         let api_host = self.load_api_host().await;
-        let ua = self.load_user_agent().await;
+        let home_headers = self.bookcase_headers(&format!("{api_host}/")).await;
+        let mut login_headers = home_headers.clone();
+        login_headers.insert(
+            REFERER,
+            HeaderValue::from_str(&format!("{api_host}/login.php"))
+                .context("Invalid Wenku8 login referer")?,
+        );
         // 1) 訪問首頁，觸發 CF cookie 設置
-        let _ = self
-            .client
-            .get(format!("{}/", api_host))
-            .headers(Self::default_headers_sync(&ua))
-            .send()
-            .await;
+        let _ = send_idempotent_get(
+            self.client
+                .get(format!("{}/", api_host))
+                .headers(home_headers),
+        )
+        .await;
         // 2) 再打 login.php 種 session cookie
-        let _ = self
-            .client
-            .get(format!("{}/login.php", api_host))
-            .headers(Self::default_headers_sync(&ua))
-            .send()
-            .await;
+        let _ = send_idempotent_get(
+            self.client
+                .get(format!("{}/login.php", api_host))
+                .headers(login_headers),
+        )
+        .await;
         Ok(())
     }
 
     // 👇 修改：checkcode 先 init，再抓圖；若回 HTML（CF 挑戰）就回傳 cf_challenge
     pub async fn checkcode(&self) -> Result<Vec<u8>> {
-        // 1) 先建立 Session（拿初始 Cookie）
-        self.init_session().await?;
+        let _guard = AUTH_REQUEST_LOCK.lock().await;
+        let host = self.load_api_host().await;
+        let login_url = format!("{host}/login.php");
+        let login_headers = self.bookcase_headers(&login_url).await;
+        // The CAPTCHA belongs to this login document/session. Stop on a denied
+        // document instead of fetching another challenge as though it were an image.
+        let page = send_idempotent_get(self.client.get(&login_url).headers(login_headers)
+            .timeout(Duration::from_secs(12))).await?;
+        if !page.status().is_success() {
+            return Err(anyhow!("captcha_session_failed HTTP {}", page.status().as_u16()));
+        }
+        let page_type = page.headers().get(CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+        let page_body = decode_home(page.bytes().await?, &page_type)?;
+        if page_body.contains("__cf_chl") || page_body.contains("challenge-form") || page_body.contains("Just a moment") {
+            return Err(anyhow!("cf_challenge"));
+        }
 
         // 2) 準備 URL + 標頭
         let url = format!("{}/checkcode.php", self.load_api_host().await);
         let params = [("random", rand::rng().random::<f64>().to_string())];
         let url = reqwest::Url::parse_with_params(url.as_str(), &params)?;
         let ua = self.load_user_agent().await;
-        let headers = Self::default_headers_sync(&ua);
+        let mut headers = Self::default_headers_sync(&ua, &host);
+        headers.insert(ACCEPT, HeaderValue::from_static("image/png,image/jpeg,image/gif,image/webp,image/*;q=0.8"));
 
         // 3) 取驗證碼
-        let resp = self
-            .client
-            .get(url)
-            .headers(headers)
-            .send()
+        let resp = send_idempotent_get(self.client.get(url).headers(headers)
+            .timeout(Duration::from_secs(12)))
             .await
             .context("checkcode: GET failed")?;
 
@@ -214,30 +292,12 @@ impl Wenku8Client {
         // 現在再讀取 body（會移動 resp）
         let bytes = resp.bytes().await?.to_vec();
 
-        // 4) 判斷是否為圖片
-        if status.is_success() && ct.starts_with("image/") {
-            return Ok(bytes);
-        }
-
-        // 5) 若被 Cloudflare 擋，會回 text/html 的挑戰頁
-        if ct.contains("text/html") {
-            let snippet = String::from_utf8_lossy(&bytes);
-            let looks_cf = snippet.contains("__cf_chl_")
-                || snippet.contains("Just a moment")
-                || snippet.contains("Enable JavaScript and cookies");
-            if looks_cf {
-                return Err(anyhow!("cf_challenge")); // ← 前端可據此觸發 WebView2 fallback
-            }
-        }
-
-        Err(anyhow!(format!(
-            "captcha_fetch_failed status={} content_type={}",
-            status, ct
-        )))
+        validate_captcha_response(status.as_u16(), &ct, &bytes)
     }
 
     // 輕微調整：login 也帶上 Referer/Accept（提高通過率）
     pub async fn login(&self, username: &str, password: &str, checkcode: &str) -> Result<()> {
+        let _guard = AUTH_REQUEST_LOCK.lock().await;
         let url = format!("{}/login.php", self.load_api_host().await);
         let params = [
             ("username", username),
@@ -248,7 +308,7 @@ impl Wenku8Client {
         ];
 
         let ua = self.load_user_agent().await;
-        let mut headers = Self::default_headers_sync(&ua);
+        let mut headers = Self::default_headers_sync(&ua, &self.load_api_host().await);
         // login 是 form，覆蓋 Accept 比較中性
         headers.insert(
             ACCEPT,
@@ -269,11 +329,12 @@ impl Wenku8Client {
             return Err(anyhow!("Login failed: HTTP {}", resp.status()));
         }
 
-        let body = decode_gbk(resp.bytes().await?)?;
-        if body.contains("登录成功") {
+        let content_type = resp.headers().get(CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+        let body = decode_home(resp.bytes().await?, &content_type)?;
+        if body.contains("登录成功") || body.contains("登錄成功") {
             Ok(())
         } else {
-            Err(anyhow!("Login failed: {}", body))
+            Err(anyhow!("{}", login_error_message(&body)))
         }
     }
 
@@ -372,7 +433,7 @@ impl Wenku8Client {
             self.load_api_host().await
         );
         let ua = self.load_user_agent().await;
-        let headers = Self::default_headers_sync(&ua);
+        let headers = Self::default_headers_sync(&ua, &self.load_api_host().await);
         let response = send_idempotent_get(self.client.get(&url).headers(headers)).await?;
         if !response.status().is_success() {
             return Err(anyhow!("Failed to get novel info: {}", response.status()));
@@ -524,178 +585,190 @@ impl Wenku8Client {
     }
 
     pub async fn index(&self) -> Result<Vec<HomeBlock>> {
-        let resp = self
-            .client
-            .get(format!(
-                "{}/index.php?charset=gbk",
-                self.load_api_host().await
-            ))
-            .header("User-Agent", self.load_user_agent().await)
-            .send()
-            .await?;
+        let api_host = self.load_api_host().await;
+        // Request the same canonical home as the site's navigation and WebView.
+        // `charset` is a display preference, not a required home API parameter.
+        let url = format!("{api_host}/");
+        let headers = self.bookcase_headers(&url).await;
 
-        if !resp.status().is_success() {
-            return Err(anyhow!("Failed to get index: HTTP {}", resp.status()));
+        let response = send_idempotent_get(self.client.get(&url).headers(headers.clone()))
+            .await
+            .with_context(|| format!("GET {url} failed"))?;
+        let response = if response.status().as_u16() == 403 {
+            // A fresh visit to the same Wenku8 login domain lets the persistent
+            // CookieStore retain any session/challenge cookies before one retry.
+            let _ = response.bytes().await;
+            self.init_session().await?;
+            send_idempotent_get(self.client.get(&url).headers(headers))
+                .await
+                .with_context(|| format!("GET {url} retry after session refresh failed"))?
+        } else {
+            response
+        };
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let content_type = response
+                .headers()
+                .get(CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let body = response
+                .bytes()
+                .await
+                .context("Failed to read Wenku8 index error response")?;
+            let category = index_error_response_category(status.as_u16(), &content_type, &body);
+            return Err(anyhow!("GET {url} failed: HTTP {status} ({category})"));
         }
 
-        let text = resp.bytes().await?;
-        let text = decode_gbk(text)?;
-        Self::parse_index(text.as_str())
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let text = decode_home(response.bytes().await?, &content_type)?;
+        Self::parse_index_at(&text, &api_host)
     }
 
     pub(crate) fn parse_index(text: &str) -> Result<Vec<HomeBlock>> {
-        let mut home_blocks = Vec::new();
-
-        let centers_selector = Selector::parse("#centers").unwrap();
-        let main_div_selector = Selector::parse("div.main").unwrap();
-
-        let html = Html::parse_document(text);
-        let center = html
-            .select(&centers_selector)
-            .next()
-            .ok_or_else(|| anyhow!("Failed to find center"))?;
-        Self::find_block(&mut home_blocks, center)?;
-
-        let block_selector = Selector::parse(".block").unwrap();
-        let blocktitle_selector = Selector::parse(".blocktitle").unwrap();
-        let img_selector = Selector::parse("div>a>img").unwrap();
-
-        for main_div in html.select(&main_div_selector).skip(5).take(2).into_iter() {
-            for block in main_div.select(&block_selector) {
-                let block_title = block
-                    .select(&blocktitle_selector)
-                    .next()
-                    .ok_or_else(|| anyhow!("Failed to find block title"))?;
-
-                // if exists first child  span class="txt" continue
-                if let Some(span) = block_title.first_child() {
-                    if let Some(span) = ElementRef::wrap(span) {
-                        if span.value().classes().any(|e| e.eq("txt")) {
-                            continue;
-                        }
-                    }
-                }
-
-                println!(
-                    "block_title  classes: {:?}",
-                    block_title.value().classes().collect::<Vec<&str>>()
-                );
-                let block_title = block_title.text().collect::<String>();
-                println!("block_title: {}", block_title);
-                if "文库Telegram群组".eq(&block_title) {
-                    continue;
-                }
-                if block_title.starts_with("轻小说文库公告") {
-                    continue;
-                }
-                let mut novel_covers = Vec::new();
-                for img in block.select(&img_selector) {
-                    let parent = img
-                        .parent()
-                        .ok_or_else(|| anyhow!("Failed to find block title"))?;
-                    if let Element(e) = &parent.value() {
-                        if e.name.local.to_string().eq("a") {
-                            let parent = ElementRef::wrap(parent).unwrap();
-                            println!("parent: {}", parent.html());
-                            let title = parent
-                                .value()
-                                .attr("title")
-                                .ok_or_else(|| anyhow!("Failed to find title"))?
-                                .to_string();
-                            let mut img = img
-                                .value()
-                                .attr("src")
-                                .ok_or_else(|| anyhow!("Failed to find img"))?
-                                .to_string();
-                            let detail_url = parent
-                                .value()
-                                .attr("href")
-                                .ok_or_else(|| anyhow!("Failed to find detail_url"))?
-                                .to_string();
-                            let aid = detail_url
-                                .split('/')
-                                .last()
-                                .ok_or_else(|| anyhow!("Failed to find aid"))?
-                                .replace(".htm", "");
-                            novel_covers.push(NovelCover {
-                                title: title.clone(),
-                                img: img.clone(),
-                                detail_url: detail_url.clone(),
-                                aid: aid.clone(),
-                            });
-                        }
-                    }
-                }
-                home_blocks.push(HomeBlock {
-                    title: block_title,
-                    list: novel_covers,
-                })
-            }
-        }
-
-        Ok(home_blocks)
+        Self::parse_index_at(text, DEFAULT_API_HOST)
     }
 
-    fn find_block(home_blocks: &mut Vec<HomeBlock>, element_ref: ElementRef) -> Result<()> {
-        let block_selector = Selector::parse(".block").unwrap();
-        let blocktitle_selector = Selector::parse(".blocktitle").unwrap();
-        let c_div_selector = Selector::parse(".blockcontent>div>div").unwrap();
-        let a_selector = Selector::parse("a").unwrap();
-        let img_selector = Selector::parse("img").unwrap();
-        for block in element_ref
-            .select(&block_selector)
-            .skip(1)
-            .take(3)
-            .into_iter()
-        {
-            let block_title = block
-                .select(&blocktitle_selector)
-                .next()
-                .ok_or_else(|| anyhow!("Failed to find block title"))?
-                .text()
-                .collect::<String>();
-            let mut novel_covers = Vec::new();
-            for j in block.select(&c_div_selector) {
-                let title = j
-                    .select(&a_selector)
-                    .nth(1)
-                    .ok_or_else(|| anyhow!("Failed to find title"))?
-                    .text()
-                    .collect::<String>();
-                let mut img = j
-                    .select(&img_selector)
+    fn parse_index_at(text: &str, api_host: &str) -> Result<Vec<HomeBlock>> {
+        let base = reqwest::Url::parse(&format!("{}/", api_host.trim_end_matches('/')))?;
+        let html = Html::parse_document(text);
+        let block_selector = Selector::parse("#centers .block, div.main .block").unwrap();
+        let title_selector = Selector::parse(".blocktitle, h1, h2, h3, h4").unwrap();
+        let image_selector = Selector::parse("img").unwrap();
+        let anchor_selector = Selector::parse("a").unwrap();
+        let mut blocks = Vec::new();
+        let mut total_books = 0;
+
+        // Column positions and wrapper depths change when banners are inserted.
+        // Identify actual same-site book cards instead of assuming item ordinals.
+        for block in html.select(&block_selector).take(128) {
+            let Some(title_node) = block.select(&title_selector).next() else {
+                continue;
+            };
+            let Some(title) = clean_home_title(&title_node.text().collect::<String>()) else {
+                continue;
+            };
+            if title.contains("公告")
+                || title == "广告"
+                || title == "广告推广"
+                || title == "文库Telegram群组"
+                || title_node
+                    .select(&Selector::parse("span.txt").unwrap())
                     .next()
-                    .ok_or_else(|| anyhow!("Failed to find img"))?
-                    .value()
-                    .attr("src")
-                    .ok_or_else(|| anyhow!("Failed to find img"))?
-                    .to_string();
-                let url = j
-                    .select(&a_selector)
-                    .next()
-                    .ok_or_else(|| anyhow!("Failed to find url"))?
-                    .value()
-                    .attr("href")
-                    .ok_or_else(|| anyhow!("Failed to find url"))?
-                    .to_string();
-                let aid = url
-                    .split('/')
-                    .last()
-                    .ok_or_else(|| anyhow!("Failed to find aid"))?
-                    .replace(".htm", "");
-                novel_covers.push(NovelCover {
-                    title: title.clone(),
-                    img: img.clone(),
-                    detail_url: url.clone(),
-                    aid: aid.clone(),
+                    .is_some()
+            {
+                continue;
+            }
+            let mut covers = Vec::new();
+            let mut seen = HashSet::new();
+            for image in block.select(&image_selector).take(200) {
+                if covers.len() >= 100 || total_books >= 500 {
+                    break;
+                }
+                let Some(img) = home_image_url(image, &base) else {
+                    continue;
+                };
+                let image_anchor = image
+                    .ancestors()
+                    .filter_map(ElementRef::wrap)
+                    .find(|element| element.value().name() == "a");
+                // An ad's image must not borrow a neighboring novel's identity.
+                if image_anchor.is_some_and(|anchor| {
+                    anchor.value().attr("href").is_some() && home_book_url(anchor, &base).is_none()
+                }) {
+                    continue;
+                }
+                let direct = image_anchor.and_then(|anchor| home_book_url(anchor, &base));
+                let mut matched = None;
+                for card in image.ancestors().filter_map(ElementRef::wrap) {
+                    if card.id() == block.id() {
+                        break;
+                    }
+                    let mut links = Vec::new();
+                    if card.value().name() == "a" {
+                        if let Some(book) = home_book_url(card, &base) {
+                            links.push((card, book));
+                        }
+                    }
+                    links.extend(card.select(&anchor_selector).filter_map(|anchor| {
+                        home_book_url(anchor, &base).map(|book| (anchor, book))
+                    }));
+                    let ids = links
+                        .iter()
+                        .map(|(_, (_, aid))| aid)
+                        .collect::<HashSet<_>>();
+                    if ids.len() != 1 {
+                        continue;
+                    }
+                    let Some((_, (detail_url, aid))) = links.first() else {
+                        continue;
+                    };
+                    if direct.as_ref().is_some_and(|(_, id)| id != aid) {
+                        continue;
+                    }
+                    let name = links
+                        .iter()
+                        .find_map(|(anchor, _)| {
+                            anchor.value().attr("title").and_then(clean_home_title)
+                        })
+                        .or_else(|| {
+                            image
+                                .value()
+                                .attr("alt")
+                                .and_then(clean_home_title)
+                                .filter(|name| name != "封面" && name != "小说封面")
+                        })
+                        .or_else(|| {
+                            links.iter().find_map(|(anchor, _)| {
+                                clean_home_title(&anchor.text().collect::<String>())
+                            })
+                        })
+                        .or_else(|| {
+                            card.select(&anchor_selector)
+                                .filter(|anchor| anchor.value().attr("href").is_none())
+                                .find_map(|anchor| {
+                                    clean_home_title(&anchor.text().collect::<String>())
+                                })
+                        });
+                    if let Some(name) = name {
+                        matched = Some(NovelCover {
+                            title: name,
+                            img: img.clone(),
+                            detail_url: detail_url.clone(),
+                            aid: aid.clone(),
+                        });
+                        break;
+                    }
+                    // A picture link may have a sibling text link for the same
+                    // book; continue outward until that name becomes available.
+                }
+                if let Some(cover) = matched {
+                    if seen.insert(cover.aid.clone()) {
+                        covers.push(cover);
+                        total_books += 1;
+                    }
+                }
+            }
+            if !covers.is_empty() {
+                blocks.push(HomeBlock {
+                    title,
+                    list: covers,
                 });
             }
-            home_blocks.push(HomeBlock {
-                title: block_title,
-                list: novel_covers,
-            })
         }
-        Ok(())
+        if blocks.is_empty() {
+            return Err(anyhow!(
+                "Wenku8 home contains no usable book recommendations"
+            ));
+        }
+        Ok(blocks)
     }
 
     pub async fn tags(&self) -> Result<Vec<TagGroup>> {
@@ -929,9 +1002,14 @@ impl Wenku8Client {
         // keeping the original URL as the disk-cache key for existing users.
         let mut image_url = reqwest::Url::parse(url)?;
         if image_url.scheme() == "http"
-            && matches!(image_url.host_str(), Some("img.wenku8.com" | "img.wenku8.net" | "img.wenku8.cc"))
+            && matches!(
+                image_url.host_str(),
+                Some("img.wenku8.com" | "img.wenku8.net" | "img.wenku8.cc")
+            )
         {
-            image_url.set_scheme("https").map_err(|_| anyhow!("Invalid image scheme"))?;
+            image_url
+                .set_scheme("https")
+                .map_err(|_| anyhow!("Invalid image scheme"))?;
         }
         let request = self.client.get(image_url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
@@ -1018,7 +1096,7 @@ impl Wenku8Client {
             self.load_api_host().await
         );
         let ua = self.load_user_agent().await;
-        let headers = Self::default_headers_sync(&ua);
+        let headers = Self::default_headers_sync(&ua, &self.load_api_host().await);
         let response = send_idempotent_get(self.client.get(url).headers(headers)).await?;
         if !response.status().is_success() {
             return Err(anyhow!("Failed to get novel reader: {}", response.status()));
@@ -1040,7 +1118,7 @@ impl Wenku8Client {
             cid
         );
         let ua = self.load_user_agent().await;
-        let headers = Self::default_headers_sync(&ua);
+        let headers = Self::default_headers_sync(&ua, &self.load_api_host().await);
         let response = send_idempotent_get(self.client.get(&url).headers(headers)).await?;
         if !response.status().is_success() {
             return Err(anyhow!("Failed to get novel reader: {}", response.status()));
@@ -1423,32 +1501,19 @@ impl Wenku8Client {
         let headers = self.bookcase_headers(&referer).await;
         let response = send_idempotent_get(self.client.get(url).headers(headers)).await?;
         let status = response.status();
-        let ua_used = self.load_user_agent().await;
         let body = response
             .bytes()
             .await
             .context("Failed to read bookcase list response")?;
-        let text_preview: String = String::from_utf8_lossy(&body).chars().take(300).collect();
+        let category = index_error_response_category(status.as_u16(), "text/html", &body);
         if !status.is_success() {
-            return Err(anyhow!(
-                "書架請求失敗 [HTTP {}] UA={} body_preview={}",
-                status,
-                ua_used,
-                text_preview
-            ));
+            return Err(anyhow!("書架請求失敗 [HTTP {}] ({})", status, category));
         }
         // 200 但可能是 CF challenge 頁面
-        if text_preview.contains("Just a moment")
-            || text_preview.contains("cf_chl")
-            || text_preview.contains("Attention Required")
-            || text_preview.contains("Enable JavaScript")
+        if index_error_response_category(403, "text/html", &body)
+            == "Cloudflare challenge/block HTML"
         {
-            return Err(anyhow!(
-                "Cloudflare Challenge [HTTP {}] UA={} body_preview={}",
-                status,
-                ua_used,
-                text_preview
-            ));
+            return Err(anyhow!("Cloudflare Challenge [HTTP {}]", status));
         }
 
         let text = decode_gbk(bytes::Bytes::from(body.to_vec()))?;
@@ -1522,7 +1587,6 @@ impl Wenku8Client {
 
                     let parent =
                         ElementRef::wrap(parent).with_context(|| "Failed to wrap parent")?;
-                    println!("parent: {}", parent.html());
 
                     let next = parent
                         .next_sibling()
@@ -1826,6 +1890,365 @@ impl Wenku8Client {
             max_page,
             records: reviews,
         })
+    }
+}
+
+#[cfg(test)]
+mod index_request_tests {
+    use super::*;
+    use reqwest::cookie::CookieStore;
+    use reqwest::header::HeaderValue;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    #[test]
+    fn captcha_rejects_html_empty_truncated_or_denied_responses() {
+        use image::ImageOutputFormat;
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(120, 40).write_to(&mut png, ImageOutputFormat::Png).unwrap();
+        let bytes = png.into_inner();
+        assert!(validate_captcha_response(200, "image/png", &bytes).is_ok());
+        assert!(validate_captcha_response(403, "text/html", b"<html>Just a moment</html>").unwrap_err().to_string().contains("403"));
+        assert!(validate_captcha_response(200, "image/png", b"<html>login form</html>").is_err());
+        assert!(validate_captcha_response(200, "image/png", &bytes[..bytes.len()/2]).is_err());
+        assert!(validate_captcha_response(200, "image/png", &[]).is_err());
+        assert!(validate_captcha_response(200, "text/html", &bytes).is_err());
+    }
+
+    #[test]
+    fn auth_headers_use_configured_origin_and_login_errors_are_bounded() {
+        let headers = Wenku8Client::default_headers_sync("", "https://alt.wenku8.net");
+        assert_eq!(headers[REFERER], "https://alt.wenku8.net/login.php");
+        assert!(headers[ACCEPT].to_str().unwrap().contains("text/html"));
+        assert_eq!(login_error_message("fixture 验证码错误 extra account controls"), "验证码错误");
+        assert_eq!(login_error_message("unrecognized sensitive body fixture"), "登录结果未能确认，请打开站点查看。");
+    }
+
+    #[derive(Default)]
+    struct MemoryCookieStore(Mutex<HashMap<String, String>>);
+
+    impl CookieStore for MemoryCookieStore {
+        fn set_cookies(
+            &self,
+            cookie_headers: &mut dyn Iterator<Item = &HeaderValue>,
+            _url: &reqwest::Url,
+        ) {
+            let mut cookies = self.0.lock().unwrap();
+            for header in cookie_headers {
+                if let Some(pair) = header
+                    .to_str()
+                    .ok()
+                    .and_then(|value| value.split(';').next())
+                    .and_then(|value| value.split_once('='))
+                {
+                    cookies.insert(pair.0.trim().to_string(), pair.1.trim().to_string());
+                }
+            }
+        }
+
+        fn cookies(&self, _url: &reqwest::Url) -> Option<HeaderValue> {
+            let cookies = self.0.lock().unwrap();
+            let value = cookies
+                .iter()
+                .map(|(name, value)| format!("{name}={value}"))
+                .collect::<Vec<_>>()
+                .join("; ");
+            if value.is_empty() {
+                None
+            } else {
+                HeaderValue::from_str(&value).ok()
+            }
+        }
+    }
+
+    async fn read_request(stream: &mut TcpStream) -> String {
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        loop {
+            let read = stream.read(&mut buffer).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        String::from_utf8_lossy(&request).to_string()
+    }
+
+    async fn write_response(stream: &mut TcpStream, status: &str, extra: &str, body: &str) {
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}",
+            body.len()
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn index_refreshes_same_host_session_once_after_a_403_and_preserves_cookies() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let host = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+        let captured = Arc::clone(&requests);
+        let server = tokio::spawn(async move {
+            for number in 0..4 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let request = read_request(&mut stream).await;
+                captured.lock().unwrap().push(request.clone());
+                let path = request.lines().next().unwrap_or_default();
+                if number == 0 {
+                    assert!(path.starts_with("GET / "));
+                    write_response(
+                        &mut stream,
+                        "403 Forbidden",
+                        "Set-Cookie: cf_clearance=verified; Path=/\r\n",
+                        "<html>__cf_chl_tk=challenge</html>",
+                    )
+                    .await;
+                } else if number == 1 {
+                    assert!(path.starts_with("GET / "));
+                    write_response(&mut stream, "200 OK", "", "<html></html>").await;
+                } else if number == 2 {
+                    assert!(path.starts_with("GET /login.php "));
+                    write_response(&mut stream, "200 OK", "", "<html></html>").await;
+                } else {
+                    assert!(path.starts_with("GET / "));
+                    write_response(
+                        &mut stream,
+                        "200 OK",
+                        "",
+                        "<div id=centers><div class=block><div class=blocktitle>推荐</div><div><a href='/book/101.htm'><img src='http://img1.wenku8.com/image/0/101/101s.jpg'></a><a href='/book/101.htm'>正常书目</a></div></div></div>",
+                    )
+                    .await;
+                }
+            }
+        });
+
+        let cookie_store = Arc::new(MemoryCookieStore::default());
+        cookie_store
+            .0
+            .lock()
+            .unwrap()
+            .insert("jieqiUserInfo".into(), "saved-account-session".into());
+        let client = Client::builder()
+            .cookie_provider(cookie_store)
+            .build()
+            .unwrap();
+        let w8 = Wenku8Client {
+            client,
+            user_agent: RwLock::new("Dalvik/2.1.0 (Linux; U; Android 15)".into()),
+            api_host: RwLock::new(host.clone()),
+        };
+
+        let blocks = w8.index().await.unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].list[0].title, "正常书目");
+        server.await.unwrap();
+
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(requests[0].contains(&format!("Referer: {host}/")));
+        assert!(requests[1].contains(&format!("Referer: {host}/")));
+        assert!(requests[2].contains(&format!("Referer: {host}/login.php")));
+        assert!(requests[1].contains("jieqiUserInfo=saved-account-session"));
+        assert!(requests[2].contains("jieqiUserInfo=saved-account-session"));
+        assert!(requests[3].contains("jieqiUserInfo=saved-account-session"));
+        assert!(requests[3].contains("cf_clearance=verified"));
+        for request in requests.iter() {
+            let lower = request.to_ascii_lowercase();
+            assert!(lower.contains("accept: text/html,application/xhtml+xml"));
+            assert!(!request.contains("charset=gbk"));
+        }
+    }
+
+    #[test]
+    fn index_http_403_category_distinguishes_cloudflare_challenge_from_generic_denial() {
+        assert_eq!(
+            index_error_response_category(
+                403,
+                "text/html",
+                b"<html>Attention Required __cf_chl_tk=1</html>"
+            ),
+            "Cloudflare challenge/block HTML"
+        );
+        assert_eq!(
+            index_error_response_category(403, "text/html", b"forbidden"),
+            "access-denied response"
+        );
+    }
+
+    #[test]
+    fn home_parser_reads_nested_cards_and_skips_ads_and_empty_sections() {
+        let html = r#"
+          <div id="centers">
+            <div class="block"><div class="blocktitle">empty banner</div></div>
+            <div class="block"><div class="blocktitle">广告</div>
+              <a title="有效广告书号" href="/book/9.htm"><img src="https://img1.wenku8.com/9.jpg"></a>
+            </div>
+            <div class="block"><div class="blocktitle">文库轻小说推广区</div>
+              <a title="合法推广书目" href="/book/106.htm"><img src="https://img1.wenku8.com/106.jpg"></a>
+            </div>
+            <div class="block"><div class="blocktitle">轻小说文库公告</div>
+              <a title="公告内书目" href="/book/8.htm"><img src="https://img1.wenku8.com/8.jpg"></a>
+            </div>
+            <div class="block"><h3>新书风云榜</h3><table><tr>
+              <td><a href="http://www.wenku8.net/book/101.htm"><span>
+                <img src="/placeholder.jpg" data-src="http://img1.wenku8.com/101.jpg">
+              </span></a><p><a href="/book/101.htm">第一个书名</a></p></td>
+              <td><a href="/book/102.htm"><img alt="第二个书名" src="https://img1.wenku8.com/102.jpg"></a></td>
+              <td><a href="https://ads.example.com/book/103.htm"><img src="https://img1.wenku8.com/ad.jpg"></a>
+                <a href="/book/103.htm">不应借用此书名</a></td>
+              <td><img src="data:image/png;base64,broken"><a href="/book/104.htm">错误图片</a></td>
+            </tr></table></div>
+          </div>
+          <div class="main"><div class="block"><div class="blocktitle">会员推荐</div>
+            <div><a href="/book/105.htm" title="第五个书名"><img src="https://img1.wenku8.com/105.jpg"></a></div>
+          </div></div>"#;
+        let blocks = Wenku8Client::parse_index(html).unwrap();
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0].title, "文库轻小说推广区");
+        assert_eq!(blocks[0].list[0].aid, "106");
+        assert_eq!(blocks[1].title, "新书风云榜");
+        assert_eq!(blocks[1].list.len(), 2);
+        assert_eq!(blocks[1].list[0].title, "第一个书名");
+        assert_eq!(
+            blocks[1].list[0].detail_url,
+            "https://www.wenku8.net/book/101.htm"
+        );
+        assert_eq!(blocks[1].list[0].img, "https://img1.wenku8.com/101.jpg");
+        assert_eq!(blocks[2].list[0].aid, "105");
+    }
+
+    #[test]
+    fn home_parser_does_not_treat_challenge_login_or_empty_home_as_success() {
+        for page in [
+            "<html><title>Just a moment</title></html>",
+            "<form action='/login.php'>用户登录</form>",
+            "<div id=centers></div>",
+            "<div id=centers><div class=block><div class=blocktitle>广告</div><a href='/book/12oops.htm'><img src='https://img1.wenku8.com/ad.jpg'></a></div></div>",
+        ] {
+            assert!(Wenku8Client::parse_index(page).is_err());
+        }
+    }
+
+    #[test]
+    fn home_parser_reads_plain_sibling_names_in_the_legacy_fixture() {
+        let blocks = Wenku8Client::parse_index(include_str!(
+            "../../../test/fixtures/wenku8_home_index.html"
+        ))
+        .unwrap();
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0].list[0].title, "中心小说甲");
+        assert_eq!(blocks[0].list[1].title, "中心小说丁");
+        assert_eq!(blocks[1].list[0].title, "新书小说乙");
+        assert_eq!(blocks[2].list[0].title, "热门书丙");
+    }
+
+    #[test]
+    fn home_decoder_obeys_gbk_and_utf8_declarations() {
+        let html = "<html><div>中文书名</div></html>";
+        let (encoded, _, errors) = GBK.encode(html);
+        assert!(!errors);
+        assert_eq!(
+            decode_home(
+                bytes::Bytes::from(encoded.into_owned()),
+                "text/html; charset=gbk"
+            )
+            .unwrap(),
+            html
+        );
+        assert_eq!(
+            decode_home(
+                bytes::Bytes::from(html.as_bytes().to_vec()),
+                "text/html; charset=UTF-8"
+            )
+            .unwrap(),
+            html
+        );
+    }
+}
+
+fn clean_home_title(value: &str) -> Option<String> {
+    let title = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!title.is_empty() && title.chars().count() <= 240).then_some(title)
+}
+
+fn home_book_url(anchor: ElementRef<'_>, base: &reqwest::Url) -> Option<(String, String)> {
+    let raw = anchor.value().attr("href")?.trim();
+    if raw.len() > 2048 {
+        return None;
+    }
+    let mut url = base.join(raw).ok()?;
+    if !["http", "https"].contains(&url.scheme())
+        || url.host_str() != base.host_str()
+        || url.port() != base.port()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return None;
+    }
+    let aid = url.path().strip_prefix("/book/")?.strip_suffix(".htm")?;
+    if aid.is_empty() || aid.len() > 12 || !aid.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let aid = aid.to_string();
+    url.set_scheme("https").ok()?;
+    Some((url.to_string(), aid))
+}
+
+fn home_image_url(image: ElementRef<'_>, base: &reqwest::Url) -> Option<String> {
+    let raw = [
+        "data-original",
+        "data-original-src",
+        "data-lazy-src",
+        "data-src",
+        "src",
+    ]
+    .into_iter()
+    .filter_map(|name| image.value().attr(name))
+    .map(str::trim)
+    .find(|value| !value.is_empty())?;
+    if raw.len() > 2048 {
+        return None;
+    }
+    let mut url = base.join(raw).ok()?;
+    let host = url.host_str()?;
+    if !["http", "https"].contains(&url.scheme())
+        || !["wenku8.net", "wenku8.com"]
+            .iter()
+            .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return None;
+    }
+    url.set_scheme("https").ok()?;
+    url.set_fragment(None);
+    Some(url.to_string())
+}
+
+fn decode_home(bytes: bytes::Bytes, content_type: &str) -> Result<String> {
+    let declaration = String::from_utf8_lossy(&bytes[..bytes.len().min(2048)])
+        .to_ascii_lowercase()
+        .replace(' ', "");
+    let declared_utf8 = content_type
+        .to_ascii_lowercase()
+        .replace(' ', "")
+        .contains("charset=utf-8")
+        || declaration.contains("charset=utf-8")
+        || declaration.contains("charset=\"utf-8\"")
+        || declaration.contains("charset='utf-8'")
+        || bytes.starts_with(&[0xef, 0xbb, 0xbf]);
+    if declared_utf8 {
+        String::from_utf8(bytes.to_vec()).context("Failed to decode UTF-8 Wenku8 home")
+    } else {
+        decode_gbk(bytes)
     }
 }
 

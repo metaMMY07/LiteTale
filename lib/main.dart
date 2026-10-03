@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:wild/cubits/app_accent_cubit.dart';
 import 'package:wild/cubits/reader_curl_cubit.dart';
@@ -39,6 +40,13 @@ import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/cubits/reader_background_cubit.dart';
 import 'package:wild/cubits/volume_control_cubit.dart';
 import 'package:wild/theme/app_fonts.dart';
+import 'package:wild/widgets/theme_reveal_host.dart';
+import 'package:wild/widgets/wenku8_browser_host.dart';
+import 'package:wild/cubits/font_settings_cubit.dart';
+import 'package:wild/theme/imported_font_theme.dart';
+import 'package:wild/settings/settings_preferences.dart';
+import 'package:wild/settings/reading_statistics.dart';
+import 'package:wild/settings/settings_theme.dart';
 
 final lightTheme = ThemeData(
   colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
@@ -70,6 +78,9 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiBlocProvider(
       providers: [
+        BlocProvider(create: (_) => FontSettingsCubit()),
+        BlocProvider(create: (_) => SettingsPreferencesCubit()),
+        BlocProvider(create: (_) => ReadingStatisticsCubit()),
         BlocProvider(create: (_) => AppAccentCubit()),
         BlocProvider(create: (_) => ReaderCurlCubit()),
         BlocProvider(create: (context) => AuthCubit()),
@@ -124,6 +135,10 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final appFont = context.select(
+      (FontSettingsCubit cubit) => cubit.state.appFamily,
+    );
+    final settings = context.watch<SettingsPreferencesCubit>().state;
     return BlocBuilder<ThemeCubit, ReaderTheme>(
       builder: (context, theme) {
         return BlocBuilder<AppAccentCubit, String>(
@@ -134,12 +149,18 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                     (dynamicLight, dynamicDark) => MaterialApp(
                       title: 'LiteTale',
                       debugShowCheckedModeBanner: false,
+                      themeAnimationDuration: Duration.zero,
+                      builder:
+                          (context, child) => Wenku8BrowserHost(
+                            child: ThemeRevealHost(child: child!),
+                          ),
                       themeMode: switch (theme.themeMode) {
                         ReaderThemeMode.auto => ThemeMode.system,
                         ReaderThemeMode.light => ThemeMode.light,
                         ReaderThemeMode.dark => ThemeMode.dark,
                       },
-                      theme:
+                      theme: applySettingsTheme(
+                        applyImportedAppFont(
                           usesMaterialYou
                               ? materialYouTheme(
                                 Brightness.light,
@@ -147,7 +168,12 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                                 seedColor: appAccentSeed(accent),
                               )
                               : lightTheme,
-                      darkTheme:
+                          appFont,
+                        ),
+                        settings,
+                      ),
+                      darkTheme: applySettingsTheme(
+                        applyImportedAppFont(
                           usesMaterialYou
                               ? materialYouTheme(
                                 Brightness.dark,
@@ -155,7 +181,14 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                                 seedColor: appAccentSeed(accent),
                               )
                               : darkTheme,
+                          appFont,
+                        ),
+                        settings,
+                      ),
                       initialRoute: '/init',
+                      supportedLocales: const [Locale('zh', 'CN')],
+                      localizationsDelegates:
+                          GlobalMaterialLocalizations.delegates,
                       onGenerateRoute: (settings) {
                         final routes = <String, WidgetBuilder>{
                           '/init': (context) => const InitPage(),

@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'dart:typed_data';
+import 'package:wild/services/wenku8_browser.dart';
+import 'package:wild/utils/wenku8_query.dart';
 import 'package:wild/src/rust/api/wenku8.dart' as w8;
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/src/rust/api/database.dart' as db;
@@ -22,27 +25,175 @@ export 'package:wild/src/rust/api/wenku8.dart'
         moveBookcase,
         listReadingHistory,
         deleteAllHistory,
-        allDownloads;
+        allDownloads,
+        tags,
+        tagPage,
+        toplist,
+        articlelist,
+        downloadCheckcode,
+        wenku8Login,
+        preLoginState,
+        logout;
+
+final _wenkuBrowser = Wenku8BrowserSession.instance;
+
+Future<Uint8List> downloadCheckcode() =>
+    _wenkuBrowser.downloadCheckcode(w8.downloadCheckcode);
+
+Future<void> wenku8Login({
+  required String username,
+  required String password,
+  required String checkcode,
+}) async {
+  await _wenkuBrowser.submitLogin(
+    username: username,
+    password: password,
+    checkcode: checkcode,
+    nativeRequest:
+        () => w8.wenku8Login(
+          username: username,
+          password: password,
+          checkcode: checkcode,
+        ),
+  );
+}
+
+Future<bool> preLoginState() async =>
+    await _wenkuBrowser.enabled()
+        ? _wenkuBrowser.hasSavedLogin()
+        : w8.preLoginState();
+
+Future<void> logout() async {
+  await _wenkuBrowser.signOut();
+  await w8.logout();
+}
+
+Future<T> _wenkuRead<T>(
+  String kind,
+  String path, {
+  Map<String, String> query = const {},
+  String? aid,
+}) async {
+  final host = await _wenkuBrowser.apiHost();
+  return _wenkuBrowser.read<T>(
+    kind,
+    Uri.parse(
+      '$host$path',
+    ).replace(queryParameters: query.isEmpty ? null : query),
+    aid: aid,
+  );
+}
+
+void _wenkuId(String id) {
+  if (!RegExp(r'^[1-9][0-9]{0,11}$').hasMatch(id)) {
+    throw const FormatException('文库8书籍或章节编号无效。');
+  }
+}
+
+Future<List<TagGroup>> tags() => _wenkuBrowser.nativeOrBrowser(
+  w8.tags,
+  () => _wenkuRead(
+    'tags',
+    '/modules/article/tags.php',
+    query: {'charset': 'gbk'},
+  ),
+);
+
+Future<w8.PageStatsNovelCover> _wenkuEncodedList(
+  String path,
+  String encodedQuery,
+) async {
+  final host = await _wenkuBrowser.apiHost();
+  return _wenkuBrowser.read('list', Uri.parse('$host$path?$encodedQuery'));
+}
+
+Future<w8.PageStatsNovelCover> tagPage({
+  required String tag,
+  required String v,
+  required int pageNumber,
+}) => _wenkuBrowser.nativeOrBrowser(
+  () => w8.tagPage(tag: tag, v: v, pageNumber: pageNumber),
+  () async => _wenkuEncodedList(
+    '/modules/article/tags.php',
+    't=${await wenku8EncodeQuery(tag)}&v=${Uri.encodeComponent(v)}&page=$pageNumber&charset=gbk',
+  ),
+);
+
+Future<w8.PageStatsNovelCover> toplist({
+  required String sort,
+  required int page,
+}) => _wenkuBrowser.nativeOrBrowser(
+  () => w8.toplist(sort: sort, page: page),
+  () => _wenkuRead(
+    'list',
+    '/modules/article/toplist.php',
+    query: {'sort': sort, 'page': '$page', 'charset': 'gbk'},
+  ),
+);
+
+Future<w8.PageStatsNovelCover> articlelist({
+  required int fullflag,
+  required int page,
+}) => _wenkuBrowser.nativeOrBrowser(
+  () => w8.articlelist(fullflag: fullflag, page: page),
+  () => _wenkuRead(
+    'list',
+    '/modules/article/articlelist.php',
+    query: {'fullflag': '$fullflag', 'page': '$page', 'charset': 'gbk'},
+  ),
+);
 
 class Wenku8Source implements BookSource {
   @override
   SourceId get id => SourceId.wenku8;
   @override
-  Future<List<HomeBlock>> discover() => w8.index();
+  Future<List<HomeBlock>> discover() =>
+      _wenkuBrowser.nativeOrBrowser(w8.index, _wenkuBrowser.home);
   @override
   Future<w8.PageStatsNovelCover> search(
     String keyword,
     String type,
     int page,
-  ) => w8.search(searchType: type, searchKey: keyword, page: page);
-  @override
-  Future<SourceBookDetail> detail(String bookId) async => SourceBookDetail(
-    await w8.novelInfo(aid: bookId),
-    await w8.novelReader(aid: bookId),
+  ) => _wenkuBrowser.nativeOrBrowser(
+    () => w8.search(searchType: type, searchKey: keyword, page: page),
+    () async => _wenkuEncodedList(
+      '/modules/article/search.php',
+      'searchtype=${Uri.encodeComponent(type)}&searchkey=${await wenku8EncodeQuery(keyword)}&page=$page&charset=gbk',
+    ),
   );
   @override
-  Future<SourceChapter> chapter(String bookId, String chapterId) async =>
-      SourceChapter(await w8.chapterContent(aid: bookId, cid: chapterId));
+  Future<SourceBookDetail> detail(String bookId) async {
+    _wenkuId(bookId);
+    final info = await _wenkuBrowser.nativeOrBrowser(
+      () => w8.novelInfo(aid: bookId),
+      () => _wenkuRead<NovelInfo>('detail', '/book/$bookId.htm', aid: bookId),
+    );
+    final volumes = await _wenkuBrowser.nativeOrBrowser(
+      () => w8.novelReader(aid: bookId),
+      () => _wenkuRead<List<Volume>>(
+        'reader',
+        '/novel/${int.parse(bookId) ~/ 1000}/$bookId/index.htm',
+        aid: bookId,
+      ),
+    );
+    return SourceBookDetail(info, volumes);
+  }
+
+  @override
+  Future<SourceChapter> chapter(String bookId, String chapterId) async {
+    _wenkuId(bookId);
+    _wenkuId(chapterId);
+    return SourceChapter(
+      await _wenkuBrowser.nativeOrBrowser(
+        () => w8.chapterContent(aid: bookId, cid: chapterId),
+        () => _wenkuRead<String>(
+          'chapter',
+          '/novel/${int.parse(bookId) ~/ 1000}/$bookId/$chapterId.htm',
+          aid: bookId,
+        ),
+      ),
+    );
+  }
 }
 
 final shelfSource = LightNovelShelfSource();
@@ -110,7 +261,7 @@ Future<w8.PageStatsNovelCover> search({
   required int page,
 }) async {
   final source = activeSource.value;
-  if (source != SourceId.wenku8 && page == 1) {
+  if (page == 1) {
     await _serial(() async {
       final history = await _jsonList(_searchKey(source));
       history.removeWhere(
@@ -139,16 +290,26 @@ String _caseId(SourceId source) =>
 
 Future<List<w8.SearchHistory>> searchHistories() async {
   final source = activeSource.value;
-  if (activeSource.value == SourceId.wenku8) return w8.searchHistories();
-  return (await _jsonList(_searchKey(source)))
-      .map(
-        (h) => w8.SearchHistory(
-          searchType: h['type'] as String,
-          searchKey: h['key'] as String,
-          searchTime: h['time'] as int,
-        ),
-      )
-      .toList();
+  final history =
+      (await _jsonList(_searchKey(source)))
+          .map(
+            (h) => w8.SearchHistory(
+              searchType: h['type'] as String,
+              searchKey: h['key'] as String,
+              searchTime: h['time'] as int,
+            ),
+          )
+          .toList();
+  if (source == SourceId.wenku8) {
+    history.addAll(await w8.searchHistories());
+    history.sort((a, b) => b.searchTime.compareTo(a.searchTime));
+    final seen = <(String, String)>{};
+    return history
+        .where((h) => seen.add((h.searchType, h.searchKey)))
+        .take(100)
+        .toList();
+  }
+  return history;
 }
 
 Future<List<w8.ReadingHistory>> listReadingHistory({

@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod database;
 pub mod font;
 pub mod simple;

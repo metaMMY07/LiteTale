@@ -13,6 +13,7 @@ import android.widget.FrameLayout
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -40,6 +41,9 @@ class PTQBookPageCurlNativeView(
         Thread(task, "ptq-page-image-decoder").apply { isDaemon = true }
     }
     private val pageBitmaps = mutableStateMapOf<Int, Bitmap>()
+    private val rightLeafBitmaps = mutableStateMapOf<Int, Bitmap>()
+    private val spreadState = mutableStateOf(false)
+    private val tapToTurnState = mutableStateOf(true)
     private val pageCountState = mutableIntStateOf(1)
     private val pageIndexState = mutableIntStateOf(0)
     private val renderedPageIndexState = mutableIntStateOf(-1)
@@ -61,6 +65,7 @@ class PTQBookPageCurlNativeView(
             val pageIndex = pageIndexState.intValue.coerceIn(0, pageCount - 1)
             val opaqueColor = opaqueArgb(paperColorState.intValue)
             val paper = Color(opaqueColor)
+            val isSpread = spreadState.value
             // The Flutter index can change while this Compose tree is still
             // rendering its previous page. Do not accept a tap until the PTQ
             // bitmap controller has caught up with the visible index.
@@ -73,17 +78,22 @@ class PTQBookPageCurlNativeView(
             PTQBookPageView(
                 state = state,
                 directBitmapAt = { pageBitmaps[it] },
+                directLeafBitmapAt = { index, right ->
+                    if (right) rightLeafBitmaps[index] else pageBitmaps[index]
+                },
                 onSynchronizedPage = {
                     renderedPageIndexState.intValue = it
                 },
                 config = PTQBookPageViewConfig(
                     pageColor = paper,
                     disabled = !readyForTurn,
+                    isSpread = isSpread,
                 ),
             ) {
                 onTurnStarted {
                     if (!turnInProgress) {
                         turnInProgress = true
+                        announcedReadyIndex = null
                         sendEvent("turnStarted", null)
                     }
                 }
@@ -92,6 +102,11 @@ class PTQBookPageCurlNativeView(
                     if (turnInProgress) {
                         turnInProgress = false
                         sendEvent("turnFinished", null)
+                        val current = pageIndexState.intValue
+                        if (renderedPageIndexState.intValue == current && hasTurnBitmaps(current, pageCount)) {
+                            announcedReadyIndex = current
+                            sendEvent("ready", mapOf("index" to current))
+                        }
                     }
                 }
 
@@ -116,8 +131,9 @@ class PTQBookPageCurlNativeView(
                         val width = rightDown.x.coerceAtLeast(1f)
                         val height = rightDown.y.coerceAtLeast(1f)
                         when {
-                            touchPoint.x < width * 0.30f || touchPoint.y < height * 0.30f -> false
-                            touchPoint.x > width * 0.70f || touchPoint.y > height * 0.70f -> true
+                            !tapToTurnState.value -> { sendEvent("centerTap", null); null }
+                            touchPoint.x < width * 0.30f || (!isSpread && touchPoint.y < height * 0.30f) -> false
+                            touchPoint.x > width * 0.70f || (!isSpread && touchPoint.y > height * 0.70f) -> true
                             else -> {
                                 sendEvent("centerTap", null)
                                 null
@@ -129,12 +145,19 @@ class PTQBookPageCurlNativeView(
                 contents { requestedPage, refresh ->
                     val image = pageBitmaps[requestedPage]
                     val displayImage = remember(image) { image?.asImageBitmap() }
+                    val rightImage = rightLeafBitmaps[requestedPage]
+                    val displayRight = remember(rightImage) { rightImage?.asImageBitmap() }
                     Box(
                         Modifier
                             .fillMaxSize()
                             .background(paper),
                     ) {
-                        if (displayImage != null) {
+                        if (isSpread && displayImage != null && displayRight != null) {
+                            Row(Modifier.fillMaxSize()) {
+                                Image(displayImage, null, Modifier.weight(1f).fillMaxSize(), contentScale = ContentScale.FillBounds)
+                                Image(displayRight, null, Modifier.weight(1f).fillMaxSize(), contentScale = ContentScale.FillBounds)
+                            }
+                        } else if (displayImage != null) {
                             Image(
                                 bitmap = displayImage,
                                 contentDescription = null,
@@ -150,7 +173,7 @@ class PTQBookPageCurlNativeView(
                 }
             }
             SideEffect {
-                if (!readyForTurn) {
+                if (!readyForTurn || turnInProgress) {
                     announcedReadyIndex = null
                 } else if (announcedReadyIndex != pageIndex) {
                     announcedReadyIndex = pageIndex
@@ -170,10 +193,18 @@ class PTQBookPageCurlNativeView(
         setBackgroundColor(AndroidColor.WHITE)
     }
 
-    fun updateState(pageCount: Int, index: Int, paperColor: Int) {
+    fun updateState(pageCount: Int, index: Int, paperColor: Int, isSpread: Boolean = false, tapToTurn: Boolean = true) {
         if (disposed) return
+        tapToTurnState.value = tapToTurn
         val safeCount = pageCount.coerceAtLeast(1)
         val safeIndex = index.coerceIn(0, safeCount - 1)
+        if (spreadState.value != isSpread) {
+            pageBitmaps.clear()
+            rightLeafBitmaps.clear()
+            renderedPageIndexState.intValue = -1
+            announcedReadyIndex = null
+        }
+        spreadState.value = isSpread
         if (safeIndex != pageIndexState.intValue) {
             renderedPageIndexState.intValue = -1
             announcedReadyIndex = null
@@ -199,21 +230,34 @@ class PTQBookPageCurlNativeView(
         val generation = ++nextPageGeneration
         pageGenerationIds[index] = generation
         loadingPages.add(index)
+        val splitLeaves = spreadState.value
 
         decoder.execute {
+            // Split once off the UI thread. Keep only the two half-size
+            // textures, rather than a full spread plus redundant leaf copies.
             val decoded = try {
-                BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size)
+                BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size)?.let { bitmap ->
+                    if (splitLeaves && bitmap.width >= 2) {
+                        val half = bitmap.width / 2
+                        val left = Bitmap.createBitmap(bitmap, 0, 0, half, bitmap.height)
+                        val right = Bitmap.createBitmap(bitmap, half, 0, bitmap.width - half, bitmap.height)
+                        bitmap.recycle()
+                        left to right
+                    } else bitmap to null
+                }
             } catch (error: Exception) {
                 null
             }
             mainHandler.post {
                 if (disposed) {
-                    decoded?.recycle()
+                    decoded?.first?.recycle()
+                    decoded?.second?.recycle()
                     onComplete(false, "view_disposed")
                     return@post
                 }
-                if (pageGenerationIds[index] != generation) {
-                    decoded?.recycle()
+                if (pageGenerationIds[index] != generation || splitLeaves != spreadState.value) {
+                    decoded?.first?.recycle()
+                    decoded?.second?.recycle()
                     onComplete(true, null)
                     return@post
                 }
@@ -224,11 +268,13 @@ class PTQBookPageCurlNativeView(
                     return@post
                 }
                 if (index in (pageIndexState.intValue - 2)..(pageIndexState.intValue + 2)) {
-                    pageBitmaps[index] = decoded
+                    decoded.second?.let { rightLeafBitmaps[index] = it }
+                    pageBitmaps[index] = decoded.first
                     trimPageCache(pageIndexState.intValue, pageCountState.intValue)
                     refreshPTQPages?.invoke()
                 } else {
-                    decoded.recycle()
+                    decoded.first.recycle()
+                    decoded.second?.recycle()
                 }
                 requestedPages.remove(index)
                 onComplete(true, null)
@@ -288,7 +334,7 @@ class PTQBookPageCurlNativeView(
     fun readyIndex(): Int? {
         val index = pageIndexState.intValue
         return index.takeIf {
-            announcedReadyIndex == it && renderedPageIndexState.intValue == it &&
+            !turnInProgress && announcedReadyIndex == it && renderedPageIndexState.intValue == it &&
                 hasTurnBitmaps(it, pageCountState.intValue)
         }
     }
@@ -307,7 +353,9 @@ class PTQBookPageCurlNativeView(
     private fun hasTurnBitmaps(current: Int, count: Int): Boolean {
         val first = maxOf(0, current - 1)
         val last = minOf(count - 1, current + 1)
-        return (first..last).all { pageBitmaps.containsKey(it) }
+        return (first..last).all {
+            pageBitmaps.containsKey(it) && (!spreadState.value || rightLeafBitmaps.containsKey(it))
+        }
     }
 
     private fun requestMissingTurnBitmaps(current: Int, count: Int) {
@@ -326,6 +374,7 @@ class PTQBookPageCurlNativeView(
         val last = minOf(count - 1, current + 2)
         pageBitmaps.keys.toList().filter { it !in first..last }.forEach { index ->
             pageBitmaps.remove(index)
+            rightLeafBitmaps.remove(index)
         }
         pageGenerationIds.keys.toList().filter { it !in first..last && it !in loadingPages }.forEach { index ->
             pageGenerationIds.remove(index)

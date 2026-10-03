@@ -7,6 +7,7 @@ import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import dev.flutter.packages.file_selector_android.FileSelectorAndroidPlugin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.newSingleThreadContext
@@ -29,11 +30,38 @@ class MainActivity : FlutterFragmentActivity() {
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // Android-only --no-pub builds can retain an older generated registrant
+        // when desktop symlinks are unavailable. Never register the picker twice.
+        if (!flutterEngine.plugins.has(FileSelectorAndroidPlugin::class.java)) {
+            flutterEngine.plugins.add(FileSelectorAndroidPlugin())
+        }
+
         flutterEngine.platformViewsController.registry.registerViewFactory(
             "litetale/ptq_curl",
             PTQPageCurlPlatformViewFactory(flutterEngine.dartExecutor.binaryMessenger),
         )
         LauncherIconChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        SettingsDocumentChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "litetale/web_session")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "flushCookies") {
+                    result.notImplemented()
+                } else {
+                    // flush() performs disk I/O. Keep it off the UI thread and
+                    // acknowledge persistence before Flutter saves login state.
+                    scope.launch {
+                        try {
+                            android.webkit.CookieManager.getInstance().flush()
+                            uiThreadHandler.post { result.success(null) }
+                        } catch (_: Exception) {
+                            uiThreadHandler.post {
+                                result.error("web_session_save_failed", "无法保存文库8网页会话，请重试。", null)
+                            }
+                        }
+                    }
+                }
+            }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "methods").setMethodCallHandler { call, result ->
             result.withCoroutine {

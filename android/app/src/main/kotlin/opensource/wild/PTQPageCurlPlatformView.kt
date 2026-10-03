@@ -24,6 +24,8 @@ internal class PTQPageCurlPlatformViewFactory(
             pageCount = creationParams.intValue("pageCount", 1),
             index = creationParams.intValue("index", 0),
             paperColor = creationParams.intValue("paperColor", -1),
+            isSpread = creationParams["isSpread"] == true,
+            tapToTurn = creationParams["tapToTurn"] != false,
         )
         creationParams.pageImages().forEach { (index, bytes) ->
             nativeView.setPageImage(index, bytes) { _, _ -> }
@@ -37,6 +39,8 @@ internal class PTQPageCurlPlatformViewFactory(
                         pageCount = values.intValue("pageCount", 1),
                         index = values.intValue("index", 0),
                         paperColor = values.intValue("paperColor", -1),
+                        isSpread = values["isSpread"] == true,
+                        tapToTurn = values["tapToTurn"] != false,
                     )
                     result.success(null)
                 }

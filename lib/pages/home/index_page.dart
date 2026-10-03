@@ -1,20 +1,21 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/auth_cubit.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/pages/shelf_catalog_page.dart';
-import 'package:wild/pages/home/settings_page.dart';
+import 'package:wild/settings/source_settings_page.dart';
 import 'package:wild/pages/novel/theme_cubit.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
 import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/theme_reveal_host.dart';
 
 import '../../src/rust/api/database.dart';
 import 'package:wild/sources/source_api.dart';
-import '../../src/rust/wenku8/models.dart';
-import '../../widgets/cached_image.dart';
 import 'category_page.dart';
 import 'recommend_page.dart';
 import '../search_page.dart';
@@ -29,6 +30,7 @@ class IndexPage extends StatefulWidget {
 class _IndexPageState extends State<IndexPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
+  final _themeButtonKey = GlobalKey();
 
   @override
   void initState() {
@@ -40,6 +42,25 @@ class _IndexPageState extends State<IndexPage>
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  Future<void> _switchTheme() async {
+    final target =
+        Theme.of(context).brightness == Brightness.dark
+            ? ReaderThemeMode.light
+            : ReaderThemeMode.dark;
+    final theme = context.read<ThemeCubit>();
+    final reveal = ThemeRevealHost.maybeOf(context);
+    if (reveal == null) {
+      await theme.setThemeMode(target);
+      return;
+    }
+    await reveal.revealFrom(
+      triggerContext: _themeButtonKey.currentContext ?? context,
+      changeTheme: () {
+        unawaited(theme.setThemeMode(target));
+      },
+    );
   }
 
   Widget _buildDiscoveryTabs(BuildContext context) {
@@ -96,12 +117,16 @@ class _IndexPageState extends State<IndexPage>
 
   @override
   Widget build(BuildContext context) {
+    final signedIn = context.select<AuthCubit, bool>(
+      (auth) => auth.state.status == AuthStatus.authenticated,
+    );
     return Scaffold(
       appBar: AppBar(
         title: Text(usesMaterialYou ? '发现' : '轻小说文库'),
         actions: [
           if (usesMaterialYou)
             IconButton(
+              key: _themeButtonKey,
               icon: Icon(
                 Theme.of(context).brightness == Brightness.dark
                     ? Icons.light_mode_rounded
@@ -111,12 +136,7 @@ class _IndexPageState extends State<IndexPage>
                   Theme.of(context).brightness == Brightness.dark
                       ? '切换浅色模式'
                       : '切换深色模式',
-              onPressed:
-                  () => context.read<ThemeCubit>().setThemeMode(
-                    Theme.of(context).brightness == Brightness.dark
-                        ? ReaderThemeMode.light
-                        : ReaderThemeMode.dark,
-                  ),
+              onPressed: _switchTheme,
             )
           else
             IconButton(
@@ -169,9 +189,7 @@ class _IndexPageState extends State<IndexPage>
         ),
       ),
       body:
-          activeSource.value == SourceId.wenku8 &&
-                  context.read<AuthCubit>().state.status !=
-                      AuthStatus.authenticated
+          activeSource.value == SourceId.wenku8 && !signedIn
               ? Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
@@ -183,7 +201,7 @@ class _IndexPageState extends State<IndexPage>
                       const Text('欢迎使用 LiteTale'),
                       const SizedBox(height: 8),
                       const Text(
-                        '在设置中选择书源并登录，即可浏览和阅读。',
+                        '选择书源后即可开始；需要账号的书源可在同一页面登录。',
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 16),
@@ -192,7 +210,7 @@ class _IndexPageState extends State<IndexPage>
                             () => Navigator.push(
                               context,
                               HorizontalCoverPageRoute(
-                                builder: (_) => const SettingsPage(),
+                                builder: (_) => const SourceSettingsPage(),
                               ),
                             ),
                         child: const Text('选择书源'),
@@ -218,48 +236,6 @@ class _IndexPageState extends State<IndexPage>
                           ShelfCatalogPage(mode: 'all'),
                         ],
               ),
-    );
-  }
-}
-
-class _HomeBlockWidget extends StatelessWidget {
-  final HomeBlock block;
-
-  const _HomeBlockWidget({required this.block});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Text(
-            block.title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: BookGridDelegate(
-              sectionItemCount: block.list.length,
-              childAspectRatio: 207 / 307,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-            ),
-            itemCount: block.list.length,
-            itemBuilder: (context, index) {
-              final novel = block.list[index];
-              return NovelCoverCard(novel: novel);
-            },
-          ),
-        ),
-      ],
     );
   }
 }
@@ -465,8 +441,7 @@ class _ToplistPageState extends State<ToplistPage> {
                             ),
                           );
                         }
-                        final novel =
-                            _currentPage!.records[index] as NovelCover;
+                        final novel = _currentPage!.records[index];
                         return NovelCoverCard(novel: novel);
                       },
                     ),
@@ -598,7 +573,7 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
                   ),
                 );
               }
-              final novel = _currentPage!.records[index] as NovelCover;
+              final novel = _currentPage!.records[index];
               return NovelCoverCard(novel: novel);
             },
           ),

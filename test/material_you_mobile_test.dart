@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,7 +15,17 @@ class PreviewAuthCubit extends AuthCubit {
     emit(const AuthState(status: AuthStatus.unauthenticated));
   }
   @override
-  Future<void> loadCheckcode() async {}
+  Future<void> loadCheckcode() async {
+    emit(
+      state.copyWith(
+        checkcodeStatus: CheckcodeStatus.success,
+        checkcode: base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=',
+        ),
+      ),
+    );
+  }
+
   @override
   Future<void> login(String username, String password, String checkcode) async {
     submitted = [username, password, checkcode];

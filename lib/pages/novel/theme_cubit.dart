@@ -155,24 +155,18 @@ class ThemeCubit extends Cubit<ReaderTheme> {
   }
 
   Future<void> setThemeMode(ReaderThemeMode mode) async {
+    // Update the visible theme before waiting for storage I/O.
+    emit(ReaderTheme(
+      themeMode: mode,
+      lightBackgroundColor: state.lightBackgroundColor,
+      lightTextColor: state.lightTextColor,
+      darkBackgroundColor: state.darkBackgroundColor,
+      darkTextColor: state.darkTextColor,
+    ));
     try {
       await saveProperty(key: _keyThemeMode, value: mode.toString());
-      emit(ReaderTheme(
-        themeMode: mode,
-        lightBackgroundColor: state.lightBackgroundColor,
-        lightTextColor: state.lightTextColor,
-        darkBackgroundColor: state.darkBackgroundColor,
-        darkTextColor: state.darkTextColor,
-      ));
-    } catch (e) {
-      // 如果保存失败，仍然更新状态
-      emit(ReaderTheme(
-        themeMode: mode,
-        lightBackgroundColor: state.lightBackgroundColor,
-        lightTextColor: state.lightTextColor,
-        darkBackgroundColor: state.darkBackgroundColor,
-        darkTextColor: state.darkTextColor,
-      ));
+    } catch (_) {
+      // Keep the visible choice if persistence is temporarily unavailable.
     }
   }
 

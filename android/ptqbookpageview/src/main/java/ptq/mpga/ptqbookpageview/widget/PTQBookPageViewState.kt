@@ -48,6 +48,7 @@ data class PTQBookPageViewConfig(
     val disabled: Boolean = false,
     val distortionInterval: Int = 25,
     val bezierEdgeDownSampling: Int = 50,
+    val isSpread: Boolean = false,
 )
 
 internal val LocalPTQBookPageViewConfig = compositionLocalOf<PTQBookPageViewConfig> { error("Local flipper config error") }

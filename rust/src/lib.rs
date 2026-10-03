@@ -127,17 +127,83 @@ pub async fn init(root: String) -> Result<()> {
 }
 
 async fn init_api_host() -> Result<()> {
-    let mut property_api_host = load_property("api_host".to_string()).await?;
-    if !property_api_host.is_empty() {
-        CLIENT.set_api_host(property_api_host).await;
-    }
+    let saved = load_property("api_host".to_string()).await?;
+    // Earlier versions accepted arbitrary domains. Preserve the stored value,
+    // but use the default endpoint until the user saves a supported address.
+    let supported = normalize_api_host(&saved).unwrap_or_default();
+    CLIENT.set_api_host(supported).await;
     Ok(())
 }
 
 pub async fn set_api_host(api_host: String) -> Result<()> {
+    let api_host = normalize_api_host(&api_host)?;
     save_property("api_host".to_string(), api_host.clone()).await?;
     CLIENT.set_api_host(api_host).await;
     Ok(())
+}
+
+fn normalize_api_host(value: &str) -> Result<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(String::new());
+    }
+    let url = reqwest::Url::parse(value)?;
+    let host = url.host_str().unwrap_or_default();
+    let valid_labels = host.split('.').all(|part| {
+        !part.is_empty()
+            && !part.starts_with('-')
+            && !part.ends_with('-')
+            && part.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+    });
+    anyhow::ensure!(
+        url.scheme() == "https"
+            && (host == "wenku8.net" || host.ends_with(".wenku8.net"))
+            && valid_labels
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.port_or_known_default() == Some(443)
+            && (url.path().is_empty() || url.path() == "/")
+            && url.query().is_none()
+            && url.fragment().is_none(),
+        "仅支持 HTTPS 的 wenku8.net 或其子域名根地址"
+    );
+    Ok(format!("https://{host}"))
+}
+
+#[cfg(test)]
+mod api_host_tests {
+    #[test]
+    fn mirror_hosts_stay_in_the_shared_login_domain() {
+        for input in ["", "  "] {
+            assert_eq!(super::normalize_api_host(input).unwrap(), "");
+        }
+        for input in ["https://WWW.WENKU8.NET/", " https://www.wenku8.net:443 "] {
+            assert_eq!(
+                super::normalize_api_host(input).unwrap(),
+                "https://www.wenku8.net"
+            );
+        }
+        assert!(super::normalize_api_host("https://wenku8.net").is_ok());
+        assert!(super::normalize_api_host("https://mirror.wenku8.net").is_ok());
+        for input in [
+            "http://www.wenku8.net",
+            "https://wenku8.net.attacker.test",
+            "https://fakewenku8.net",
+            "https://wenku8.cc",
+            "https://example.test",
+            "https://u:p@www.wenku8.net",
+            "https://www.wenku8.net:8443",
+            "https://www.wenku8.net/book/1.htm",
+            "https://www.wenku8.net/?host=x",
+            "https://www.wenku8.net/#x",
+            "https://-bad.wenku8.net",
+        ] {
+            assert!(
+                super::normalize_api_host(input).is_err(),
+                "accepted {input}"
+            );
+        }
+    }
 }
 
 pub fn get_image_cache_dir() -> &'static str {

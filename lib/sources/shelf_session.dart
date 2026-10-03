@@ -1,8 +1,16 @@
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+
+class ShelfSignInRequired implements Exception {
+  const ShelfSignInRequired();
+
+  @override
+  String toString() => '轻书架需要登录，请在“我的 → 书源与账号”重新登录。';
+}
 
 class ShelfSession {
   ShelfSession._();
@@ -16,7 +24,11 @@ class ShelfSession {
   int _generation = 0;
 
   Future<void> load() async {
-    signedIn.value = (await _storage.read(key: _key))?.isNotEmpty ?? false;
+    signedIn.value = (await _readRefresh())?.isNotEmpty ?? false;
+    if (!signedIn.value) {
+      _access = null;
+      _expires = null;
+    }
   }
 
   Future<void> login(String email, String password) async {
@@ -72,7 +84,7 @@ class ShelfSession {
 
   Future<String?> _renew() async {
     final generation = _generation;
-    final refresh = await _storage.read(key: _key);
+    final refresh = await _readRefresh();
     if (refresh == null || refresh.isEmpty) return null;
     final value = await _exchange(refresh);
     if (generation != _generation) return null;
@@ -80,6 +92,38 @@ class ShelfSession {
     _expires = DateTime.now().add(const Duration(seconds: 30));
     signedIn.value = true;
     return value;
+  }
+
+  Future<String?> _readRefresh() async {
+    try {
+      return await _storage.read(key: _key);
+    } on PlatformException catch (error) {
+      if (!_isUnreadableCredential(error)) rethrow;
+      // An Android backup can restore the encrypted preference without its
+      // device-bound Keystore key. Only this unusable refresh token is removed;
+      // local books, reading history and other secure entries stay intact.
+      _generation++;
+      _access = null;
+      _expires = null;
+      signedIn.value = false;
+      try {
+        await _storage.delete(key: _key);
+      } on PlatformException {
+        // Keep the login action available even if Android cannot remove the
+        // unreadable entry. A successful login can overwrite this one key.
+        throw const ShelfSignInRequired();
+      }
+      return null;
+    }
+  }
+
+  bool _isUnreadableCredential(PlatformException error) {
+    if (error.message != 'read') return false;
+    final details = error.details?.toString().toLowerCase() ?? '';
+    return details.contains('bad_decrypt') ||
+        details.contains('badpaddingexception') ||
+        details.contains('aeadbadtagexception') ||
+        details.contains('failed to unwrap key');
   }
 
   Future<String> _exchange(String refresh) async {

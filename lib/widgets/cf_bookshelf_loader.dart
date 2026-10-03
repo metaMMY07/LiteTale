@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/wenku_webview.dart';
+import 'package:wild/services/wenku8_browser.dart';
 import 'package:wild/sources/source_api.dart' show getSessionCookieString;
 import 'package:wild/src/rust/wenku8/models.dart';
 
@@ -177,6 +178,10 @@ class CfBookshelfLoaderState extends State<CfBookshelfLoader> {
 
   Future<void> _injectCookies() async {
     try {
+      if (await Wenku8BrowserSession.instance.enabled()) {
+        _cookiesInjected = true;
+        return;
+      }
       final cookieStr = await getSessionCookieString();
       if (cookieStr.isNotEmpty) {
         for (final part in cookieStr.split('; ')) {
@@ -184,7 +189,7 @@ class CfBookshelfLoaderState extends State<CfBookshelfLoader> {
           if (eq <= 0) continue;
           final cookie =
               '${part.substring(0, eq)}=${part.substring(eq + 1)}; '
-              'path=/; domain=.wenku8.net';
+              'path=/; secure';
           await _controller.executeScript(
             'document.cookie = ${jsonEncode(cookie)};',
           );

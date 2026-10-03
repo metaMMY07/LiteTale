@@ -10,6 +10,7 @@ import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
+import 'package:wild/widgets/left_aligned_scrollable.dart';
 
 class NovelDownloadInfoPage extends StatelessWidget {
   final String novelId;
@@ -159,7 +160,7 @@ class _NovelDownloadInfoContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomScrollView(
+    return LeftAlignedCustomScrollView(
       slivers: [
         SliverToBoxAdapter(child: _NovelHeader(download: download)),
         SliverToBoxAdapter(
@@ -394,7 +395,9 @@ class _NovelDescription extends StatelessWidget {
               'body': Style(
                 margin: Margins.zero,
                 padding: HtmlPaddings.zero,
-                fontFamily: appFontFamily,
+                fontFamily:
+                    Theme.of(context).textTheme.bodyMedium?.fontFamily ??
+                    appFontFamily,
                 fontSize: FontSize(14),
                 color: Theme.of(context).colorScheme.onSurface,
               ),

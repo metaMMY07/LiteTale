@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
   <title>LiteTale 书本与书签图标</title>
   <defs><linearGradient id="cover"><stop stop-color="#C5A8E9"/><stop offset="1" stop-color="#E9DCFA"/></linearGradient></defs>
-  <rect width="512" height="512" rx="112" fill="#FAF7FF"/>
+  <rect width="512" height="512" fill="#FFFFFF"/>
   <path d="M122 53h284q28 0 28 28v353q0 28-28 28H106q-28 0-28-28V97q0-44 44-44z" fill="#4D3A6B"/>
   <path d="M122 69h284q12 0 12 12v314q0 12-12 12H106q-12 0-12-12V97q0-28 28-28z" fill="url(#cover)"/>
   <rect x="138" y="68" width="18" height="341" rx="5" fill="#4D3A6B"/>

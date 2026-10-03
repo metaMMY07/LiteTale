@@ -32,8 +32,22 @@ pub async fn wenku8_get_bookshelf() -> Result<Vec<BookshelfItem>> {
 }
 
 pub async fn pre_login_state() -> Result<bool> {
-    let logged = crate::database::entities::CookieEntity::exists("jieqiUserInfo").await?;
-    Ok(logged)
+    use reqwest::cookie::CookieStore;
+    let url = reqwest::Url::parse(&format!("{}/", CLIENT.load_api_host().await))?;
+    let store = crate::database::entities::cookie::cookie_store::DatabaseCookieStore {};
+    Ok(store
+        .cookies(&url)
+        .and_then(|header| {
+            header.to_str().ok().map(|cookies| {
+                cookies.split(';').any(|cookie| {
+                    cookie
+                        .trim()
+                        .split_once('=')
+                        .is_some_and(|(name, value)| name == "jieqiUserInfo" && !value.is_empty())
+                })
+            })
+        })
+        .unwrap_or(false))
 }
 
 pub async fn logout() -> Result<()> {
@@ -44,13 +58,13 @@ pub async fn logout() -> Result<()> {
 /// 回傳 wenku8.net 的 session cookies 字串（格式：name=value; name2=value2）
 /// 供 WebView 注入使用
 pub async fn get_session_cookie_string() -> Result<String> {
-    let cookies = CookieEntity::find_by_domain("www.wenku8.net").await?;
-    let s = cookies
-        .into_iter()
-        .map(|c| format!("{}={}", c.name, c.value))
-        .collect::<Vec<_>>()
-        .join("; ");
-    Ok(s)
+    use reqwest::cookie::CookieStore;
+    let url = reqwest::Url::parse(&format!("{}/", CLIENT.load_api_host().await))?;
+    let store = crate::database::entities::cookie::cookie_store::DatabaseCookieStore {};
+    Ok(store
+        .cookies(&url)
+        .and_then(|value| value.to_str().ok().map(str::to_owned))
+        .unwrap_or_default())
 }
 
 pub async fn download_checkcode() -> Result<Vec<u8>> {

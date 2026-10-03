@@ -23,6 +23,8 @@ class PageCurlView extends StatefulWidget {
     required this.onPageChanged,
     required this.paperDecoration,
     required this.paperColor,
+    this.isSpread = false,
+    this.tapToTurn = true,
     this.onCenterTap,
     this.onBoundaryTurn,
   }) : assert(pageCount > 0);
@@ -33,6 +35,8 @@ class PageCurlView extends StatefulWidget {
   final ValueChanged<int> onPageChanged;
   final Decoration paperDecoration;
   final Color paperColor;
+  final bool isSpread;
+  final bool tapToTurn;
   final VoidCallback? onCenterTap;
   final ValueChanged<int>? onBoundaryTurn;
 
@@ -62,6 +66,7 @@ class PageCurlViewState extends State<PageCurlView>
   bool _nativeInteractive = false;
   int? _nativeReadyIndex;
   bool _nativeTurning = false;
+  int _nativeTurnSequence = 0;
   int? _nativeOptimisticIndex;
   int? _pendingNativeDirection;
   double? _pendingNativeStartY;
@@ -105,7 +110,11 @@ class PageCurlViewState extends State<PageCurlView>
   void didUpdateWidget(covariant PageCurlView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!Platform.isAndroid) return;
+    if (widget.tapToTurn != oldWidget.tapToTurn) {
+      _nativeChannel?.invokeMethod('setState', _nativeState);
+    }
     final paperChanged =
+        widget.isSpread != oldWidget.isSpread ||
         widget.paperDecoration != oldWidget.paperDecoration ||
         widget.paperColor != oldWidget.paperColor;
     if (paperChanged || widget.pageCount != oldWidget.pageCount) {
@@ -133,6 +142,12 @@ class PageCurlViewState extends State<PageCurlView>
       }
       _nativeChannel?.invokeMethod('setState', _nativeState);
       _scheduleNativeCapture();
+      // Native ready can arrive before Flutter rebuilds the new page index.
+      // Consume the queued tap when the two renderers meet on that index.
+      if (_nativeReadyIndex == widget.index &&
+          _pendingNativeDirection != null) {
+        _markNativeReady(widget.index);
+      }
     }
   }
 
@@ -140,6 +155,8 @@ class PageCurlViewState extends State<PageCurlView>
     'pageCount': widget.pageCount,
     'index': widget.index,
     'paperColor': widget.paperColor.toARGB32(),
+    'isSpread': widget.isSpread,
+    'tapToTurn': widget.tapToTurn,
   };
 
   List<int> get _nativeVisibleIndices {
@@ -277,6 +294,7 @@ class PageCurlViewState extends State<PageCurlView>
       widget.onPageChanged(target);
       return;
     }
+    final turnSequence = ++_nativeTurnSequence;
     _nativeTurning = true;
     try {
       final accepted = await _nativeChannel!.invokeMethod<bool>('turn', {
@@ -285,19 +303,27 @@ class PageCurlViewState extends State<PageCurlView>
       });
       if (accepted == false) {
         _nativeTurning = false;
-        final readyIndex = await _nativeChannel!.invokeMethod<int>(
-          'getReadyIndex',
-        );
-        if (mounted && readyIndex != widget.index && _canTurn(direction)) {
+        if (mounted && _canTurn(direction)) {
+          // Ready can arrive between the rejected turn and this readback.
+          // Queue first and consume it whether the event or the poll wins;
+          // a matching ready index must not silently discard the user's tap.
           _nativeInteractive = false;
           _pendingNativeDirection = direction;
           _pendingNativeStartY = startY;
           setState(() {});
+          final readyIndex = await _nativeChannel!.invokeMethod<int>(
+            'getReadyIndex',
+          );
+          if (mounted && readyIndex == widget.index) {
+            _markNativeReady(readyIndex!);
+          }
         }
       }
       // Guard an interrupted native gesture or detached view.
       Future<void>.delayed(const Duration(seconds: 2), () {
-        if (mounted) _nativeTurning = false;
+        if (mounted && turnSequence == _nativeTurnSequence) {
+          _nativeTurning = false;
+        }
       });
     } catch (error) {
       _nativeTurning = false;
@@ -323,6 +349,7 @@ class PageCurlViewState extends State<PageCurlView>
         widget.onBoundaryTurn?.call(direction);
       }
     });
+    WidgetsBinding.instance.scheduleFrame();
   }
 
   void _loadingTurn(int direction, double startY) {
@@ -335,9 +362,15 @@ class PageCurlViewState extends State<PageCurlView>
   }
 
   void _loadingTap(Offset position) {
-    if (position.dx < _width * 0.30 || position.dy < _height * 0.30) {
+    if (!widget.tapToTurn) {
+      widget.onCenterTap?.call();
+      return;
+    }
+    if (position.dx < _width * 0.30 ||
+        (!widget.isSpread && position.dy < _height * 0.30)) {
       _loadingTurn(-1, position.dy);
-    } else if (position.dx > _width * 0.70 || position.dy > _height * 0.70) {
+    } else if (position.dx > _width * 0.70 ||
+        (!widget.isSpread && position.dy > _height * 0.70)) {
       _loadingTurn(1, position.dy);
     } else {
       widget.onCenterTap?.call();
@@ -348,6 +381,7 @@ class PageCurlViewState extends State<PageCurlView>
     if (!mounted) return;
     switch (call.method) {
       case 'turnStarted':
+        if (!_nativeTurning) _nativeTurnSequence++;
         _nativeTurning = true;
       case 'turnFinished':
         _nativeTurning = false;
@@ -356,6 +390,9 @@ class PageCurlViewState extends State<PageCurlView>
       case 'pageChanged':
         final index = (call.arguments as Map)['index'] as int;
         if (index >= 0 && index < widget.pageCount && index != widget.index) {
+          // The old page's ready flag must not accept another tap while the
+          // Flutter widget and native bitmap controller move to the new page.
+          setState(() => _nativeInteractive = false);
           widget.onPageChanged(index);
         }
       case 'turnLimit':

@@ -7,7 +7,7 @@ import android.util.Log
 import androidx.annotation.ColorLong
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.TweenSpec
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -15,6 +15,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -109,7 +111,8 @@ internal fun PTQBookPageViewInner(
 
     //组件宽高和原点O
     val viewHeight = bounds.height
-    val viewWidth = bounds.width
+    val isSpread = localConfig.isSpread
+    val viewWidth = bounds.width / if (isSpread) 2f else 1f
 
     //扭曲格点数
     val bitmapMeshCount by remember(bounds, localConfig.distortionInterval) {
@@ -138,7 +141,9 @@ internal fun PTQBookPageViewInner(
     }
 
     //可拖动范围
-    val dragXRange by remember(bounds) { mutableStateOf(FloatRange(0f, viewWidth * (1 - maxDragXRatio))) }
+    val dragXRange by remember(bounds, isSpread) {
+        mutableStateOf(FloatRange(if (isSpread) -viewWidth * 0.5f else 0f, viewWidth * (1 - maxDragXRatio)))
+    }
 
     //组件左上角
     val absO by remember { mutableStateOf(Point.Zero) }
@@ -180,6 +185,13 @@ internal fun PTQBookPageViewInner(
      * 点击和拖动时起手是右往左还是左往右（受[PTQBookPageViewScope.tapBehavior]和[PTQBookPageViewScope.dragBehavior]控制）
      */
     var isRightToLeftWhenStart by remember { mutableStateOf(true) }
+    // Spread curls use the original right-leaf geometry in both directions;
+    // the previous spread mirrors the canvas and texture coordinates.
+    var spreadNext by remember { mutableStateOf(true) }
+    var dragAccepted by remember { mutableStateOf(false) }
+
+    fun leafPoint(raw: Point): Point = if (!isSpread) raw else
+        Point(if (spreadNext) raw.x - viewWidth else viewWidth - raw.x, raw.y)
     /**
      * 当页面Bitmap没有发生变化时，绘制的backgroundBitmap也可能不一样，因为分左起手还是右起手，所以需要一个变量记录上次是左还是右，以保证synthesizedBitmap缓存正常
      * @since v1.1.0
@@ -230,6 +242,12 @@ internal fun PTQBookPageViewInner(
     //透明色
     val nativeTransparentColor by remember { mutableStateOf(toArgb(Color.Transparent.value.toLong())) }
 
+    var animationSerial by remember { mutableIntStateOf(0) }
+    var activeAnimationSerial by remember { mutableIntStateOf(-1) }
+    val animation = remember { Animatable(0f) }
+    // A new turn never paints the previous turn's terminal 1.0 frame.
+    val animFloatRatio = if (activeAnimationSerial == animationSerial) animation.value else 0f
+
     //退出动画lambda
     val exeExitAnim = rememberUpdatedState {
         val startPoint = if (!upsideDown) allPoints.J else allPoints.J.getSymmetricalPointAbout(lBCPerpendicularBisector)
@@ -238,7 +256,11 @@ internal fun PTQBookPageViewInner(
 
         val dragBehavior = callbacks.dragBehavior
 
-        if (dragBehavior == null) {
+        if (isSpread) {
+            val commit = curDragEvent.currentTouchPoint.x < viewWidth * 0.5f
+            isNextOrPrevious = if (commit) spreadNext else null
+            animStartAndEndPoint = DragEvent(startPoint.copy(), Point(if (commit) -dragXRange.end / 2 else dragXRange.end, y))
+        } else if (dragBehavior == null) {
             val isFingerAtRight = curDragEvent.currentTouchPoint.x > 0.5f * viewWidth
 
             //记录是下一页还是前一页，用于动画结束后触发onNext/onPrevious回调
@@ -263,11 +285,11 @@ internal fun PTQBookPageViewInner(
 
         animLastPoint = startPoint.copy()
         pageState = PageState.Loose
+        animationSerial++
         state = State.ExitAnimStart
     }
 
-    //动画
-    val animFloatRatio by animateFloatAsState(targetValue = if (state == State.EnterAnimStart || state == State.ExitAnimStart) 1f else 0f, finishedListener = {
+    val finishAnimation = rememberUpdatedState {
         //动画结束时触发的回调
         when (state) {
             State.EnterAnimStart -> {
@@ -302,7 +324,25 @@ internal fun PTQBookPageViewInner(
 
             else -> {}
         }
-    }, animationSpec = TweenSpec(easing = LinearEasing, durationMillis = if (state == State.EnterAnimStart) animDuration[0] else if (state == State.ExitAnimStart) animDuration[1] else 0))
+    }
+
+    // An explicit generation restarts even if Idle -> Exit was coalesced into
+    // one Compose frame. animateFloatAsState(1 -> 0 -> 1) could otherwise skip
+    // the reset, leaving a rapid reverse turn at 1.0 without a finish callback.
+    val animationPhase = state
+    LaunchedEffect(animationPhase, animationSerial) {
+        animation.snapTo(0f)
+        activeAnimationSerial = animationSerial
+        when (animationPhase) {
+            State.EnterAnimStart, State.ExitAnimStart -> {
+                val duration = if (animationPhase == State.EnterAnimStart) animDuration[0] else animDuration[1]
+                animation.animateTo(1f, TweenSpec(easing = LinearEasing, durationMillis = duration))
+                finishAnimation.value()
+            }
+            State.ExitAnimPreStart -> exeExitAnim.value()
+            else -> {}
+        }
+    }
 
     //拖动结束lambda
     val onDragEnd = rememberUpdatedState {
@@ -320,7 +360,9 @@ internal fun PTQBookPageViewInner(
                 if (turnPageRequestWhenDrag) {
                     val dragBehavior = callbacks.dragBehavior
 
-                    if (dragBehavior == null) {
+                    if (isSpread) {
+                        isNextOrPrevious = if (curDragEvent.currentTouchPoint.x < viewWidth * 0.5f) spreadNext else null
+                    } else if (dragBehavior == null) {
                         val isFingerAtRight = curDragEvent.currentTouchPoint.x > 0.5f * viewWidth
 
                         if (isFingerAtRight && !isRightToLeftWhenStart) {
@@ -365,7 +407,9 @@ internal fun PTQBookPageViewInner(
                     return@detectTapGestures
                 }
 
-                val touchPoint = touchOffset.toPoint
+                val rawTouchPoint = touchOffset.toPoint
+                if (isSpread) spreadNext = rawTouchPoint.x >= viewWidth
+                val touchPoint = leafPoint(rawTouchPoint)
 
                 if (!dragXRange.contains(touchPoint.x)) {
                     return@detectTapGestures
@@ -380,7 +424,7 @@ internal fun PTQBookPageViewInner(
                     val isLeftToRight = if (onTapBehavior == null) {
                         touchPoint.x < 0.5f * viewWidth
                     } else {
-                        val result = onTapBehavior(leftUpOnTap.copy(), absC.copy(), touchPoint.copy())
+                        val result = onTapBehavior(leftUpOnTap.copy(), Point(bounds.width, viewHeight), rawTouchPoint.copy())
 
                         if (result == null) {
                             return@detectTapGestures
@@ -401,16 +445,19 @@ internal fun PTQBookPageViewInner(
 
                     callbacks.onTurnStarted()
 
-                    val startPoint = Point(x = if (isLeftToRight) -dragXRange.end * 0.5f else dragXRange.end, y = if (isLeftToRight) touchPoint.y - tapYDelta else touchPoint.y)
+                    if (isSpread) spreadNext = !isLeftToRight
+
+                    val startPoint = Point(x = if (isLeftToRight && !isSpread) -dragXRange.end * 0.5f else dragXRange.end, y = if (isLeftToRight && !isSpread) touchPoint.y - tapYDelta else touchPoint.y)
                     f = viewHeight - touchPoint.y.absoluteValue
-                    val endPoint = Point(x = if (isLeftToRight) dragXRange.end else -dragXRange.end * 0.5f, y = if (isLeftToRight) touchPoint.y else touchPoint.y - tapYDelta)
+                    val endPoint = Point(x = if (isLeftToRight && !isSpread) dragXRange.end else -dragXRange.end * 0.5f, y = if (isLeftToRight && !isSpread) touchPoint.y else touchPoint.y - tapYDelta)
                     animLastPoint = startPoint.copy()
                     animStartAndEndPoint = DragEvent(startPoint.copy(), endPoint.copy())
                     pageState = PageState.Loose
                     animDuration = arrayOf(animEnterDuration, tapTurnDuration)
+                    animationSerial++
                     state = State.ExitAnimStart
 
-                    isRightToLeftWhenStart = !isLeftToRight
+                    isRightToLeftWhenStart = isSpread || !isLeftToRight
                     isNextOrPrevious = !isLeftToRight
                     if (isRightToLeftWhenStartLast != isRightToLeftWhenStart) {
                         //since v1.1.0 上一次和这一次起手不一样则清空synthesizedBitmap缓存
@@ -428,17 +475,21 @@ internal fun PTQBookPageViewInner(
         ) {
             detectDragGestures(
                 onDragStart = { viewSystemOffset: Offset ->
+                    dragAccepted = false
                     if (state != State.Idle || !controller.isRenderOk() || localConfig.disabled) {
                         return@detectDragGestures
                     }
 
-                    val touchPoint = viewSystemOffset.toPoint
+                    val rawTouchPoint = viewSystemOffset.toPoint
+                    if (isSpread) spreadNext = rawTouchPoint.x >= viewWidth
+                    val touchPoint = leafPoint(rawTouchPoint)
 
                     if (!dragXRange.contains(touchPoint.x)) {
                         return@detectDragGestures
                     }
 
                     dragInitialPoint = touchPoint
+                    dragAccepted = true
                     pageState = PageState.Loose
                     interruptedInDrag = false
                     curDragEvent = DragEvent(touchPoint, touchPoint)
@@ -449,11 +500,12 @@ internal fun PTQBookPageViewInner(
                     animStartAndEndPoint = DragEvent(touchPoint.copy(), touchPoint.copy())
                 },
                 onDrag = { _: PointerInputChange, dragAmount: Offset ->
-                    if (!controller.isRenderOk() || localConfig.disabled) {
+                    if (!dragAccepted || !controller.isRenderOk() || localConfig.disabled) {
                         return@detectDragGestures
                     }
 
-                    val cur = (curDragEvent.currentTouchPoint + dragAmount.toPoint)
+                    val delta = if (isSpread && !spreadNext) Point(-dragAmount.x, dragAmount.y) else dragAmount.toPoint
+                    val cur = (curDragEvent.currentTouchPoint + delta)
                     curDragEvent = DragEvent(curDragEvent.currentTouchPoint.copy(), cur)
 
                     if (state == State.Idle) {
@@ -469,7 +521,10 @@ internal fun PTQBookPageViewInner(
                             val responseDragWhen = callbacks.responseDragWhen
 
                             //手指从右向左翻，还是从左向右
-                            val isRightToLeft = if (responseDragWhen == null) {
+                            val isRightToLeft = if (isSpread) {
+                                if (cur.x >= dragInitialPoint.x) return@detectDragGestures
+                                spreadNext
+                            } else if (responseDragWhen == null) {
                                 animStartAndEndPoint.currentTouchPoint.x < animStartAndEndPoint.originTouchPoint.x
                             } else {
                                 responseDragWhen(absC.copy(), animStartAndEndPoint.originTouchPoint.copy(), cur.copy())
@@ -480,7 +535,7 @@ internal fun PTQBookPageViewInner(
                                 return@detectDragGestures
                             }
 
-                            isRightToLeftWhenStart = isRightToLeft
+                            isRightToLeftWhenStart = isSpread || isRightToLeft
                             if (isRightToLeftWhenStartLast != isRightToLeftWhenStart) {
                                 //since v1.1.0 上一次和这一次起手不一样则清空synthesizedBitmap缓存
 //                                controller.bitmapSynthesizer.clearSynthesizedCache()
@@ -494,7 +549,7 @@ internal fun PTQBookPageViewInner(
                                 return@detectDragGestures
                             }
 
-                            animStartAndEndPoint.originTouchPoint.x = if (isRightToLeft) dragXRange.end else dragXRange.start
+                            animStartAndEndPoint.originTouchPoint.x = if (isSpread || isRightToLeft) dragXRange.end else dragXRange.start
                             callbacks.onTurnStarted()
 
                             //默认向上翻，如果向下则颠倒
@@ -504,6 +559,7 @@ internal fun PTQBookPageViewInner(
                                 f = viewHeight - f
                             }
                             animLastPoint = animStartAndEndPoint.originTouchPoint.copy()
+                            animationSerial++
                             state = State.EnterAnimStart
                     }
 
@@ -522,12 +578,22 @@ internal fun PTQBookPageViewInner(
                     }
                 },
                 onDragEnd = {
-                    if (interruptedInDrag || localConfig.disabled) {
+                    if (!dragAccepted || interruptedInDrag || localConfig.disabled) {
                         return@detectDragGestures
                     }
 
                     onDragEnd.value()
-                }
+                },
+                onDragCancel = {
+                    if (dragAccepted && (state == State.Draggable || state == State.EnterAnimStart)) {
+                        curDragEvent = curDragEvent.copy(currentTouchPoint = Point(dragXRange.end, curDragEvent.currentTouchPoint.y))
+                        if (!isSpread && !isRightToLeftWhenStart) {
+                            curDragEvent = curDragEvent.copy(currentTouchPoint = Point(0f, curDragEvent.currentTouchPoint.y))
+                        }
+                        onDragEnd.value()
+                    }
+                    dragAccepted = false
+                },
             )
         }
         .background(color = Color.Transparent)
@@ -599,8 +665,10 @@ internal fun PTQBookPageViewInner(
                 null
             }
 
-            val distortBitmap = controller.getBitmapCurrent(if (isRightToLeftWhenStart) 1 else 0)
-            val backgroundBitmap = controller.getBitmapCurrent(if (isRightToLeftWhenStart) 2 else 1)
+            val distortBitmap = if (isSpread) controller.getLeafBitmapCurrent(1, spreadNext)
+                else controller.getBitmapCurrent(if (isRightToLeftWhenStart) 1 else 0)
+            val backgroundBitmap = if (isSpread) controller.getLeafBitmapCurrent(if (spreadNext) 2 else 0, spreadNext)
+                else controller.getBitmapCurrent(if (isRightToLeftWhenStart) 2 else 1)
             val currentBitmap = if (isRightToLeftWhenStart) distortBitmap else backgroundBitmap
 
             val nonNullAllPoints = newAllPoints ?: if (upsideDownChange) { //处理垂直抖动，重新计算一遍
@@ -630,6 +698,24 @@ internal fun PTQBookPageViewInner(
             upsideDownAllPoints.buildPath(distortedEdges, upsideDown, distortedEdgeDownSampling, pathResult)
             val (paths, shadowPaths, shaderControlPointPairs, shadow12Width) = pathResult
 
+            if (isSpread && !spreadNext) {
+                // The canvas mirror must not mirror the writing. Reverse each
+                // texture row's vertex mapping, leaving the curl paths intact.
+                val columns = bitmapMeshCount.first + 1
+                for (row in 0..bitmapMeshCount.second) {
+                    for (column in 0 until columns / 2) {
+                        val a = (row * columns + column) * 2
+                        val b = (row * columns + columns - 1 - column) * 2
+                        val x = distortedVertices[a]
+                        val y = distortedVertices[a + 1]
+                        distortedVertices[a] = distortedVertices[b]
+                        distortedVertices[a + 1] = distortedVertices[b + 1]
+                        distortedVertices[b] = x
+                        distortedVertices[b + 1] = y
+                    }
+                }
+            }
+
             Canvas(modifier = Modifier.fillMaxSize()) {
                 drawIntoCanvas {
                     val paint = foldPaint
@@ -639,11 +725,25 @@ internal fun PTQBookPageViewInner(
                     frameworkPaint.isFilterBitmap = true
                     frameworkPaint.shader = null
                     val nativeCanvas = it.nativeCanvas
+                    val bookSave = nativeCanvas.save()
+                    if (isSpread) {
+                        nativeCanvas.drawBitmap(controller.getLeafBitmapCurrent(1, !spreadNext), if (spreadNext) 0f else viewWidth, 0f, frameworkPaint)
+                        nativeCanvas.translate(viewWidth, 0f)
+                        if (!spreadNext) nativeCanvas.scale(-1f, 1f)
+                    }
+
+                    fun drawLeaf(bitmap: android.graphics.Bitmap) {
+                        val save = nativeCanvas.save()
+                        if (isSpread && !spreadNext) nativeCanvas.scale(-1f, 1f, viewWidth / 2, 0f)
+                        nativeCanvas.drawBitmap(bitmap, 0f, 0f, frameworkPaint)
+                        nativeCanvas.restoreToCount(save)
+                    }
                     //注意图层绘制顺序
 
                     //点还没计算出来就只画当前
                     if (upsideDownAllPoints.C.x == upsideDownAllPoints.O.x) {
-                        nativeCanvas.drawBitmap(currentBitmap, absO.x, absO.y, frameworkPaint)
+                        drawLeaf(currentBitmap)
+                        nativeCanvas.restoreToCount(bookSave)
                         return@drawIntoCanvas
                     }
 
@@ -657,7 +757,7 @@ internal fun PTQBookPageViewInner(
                     frameworkPaint.color = nativePageColor
 
                     // Draw the next page first, then its fold shadow.
-                    nativeCanvas.drawBitmap(backgroundBitmap, 0f, 0f, frameworkPaint)
+                    drawLeaf(backgroundBitmap)
                     val nextPage = with(upsideDownAllPoints) {
                         val (_, ZTN, WSM, _) = distortedEdges
                         revealedPagePath.apply {
@@ -753,6 +853,7 @@ internal fun PTQBookPageViewInner(
                         Shader.TileMode.CLAMP
                     )
                     it.drawPath(shadowPaths[5], paint)
+                    nativeCanvas.restoreToCount(bookSave)
 
                     //加强一下轮廓
 //                    paint.shader = null
@@ -821,6 +922,12 @@ private fun algorithmStateLoose(absO: Point, absR: Point, absC: Point, f: Float)
     val R = absR.toCartesianSystem()
 
     val Rf = Point(C.x, C.y + f)
+    // A perfectly horizontal drag places R at Rf's height. Its infinite
+    // slope produces NaN intersections and leaves the paper frozen until
+    // finger-up. A one-pixel lift keeps the same almost-vertical fold finite.
+    if ((R.y - Rf.y).absoluteValue < 1f) {
+        R.y = Rf.y + if (R.y < Rf.y) -1f else 1f
+    }
     val k = (C.x - R.x) / (R.y - Rf.y)
 
     val lWZ = Line.withKAndOnePoint(k, R)
@@ -893,6 +1000,9 @@ private fun algorithmStateWMin(absO: Point, absTouchPoint: Point, absC: Point, f
     val W = Point(minWxRatio * C.x, C.y)
 
     val Rf = Point(C.x, C.y + f)
+    if ((R.y - Rf.y).absoluteValue < 1f) {
+        R.y = Rf.y + if (R.y < Rf.y) -1f else 1f
+    }
     val k = (C.x - R.x) / (R.y - Rf.y)
 
     val Z = Point(C.x, k * (C.x - W.x) + C.y)

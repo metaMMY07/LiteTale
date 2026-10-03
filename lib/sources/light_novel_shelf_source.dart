@@ -142,6 +142,10 @@ class LightNovelShelfSource implements BookSource {
   static Future<Object?> _call(String method, Map<String, Object?> args) async {
     final session = ShelfSession.instance;
     final token = await session.token();
+    if (token == null &&
+        (method == 'GetBookInfo' || method == 'GetNovelContent')) {
+      throw const ShelfSignInRequired();
+    }
     final raw = await LightNovelShelfService.instance.invoke(
       method,
       args,

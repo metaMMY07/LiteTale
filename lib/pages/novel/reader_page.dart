@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/expressive_loading_indicator.dart';
-import 'package:wild/sources/source_api.dart' show chapterFont;
+import 'package:wild/cubits/font_settings_cubit.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/novel/paragraph_spacing_cubit.dart';
 import 'package:wild/pages/novel/reader_cubit.dart';
 import 'package:wild/pages/novel/theme_cubit.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
-import 'package:wild/widgets/cached_image.dart';
+import 'package:wild/services/reader_typography.dart';
+import 'package:wild/widgets/reader_system_ui_scope.dart';
+import 'package:wild/widgets/reader_paper_view.dart';
 import 'package:wild/cubits/screen_keep_on.dart';
 import 'package:wild/cubits/volume_control_cubit.dart';
 import 'package:wild/utils/controller_event.dart';
@@ -22,11 +24,12 @@ import 'left_padding_cubit.dart';
 import 'right_padding_cubit.dart';
 import 'reader_type_cubit.dart';
 import 'package:wild/cubits/reader_background_cubit.dart';
-import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/services/reader_page_controller.dart';
 import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/widgets/page_curl_view.dart';
 import 'package:wild/widgets/reader_curl_setting.dart';
+import 'package:wild/settings/settings_preferences.dart';
+import 'package:wild/settings/reading_session_scope.dart';
 
 class ReaderPage extends StatelessWidget {
   final String aid;
@@ -57,70 +60,85 @@ class ReaderPage extends StatelessWidget {
     final rightPaddingCubit = context.read<RightPaddingCubit>();
     final readerTypeCubit = context.read<ReaderTypeCubit>();
 
-    return MultiBlocProvider(
-      providers: [
-        BlocProvider.value(value: fontSizeCubit),
-        BlocProvider.value(value: paragraphSpacingCubit),
-        BlocProvider.value(value: lineHeightCubit),
-        BlocProvider.value(value: topBarHeightCubit),
-        BlocProvider.value(value: bottomBarHeightCubit),
-        BlocProvider.value(value: leftPaddingCubit),
-        BlocProvider.value(value: rightPaddingCubit),
-        BlocProvider.value(value: readerTypeCubit),
-        BlocProvider(
-          create:
-              (context) => ReaderCubit(
-                novelInfo: novelInfo,
-                initialAid: aid,
-                initialCid: cid,
-                initialVolumes: volumes,
-                fontSizeCubit: fontSizeCubit,
-                paragraphSpacingCubit: paragraphSpacingCubit,
-                lineHeightCubit: lineHeightCubit,
-                topBarHeightCubit: topBarHeightCubit,
-                bottomBarHeightCubit: bottomBarHeightCubit,
-                leftPaddingCubit: leftPaddingCubit,
-                rightPaddingCubit: rightPaddingCubit,
-              )..loadChapter(initialPage: initialPage),
-        ),
-      ],
-      child: BlocBuilder<ReaderCubit, ReaderState>(
-        builder: (context, state) {
-          if (state is ReaderLoading) {
-            return const Scaffold(body: CenteredLoadingIndicator());
-          }
-          if (state is ReaderError) {
-            return Scaffold(
-              body: SafeArea(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(state.error),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed:
-                            () => context.read<ReaderCubit>().loadChapter(),
-                        child: const Text('重试'),
+    return ReaderSystemUiScope(
+      child: MultiBlocProvider(
+        providers: [
+          BlocProvider.value(value: fontSizeCubit),
+          BlocProvider.value(value: paragraphSpacingCubit),
+          BlocProvider.value(value: lineHeightCubit),
+          BlocProvider.value(value: topBarHeightCubit),
+          BlocProvider.value(value: bottomBarHeightCubit),
+          BlocProvider.value(value: leftPaddingCubit),
+          BlocProvider.value(value: rightPaddingCubit),
+          BlocProvider.value(value: readerTypeCubit),
+          BlocProvider(
+            create:
+                (context) => ReaderCubit(
+                  novelInfo: novelInfo,
+                  initialAid: aid,
+                  initialCid: cid,
+                  initialVolumes: volumes,
+                  fontSizeCubit: fontSizeCubit,
+                  paragraphSpacingCubit: paragraphSpacingCubit,
+                  lineHeightCubit: lineHeightCubit,
+                  topBarHeightCubit: topBarHeightCubit,
+                  bottomBarHeightCubit: bottomBarHeightCubit,
+                  leftPaddingCubit: leftPaddingCubit,
+                  rightPaddingCubit: rightPaddingCubit,
+                  fontSettingsCubit: context.read<FontSettingsCubit>(),
+                )..loadChapter(initialPage: initialPage),
+          ),
+        ],
+        child: BlocListener<FontSettingsCubit, FontSettingsState>(
+          listenWhen:
+              (previous, current) =>
+                  previous.readerFamily != current.readerFamily,
+          listener:
+              (context, _) => context.read<ReaderCubit>().reloadCurrentPage(),
+          child: BlocBuilder<ReaderCubit, ReaderState>(
+            builder: (context, state) {
+              if (state is ReaderLoading) {
+                return const Scaffold(body: CenteredLoadingIndicator());
+              }
+              if (state is ReaderError) {
+                return Scaffold(
+                  body: SafeArea(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(state.error),
+                          const SizedBox(height: 16),
+                          ElevatedButton(
+                            onPressed:
+                                () => context.read<ReaderCubit>().loadChapter(),
+                            child: const Text('重试'),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-            );
-          }
-          if (state is ReaderLoaded) {
-            // A new page list means new pagination. Recreate its controller at
-            // the latest clamped position, cancelling any old turn safely.
-            return _ReaderView(
-              key: ObjectKey(state.pages),
-              state: state,
-              title: state.title,
-            );
-          }
-          return const SizedBox.shrink();
-        },
+                );
+              }
+              if (state is ReaderLoaded) {
+                // A new page list means new pagination. Recreate its controller at
+                // the latest clamped position, cancelling any old turn safely.
+                return ReadingSessionScope(
+                  bookId: state.aid,
+                  title: novelInfo.title,
+                  active: !state.showControls,
+                  child: _ReaderView(
+                    key: ObjectKey(state.pages),
+                    state: state,
+                    title: state.title,
+                  ),
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
       ),
     );
   }
@@ -141,7 +159,20 @@ class _ReaderViewState extends State<_ReaderView> {
   final _curlKey = GlobalKey<PageCurlViewState>();
   bool _wasCurlEnabled = false;
   Size? _lastLayoutSize;
+  EdgeInsets? _lastLayoutPadding;
+  TextScaler? _lastTextScaler;
+  bool? _lastBoldText;
+  String? _lastHanVariant;
   var preTime = 0;
+
+  int get _viewIndex =>
+      widget.state.layout.viewIndex(widget.state.currentPageIndex);
+  int get _viewCount =>
+      widget.state.layout.viewCount(widget.state.pages.length);
+
+  void _onViewChanged(int index) => context.read<ReaderCubit>().onPageChanged(
+    widget.state.layout.firstPage(index),
+  );
 
   /// The open book owns its image policy. Read the book id from the cubit so a
   /// later source switch in settings cannot re-route this reader's images.
@@ -159,9 +190,7 @@ class _ReaderViewState extends State<_ReaderView> {
   @override
   void initState() {
     super.initState();
-    _pageController = ReaderPageController(
-      initialPage: widget.state.currentPageIndex,
-    );
+    _pageController = ReaderPageController(initialPage: _viewIndex);
     setKeepScreenUpOnReading(true);
 
     // 监听音量键事件
@@ -190,6 +219,10 @@ class _ReaderViewState extends State<_ReaderView> {
   }
 
   void _handleTap(TapUpDetails details) {
+    if (!settingsPreferencesOf(context, listen: false).tapToTurn) {
+      context.read<ReaderCubit>().toggleControls();
+      return;
+    }
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
     final tapX = details.globalPosition.dx;
@@ -202,18 +235,19 @@ class _ReaderViewState extends State<_ReaderView> {
     final topArea = screenHeight * 0.3;
     final bottomArea = screenHeight * 0.7;
 
-    if (tapX < leftArea || tapY < topArea) {
+    final spread = widget.state.layout.isSpread;
+    if (tapX < leftArea || (!spread && tapY < topArea)) {
       if (_isTurning) return;
       // 点击左侧或上方区域，上一页
-      if (widget.state.currentPageIndex > 0) {
+      if (_viewIndex > 0) {
         _turnPage(-1, startY: details.localPosition.dy);
       } else {
         _handleBoundaryTurn(-1);
       }
-    } else if (tapX > rightArea || tapY > bottomArea) {
+    } else if (tapX > rightArea || (!spread && tapY > bottomArea)) {
       if (_isTurning) return;
       // 点击右侧或下方区域，下一页
-      if (widget.state.currentPageIndex < widget.state.pages.length - 1) {
+      if (_viewIndex < _viewCount - 1) {
         _turnPage(1, startY: details.localPosition.dy);
       } else {
         _handleBoundaryTurn(1);
@@ -225,8 +259,9 @@ class _ReaderViewState extends State<_ReaderView> {
   }
 
   void _handleBoundaryTurn(int direction) {
+    if (!settingsPreferencesOf(context, listen: false).boundaryChapters) return;
     if (direction < 0) {
-      if (widget.state.currentPageIndex != 0) return;
+      if (_viewIndex != 0) return;
       final currentVolumeIndex = _findCurrentVolumeIndex();
       final currentChapterIndex = _findCurrentChapterIndex();
       if (currentChapterIndex > 0 || currentVolumeIndex > 0) {
@@ -248,7 +283,7 @@ class _ReaderViewState extends State<_ReaderView> {
       }
       return;
     }
-    if (widget.state.currentPageIndex != widget.state.pages.length - 1) {
+    if (_viewIndex != _viewCount - 1) {
       return;
     }
     final currentVolumeIndex = _findCurrentVolumeIndex();
@@ -309,13 +344,17 @@ class _ReaderViewState extends State<_ReaderView> {
   }
 
   void _onController(ReaderControllerEventArgs args) {
+    ReadingSessionScope.recordActivity(context);
     if (!mounted || _isTurning) return;
     if (args.key == "UP") {
       // 音量上键 - 上一页
-      if (widget.state.currentPageIndex > 0) {
+      if (_viewIndex > 0) {
         _turnPage(-1);
       } else {
         // 如果是第一页，尝试加载上一章
+        if (!settingsPreferencesOf(context, listen: false).boundaryChapters) {
+          return;
+        }
         final currentVolumeIndex = _findCurrentVolumeIndex();
         final currentChapterIndex = _findCurrentChapterIndex();
         if (currentChapterIndex > 0 || currentVolumeIndex > 0) {
@@ -324,10 +363,13 @@ class _ReaderViewState extends State<_ReaderView> {
       }
     } else if (args.key == "DOWN") {
       // 音量下键 - 下一页
-      if (widget.state.currentPageIndex < widget.state.pages.length - 1) {
+      if (_viewIndex < _viewCount - 1) {
         _turnPage(1);
       } else {
         // 如果是最后一页，尝试加载下一章
+        if (!settingsPreferencesOf(context, listen: false).boundaryChapters) {
+          return;
+        }
         final currentVolumeIndex = _findCurrentVolumeIndex();
         final currentChapterIndex = _findCurrentChapterIndex();
         final volume = widget.state.volumes[currentVolumeIndex];
@@ -340,30 +382,28 @@ class _ReaderViewState extends State<_ReaderView> {
   }
 
   Widget _buildReaderPage(BuildContext context, int index, Color textColor) {
-    final page = widget.state.pages[index];
-    if (page.isImage) {
-      return _ImagePage(
-        imageUrl: page.content,
-        source: _bookSource,
-        textColor: textColor,
-        pageNumber: index + 1,
-        pageCount: widget.state.pages.length,
-      );
-    }
-    return _TextPage(
-      content: page.content,
-      textColor: textColor,
-      pageNumber: index + 1,
-      pageCount: widget.state.pages.length,
+    return ReaderPaperView(
+      pages: widget.state.pages,
+      viewIndex: index,
+      layout: widget.state.layout,
+      chapterTitle: widget.title,
+      titleFontFamily: context.read<FontSettingsCubit>().state.readerFamily,
+      source: _bookSource,
+      textStyle: readerBodyStyle(
+        fontFamily: widget.state.fontFamily,
+        fontSize: context.read<FontSizeCubit>().state,
+        lineHeight: context.read<LineHeightCubit>().state,
+        boldText: widget.state.layout.boldText,
+        color: textColor,
+      ),
+      paragraphSpacing: context.read<ParagraphSpacingCubit>().state,
     );
   }
 
   void _syncCurlMode(bool enabled) {
     if (_wasCurlEnabled && !enabled) {
       final old = _pageController;
-      _pageController = ReaderPageController(
-        initialPage: widget.state.currentPageIndex,
-      );
+      _pageController = ReaderPageController(initialPage: _viewIndex);
       WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
     }
     _wasCurlEnabled = enabled;
@@ -372,12 +412,33 @@ class _ReaderViewState extends State<_ReaderView> {
   @override
   Widget build(BuildContext context) {
     final mediaQuery = MediaQuery.of(context);
-    if (_lastLayoutSize != null && _lastLayoutSize != mediaQuery.size) {
+    final preferences = settingsPreferencesOf(context);
+    final hanChanged =
+        _lastHanVariant != null && _lastHanVariant != preferences.hanVariant;
+    _lastHanVariant = preferences.hanVariant;
+    if (hanChanged) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.read<ReaderCubit>().reloadCurrentPage();
+      });
+    }
+    final metricsChanged =
+        widget.state.layout.viewportSize != mediaQuery.size ||
+        widget.state.layout.systemPadding != mediaQuery.padding ||
+        widget.state.layout.textScaler != mediaQuery.textScaler ||
+        widget.state.layout.boldText != mediaQuery.boldText;
+    if (metricsChanged &&
+        (_lastLayoutSize != mediaQuery.size ||
+            _lastLayoutPadding != mediaQuery.padding ||
+            _lastTextScaler != mediaQuery.textScaler ||
+            _lastBoldText != mediaQuery.boldText)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) context.read<ReaderCubit>().reloadCurrentPage();
       });
     }
     _lastLayoutSize = mediaQuery.size;
+    _lastLayoutPadding = mediaQuery.padding;
+    _lastTextScaler = mediaQuery.textScaler;
+    _lastBoldText = mediaQuery.boldText;
     final topPadding = mediaQuery.padding.top;
 
     final ThemeCubit themeCubit = context.read<ThemeCubit>();
@@ -398,15 +459,24 @@ class _ReaderViewState extends State<_ReaderView> {
             ? themeCubit.state.darkTextColor
             : themeCubit.state.lightTextColor;
 
+    // Never squeeze pages laid out for the previous orientation into half a
+    // leaf. Repagination creates a fresh view and cancels any active curl.
+    if (metricsChanged) {
+      return Scaffold(
+        backgroundColor: backgroundColor,
+        body: const CenteredLoadingIndicator(),
+      );
+    }
+
     var viewer = BlocBuilder<ReaderCubit, ReaderState>(
       builder: (BuildContext context, state) {
         return BlocBuilder<ReaderBackgroundCubit, ReaderBackgroundState>(
           builder: (context, backgroundState) {
             String? backgroundImagePath;
-            if (isDarkMode && backgroundState.darkBackgroundExists) {
+            if (isDarkMode) {
               backgroundImagePath =
                   context.read<ReaderBackgroundCubit>().getDarkBackgroundPath();
-            } else if (!isDarkMode && backgroundState.lightBackgroundExists) {
+            } else {
               backgroundImagePath =
                   context
                       .read<ReaderBackgroundCubit>()
@@ -450,8 +520,10 @@ class _ReaderViewState extends State<_ReaderView> {
                         if (curlEnabled) {
                           final curl = PageCurlView(
                             key: _curlKey,
-                            pageCount: widget.state.pages.length,
-                            index: widget.state.currentPageIndex,
+                            pageCount: _viewCount,
+                            index: _viewIndex,
+                            isSpread: widget.state.layout.isSpread,
+                            tapToTurn: preferences.tapToTurn,
                             paperDecoration: paperDecoration,
                             paperColor: backgroundColor,
                             onCenterTap:
@@ -460,8 +532,7 @@ class _ReaderViewState extends State<_ReaderView> {
                             pageBuilder:
                                 (context, index) =>
                                     _buildReaderPage(context, index, textColor),
-                            onPageChanged:
-                                context.read<ReaderCubit>().onPageChanged,
+                            onPageChanged: _onViewChanged,
                           );
                           return Platform.isAndroid
                               ? curl
@@ -474,9 +545,8 @@ class _ReaderViewState extends State<_ReaderView> {
                           onTapUp: _handleTap,
                           child: PageView.builder(
                             controller: _pageController,
-                            itemCount: widget.state.pages.length,
-                            onPageChanged:
-                                context.read<ReaderCubit>().onPageChanged,
+                            itemCount: _viewCount,
+                            onPageChanged: _onViewChanged,
                             itemBuilder:
                                 (context, index) =>
                                     _buildReaderPage(context, index, textColor),
@@ -544,7 +614,15 @@ class _ReaderViewState extends State<_ReaderView> {
         );
       },
     );
-    return viewer;
+    return PopScope(
+      canPop: !preferences.preventBack || widget.state.showControls,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && !widget.state.showControls) {
+          context.read<ReaderCubit>().toggleControls();
+        }
+      },
+      child: viewer,
+    );
   }
 
   int _findCurrentVolumeIndex() {
@@ -571,188 +649,6 @@ class _ReaderViewState extends State<_ReaderView> {
       }
     }
     return -1;
-  }
-}
-
-class _TextPage extends StatelessWidget {
-  final String content;
-  final Color textColor;
-  final int pageNumber;
-  final int pageCount;
-
-  const _TextPage({
-    required this.content,
-    required this.textColor,
-    required this.pageNumber,
-    required this.pageCount,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final screenWidth = mediaQuery.size.width;
-    final topPadding = mediaQuery.padding.top;
-    final bottomPadding = mediaQuery.padding.bottom;
-    final topBarHeight = context.read<TopBarHeightCubit>().state;
-    final leftPadding = context.read<LeftPaddingCubit>().state;
-    final rightPadding = context.read<RightPaddingCubit>().state;
-    final leftAndRightPadding = leftPadding + rightPadding;
-    final canvasWidth = screenWidth - leftAndRightPadding;
-
-    return BlocBuilder<FontSizeCubit, double>(
-      builder: (context, fontSize) {
-        return BlocBuilder<ParagraphSpacingCubit, double>(
-          builder: (context, spacing) {
-            return BlocBuilder<LineHeightCubit, double>(
-              builder: (context, lineHeight) {
-                var texts = content.split("\n");
-                return Column(
-                  children: [
-                    Container(height: topPadding),
-                    Container(height: topBarHeight),
-                    for (var i = 0; i < texts.length; i++) ...[
-                      SizedBox(
-                        width: canvasWidth,
-                        child: Text.rich(
-                          strutStyle: StrutStyle(
-                            fontFamily:
-                                chapterFont(
-                                  context.read<ReaderCubit>().initialAid,
-                                  context.read<ReaderCubit>().initialCid,
-                                ) ??
-                                appFontFamily,
-                            height: lineHeight,
-                          ),
-                          TextSpan(
-                            text: texts[i],
-                            style: TextStyle(
-                              fontFamily:
-                                  chapterFont(
-                                    context.read<ReaderCubit>().initialAid,
-                                    context.read<ReaderCubit>().initialCid,
-                                  ) ??
-                                  appFontFamily,
-                              fontSize: fontSize,
-                              height: lineHeight,
-                              letterSpacing: 0.5,
-                              color: textColor,
-                            ),
-                          ),
-                        ),
-                      ),
-                      if (i < texts.length - 1) Container(height: spacing),
-                    ],
-                    Expanded(child: Container()),
-                    SizedBox(
-                      child: Align(
-                        alignment: Alignment.bottomCenter,
-                        child: Opacity(
-                          opacity: 0.3,
-                          child: Text(
-                            '$pageNumber/$pageCount',
-                            style: TextStyle(fontSize: 10, color: textColor),
-                          ),
-                        ),
-                      ),
-                    ),
-                    Container(height: bottomPadding),
-                  ],
-                );
-              },
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-class _ImagePage extends StatelessWidget {
-  final String imageUrl;
-  final Color textColor;
-  final int pageNumber;
-  final int pageCount;
-  final SourceId source;
-
-  const _ImagePage({
-    required this.imageUrl,
-    required this.source,
-    required this.textColor,
-    required this.pageNumber,
-    required this.pageCount,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final screenHeight = mediaQuery.size.height;
-    final screenWidth = mediaQuery.size.width;
-    final topPadding = mediaQuery.padding.top;
-    final bottomPadding = mediaQuery.padding.bottom;
-    final topBarHeight = context.read<TopBarHeightCubit>().state;
-    final bottomBarHeight = context.read<BottomBarHeightCubit>().state;
-    final leftPadding = context.read<LeftPaddingCubit>().state;
-    final rightPadding = context.read<RightPaddingCubit>().state;
-    final leftAndRightPadding = leftPadding + rightPadding;
-    final availableHeight =
-        screenHeight -
-        topPadding -
-        bottomPadding -
-        topBarHeight -
-        bottomBarHeight;
-
-    return Column(
-      children: [
-        Container(height: topPadding + topBarHeight),
-        SizedBox(
-          width: screenWidth - leftAndRightPadding,
-          height: availableHeight,
-          child: Center(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: availableHeight,
-                maxWidth: screenWidth - leftAndRightPadding,
-              ),
-              child: Image(
-                image: CachedImageProvider(imageUrl, source: source),
-                width: screenWidth - leftAndRightPadding,
-                height: availableHeight,
-                fit: BoxFit.contain,
-                loadingBuilder: (context, child, loadingProgress) {
-                  if (loadingProgress == null) return child;
-                  return Container(
-                    width: screenWidth - leftAndRightPadding,
-                    color: Colors.grey[200],
-                    child: const Center(child: CircularProgressIndicator()),
-                  );
-                },
-                errorBuilder: (context, error, stackTrace) {
-                  return Container(
-                    width: screenWidth - leftAndRightPadding,
-                    color: Colors.grey[200],
-                    child: const Center(child: Text('图片加载失败')),
-                  );
-                },
-              ),
-            ),
-          ),
-        ),
-        Expanded(child: Container()),
-        SizedBox(
-          child: Align(
-            alignment: Alignment.bottomCenter,
-            child: Opacity(
-              opacity: 0.3,
-              child: Text(
-                '$pageNumber/$pageCount',
-                style: TextStyle(fontSize: 10, color: textColor),
-              ),
-            ),
-          ),
-        ),
-        Container(height: bottomPadding),
-      ],
-    );
   }
 }
 

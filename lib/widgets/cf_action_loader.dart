@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/wenku_webview.dart';
+import 'package:wild/services/wenku8_browser.dart';
 import 'package:wild/sources/source_api.dart' show getSessionCookieString;
 
 /// 通过平台 WebView 完成验证后执行一次书架操作。
@@ -143,13 +144,14 @@ class _CfActionLoaderState extends State<CfActionLoader> {
 
   Future<void> _injectCookies() async {
     try {
+      if (await Wenku8BrowserSession.instance.enabled()) return;
       final cookieStr = await getSessionCookieString();
       for (final part in cookieStr.split('; ')) {
         final eq = part.indexOf('=');
         if (eq <= 0) continue;
         final cookie =
             '${part.substring(0, eq)}=${part.substring(eq + 1)}; '
-            'path=/; domain=.wenku8.net';
+            'path=/; secure';
         await _controller.executeScript(
           'document.cookie = ${jsonEncode(cookie)};',
         );

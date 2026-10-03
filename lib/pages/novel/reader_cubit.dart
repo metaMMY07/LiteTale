@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/models/reader_page.dart';
 import 'package:wild/services/reader_paginator.dart';
+import 'package:wild/services/reader_viewport_layout.dart';
+import 'package:wild/services/reader_position.dart';
 import 'package:wild/pages/novel/line_height_cubit.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
@@ -11,9 +13,14 @@ import 'package:wild/pages/novel/top_bar_height_cubit.dart';
 import 'package:wild/pages/novel/bottom_bar_height_cubit.dart';
 import 'package:wild/pages/novel/left_padding_cubit.dart';
 import 'package:wild/pages/novel/right_padding_cubit.dart';
+import 'package:wild/cubits/font_settings_cubit.dart';
 
 class ReaderCubit extends Cubit<ReaderState> {
   int _request = 0;
+  String? _loadedContent;
+  String? _contentAid;
+  String? _contentCid;
+  ReaderPosition? _position;
   final NovelInfo novelInfo;
   String initialAid;
   String initialCid;
@@ -25,6 +32,7 @@ class ReaderCubit extends Cubit<ReaderState> {
   final BottomBarHeightCubit bottomBarHeightCubit;
   final LeftPaddingCubit leftPaddingCubit;
   final RightPaddingCubit rightPaddingCubit;
+  final FontSettingsCubit fontSettingsCubit;
 
   ReaderCubit({
     required this.novelInfo,
@@ -38,6 +46,7 @@ class ReaderCubit extends Cubit<ReaderState> {
     required this.bottomBarHeightCubit,
     required this.leftPaddingCubit,
     required this.rightPaddingCubit,
+    required this.fontSettingsCubit,
   }) : super(ReaderInitial());
 
   String _findChapterTitle(String aid, String cid) {
@@ -76,13 +85,16 @@ class ReaderCubit extends Cubit<ReaderState> {
       final volume = _findVolume(targetAid, targetCid);
       final content = await chapterContent(aid: targetAid, cid: targetCid);
       if (isClosed || request != _request) return;
+      _loadedContent = content;
+      _contentAid = targetAid;
+      _contentCid = targetCid;
 
       final fontSize = fontSizeCubit.state;
       final paragraphSpacing = paragraphSpacingCubit.state;
       final lineHeight = lineHeightCubit.state;
 
       // 分页内容
-      final pages = _paginateContent(
+      final pagination = _paginateContent(
         targetAid,
         targetCid,
         chapterTitle,
@@ -91,6 +103,7 @@ class ReaderCubit extends Cubit<ReaderState> {
         paragraphSpacing,
         lineHeight,
       );
+      final pages = pagination.pages;
 
       // 验证并设置初始页码
       int pageIndex = 0;
@@ -101,6 +114,7 @@ class ReaderCubit extends Cubit<ReaderState> {
       }
 
       // 计算从第一页到当前页的累计字数
+      _position = ReaderPosition.at(pages, pageIndex);
       final characterCount = _calculateCharacterCountUpToPage(pages, pageIndex);
 
       // 更新阅读历史
@@ -125,6 +139,8 @@ class ReaderCubit extends Cubit<ReaderState> {
           title: chapterTitle,
           volumes: initialVolumes,
           pages: pages,
+          layout: pagination.layout,
+          fontFamily: pagination.fontFamily,
           currentPageIndex: pageIndex,
           showControls: super.state.showControls,
         ),
@@ -136,13 +152,19 @@ class ReaderCubit extends Cubit<ReaderState> {
   }
 
   Future reloadCurrentPage() async {
+    if (state is! ReaderLoaded) return;
     final request = ++_request;
     try {
       final targetAid = initialAid;
       final targetCid = initialCid;
 
       final chapterTitle = _findChapterTitle(targetAid, targetCid);
-      final content = await chapterContent(aid: targetAid, cid: targetCid);
+      final content =
+          _contentAid == targetAid &&
+                  _contentCid == targetCid &&
+                  _loadedContent != null
+              ? _loadedContent!
+              : await chapterContent(aid: targetAid, cid: targetCid);
       if (isClosed || request != _request) return;
 
       // Paging remains available while the content request is pending. Read
@@ -153,17 +175,14 @@ class ReaderCubit extends Cubit<ReaderState> {
           latest.cid != targetCid) {
         return;
       }
-      var currentPageIndex = latest.currentPageIndex;
-      final characterOffset = _calculateCharacterCountUpToPage(
-        latest.pages,
-        currentPageIndex - 1,
-      );
+      final position =
+          _position ?? ReaderPosition.at(latest.pages, latest.currentPageIndex);
 
       final fontSize = fontSizeCubit.state;
       final paragraphSpacing = paragraphSpacingCubit.state;
       final lineHeight = lineHeightCubit.state;
 
-      final pages = _paginateContent(
+      final pagination = _paginateContent(
         targetAid,
         targetCid,
         chapterTitle,
@@ -172,18 +191,9 @@ class ReaderCubit extends Cubit<ReaderState> {
         paragraphSpacing,
         lineHeight,
       );
+      final pages = pagination.pages;
 
-      if (characterOffset > 0) {
-        var count = 0;
-        for (var i = 0; i < pages.length; i++) {
-          if (!pages[i].isImage) count += pages[i].content.length;
-          if (count > characterOffset) {
-            currentPageIndex = i;
-            break;
-          }
-        }
-      }
-      currentPageIndex = currentPageIndex.clamp(0, pages.length - 1);
+      final currentPageIndex = position.pageIn(pages);
 
       emit(
         ReaderLoaded(
@@ -192,6 +202,8 @@ class ReaderCubit extends Cubit<ReaderState> {
           title: chapterTitle,
           volumes: initialVolumes,
           pages: pages,
+          layout: pagination.layout,
+          fontFamily: pagination.fontFamily,
           currentPageIndex: currentPageIndex,
           showControls: super.state.showControls,
         ),
@@ -207,6 +219,7 @@ class ReaderCubit extends Cubit<ReaderState> {
     if (state is ReaderLoaded) {
       final currentState = state as ReaderLoaded;
       if (index < 0 || index >= currentState.pages.length) return;
+      _position = ReaderPosition.at(currentState.pages, index);
       emit(currentState.copyWith(currentPageIndex: index));
 
       _savePageHistory(state as ReaderLoaded);
@@ -341,7 +354,8 @@ class ReaderCubit extends Cubit<ReaderState> {
     return totalCharacters;
   }
 
-  List<ReaderPage> _paginateContent(
+  ({List<ReaderPage> pages, ReaderViewportLayout layout, String fontFamily})
+  _paginateContent(
     String aid,
     String cid,
     String title,
@@ -353,32 +367,31 @@ class ReaderCubit extends Cubit<ReaderState> {
     final metrics = MediaQueryData.fromView(
       WidgetsBinding.instance.platformDispatcher.views.first,
     );
-    final screenWidth = metrics.size.width;
-    final screenHeight = metrics.size.height;
-    final topPadding = metrics.padding.top;
-    final bottomPadding = metrics.padding.bottom;
-    final topBarHeight = topBarHeightCubit.state;
-    final bottomBarHeight = bottomBarHeightCubit.state;
-    final leftPadding = leftPaddingCubit.state;
-    final rightPadding = rightPaddingCubit.state;
-    final leftAndRightPadding = leftPadding + rightPadding;
-    final canvasWidth = screenWidth - leftAndRightPadding;
-    final canvasHeight =
-        screenHeight -
-        topPadding -
-        bottomPadding -
-        topBarHeight -
-        bottomBarHeight;
-
-    return paginateReaderContent(
+    final layout = ReaderViewportLayout(
+      size: metrics.size,
+      systemPadding: metrics.padding,
+      topBarHeight: topBarHeightCubit.state,
+      bottomBarHeight: bottomBarHeightCubit.state,
+      leftPadding: leftPaddingCubit.state,
+      rightPadding: rightPaddingCubit.state,
+      textScaler: metrics.textScaler,
+      boldText: metrics.boldText,
+    );
+    final fontFamily = fontSettingsCubit.state.resolveReaderFamily(
+      chapterFont(aid, cid),
+    );
+    final pages = paginateReaderContent(
       content: content,
-      canvasWidth: canvasWidth,
-      canvasHeight: canvasHeight,
+      canvasWidth: layout.contentWidth,
+      canvasHeight: layout.contentHeight,
       fontSize: fontSize,
       paragraphSpacing: paragraphSpacing,
       lineHeight: lineHeight,
-      fontFamily: chapterFont(aid, cid),
+      fontFamily: fontFamily,
+      textScaler: layout.textScaler,
+      boldText: layout.boldText,
     );
+    return (pages: pages, layout: layout, fontFamily: fontFamily);
   }
 
   void toggleControls() {
@@ -419,6 +432,8 @@ class ReaderLoaded extends ReaderState {
   final String cid;
   final String title;
   final List<ReaderPage> pages;
+  final ReaderViewportLayout layout;
+  final String fontFamily;
   final List<Volume> volumes;
   final int currentPageIndex;
   @override
@@ -430,6 +445,8 @@ class ReaderLoaded extends ReaderState {
     required this.title,
     required this.volumes,
     required this.pages,
+    required this.layout,
+    required this.fontFamily,
     required this.currentPageIndex,
     required this.showControls,
   });
@@ -449,6 +466,8 @@ class ReaderLoaded extends ReaderState {
       title: title ?? this.title,
       volumes: volumes ?? this.volumes,
       pages: pages ?? this.pages,
+      layout: layout,
+      fontFamily: fontFamily,
       currentPageIndex: currentPageIndex ?? this.currentPageIndex,
       showControls: showControls ?? this.showControls,
     );

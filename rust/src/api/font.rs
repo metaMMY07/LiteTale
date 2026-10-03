@@ -1,13 +1,22 @@
 /// Decode chapter fonts on the bridge worker pool, never on Flutter's UI thread.
 pub fn decode_chapter_font(data: Vec<u8>) -> anyhow::Result<Vec<u8>> {
-    anyhow::ensure!(data.len() >= 4 && data.len() <= 16 * 1024 * 1024, "Invalid chapter font size");
+    anyhow::ensure!(
+        data.len() >= 4 && data.len() <= 16 * 1024 * 1024,
+        "Invalid chapter font size"
+    );
     if &data[..4] == b"wOF2" {
         anyhow::ensure!(data.len() >= 48, "Truncated WOFF2 header");
         let decoded_size = u32::from_be_bytes(data[16..20].try_into()?);
-        anyhow::ensure!(decoded_size > 0 && decoded_size <= 32 * 1024 * 1024, "Chapter font is too large");
+        anyhow::ensure!(
+            decoded_size > 0 && decoded_size <= 32 * 1024 * 1024,
+            "Chapter font is too large"
+        );
         woofwoof::decompress(&data).ok_or_else(|| anyhow::anyhow!("Chapter font decoding failed"))
     } else {
-        anyhow::ensure!(&data[..4] == b"\x00\x01\x00\x00" || &data[..4] == b"OTTO", "Unsupported chapter font format");
+        anyhow::ensure!(
+            &data[..4] == b"\x00\x01\x00\x00" || &data[..4] == b"OTTO",
+            "Unsupported chapter font format"
+        );
         Ok(data)
     }
 }

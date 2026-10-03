@@ -12,6 +12,8 @@ import 'package:wild/widgets/cf_action_loader.dart';
 import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
 import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/pages/shelf_login_page.dart';
+import 'package:wild/theme/horizontal_page_transitions.dart';
 
 import '../../src/rust/wenku8/models.dart';
 import 'novel_info_cubit.dart';
@@ -70,8 +72,14 @@ class NovelInfoPage extends StatelessWidget {
                 }
                 return IconButton(
                   icon: const Icon(Icons.download_outlined),
-                  tooltip: sourceOf(novelId) == SourceId.wenku8 ? '离线下载' : '此书源暂不支持离线下载',
-                  onPressed: sourceOf(novelId) == SourceId.wenku8 ? () => _navigateToDownload(context) : null,
+                  tooltip:
+                      sourceOf(novelId) == SourceId.wenku8
+                          ? '离线下载'
+                          : '此书源暂不支持离线下载',
+                  onPressed:
+                      sourceOf(novelId) == SourceId.wenku8
+                          ? () => _navigateToDownload(context)
+                          : null,
                 );
               },
             ),
@@ -110,36 +118,39 @@ class NovelInfoPage extends StatelessWidget {
                         if (isInBookshelf) {
                           final bid = bookshelfCubit.state.getBookBid(novelId);
                           if (bid == null) return;
-                          actionPath = '/modules/article/bookcase.php?delid=$bid';
+                          actionPath =
+                              '/modules/article/bookcase.php?delid=$bid';
                         } else {
-                          actionPath = '/modules/article/addbookcase.php?bid=$novelId';
+                          actionPath =
+                              '/modules/article/addbookcase.php?bid=$novelId';
                         }
                         showDialog(
                           context: context,
                           barrierDismissible: false,
-                          builder: (ctx) => Dialog.fullscreen(
-                            child: CfActionLoader(
-                              apiHost: apiHost,
-                              actionPath: actionPath,
-                              successUrlKeyword: 'bookcase.php',
-                              successBodyKeyword: '处理成功',
-                              onSuccess: () {
-                                Navigator.of(ctx).pop();
-                                bookshelfCubit.loadBookcases();
-                              },
-                              onError: (err) {
-                                Navigator.of(ctx).pop();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('操作失敗: $err')),
-                                );
-                              },
-                            ),
-                          ),
+                          builder:
+                              (ctx) => Dialog.fullscreen(
+                                child: CfActionLoader(
+                                  apiHost: apiHost,
+                                  actionPath: actionPath,
+                                  successUrlKeyword: 'bookcase.php',
+                                  successBodyKeyword: '处理成功',
+                                  onSuccess: () {
+                                    Navigator.of(ctx).pop();
+                                    bookshelfCubit.loadBookcases();
+                                  },
+                                  onError: (err) {
+                                    Navigator.of(ctx).pop();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('操作失敗: $err')),
+                                    );
+                                  },
+                                ),
+                              ),
                         );
                       } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('操作失败: $e')),
-                        );
+                        ScaffoldMessenger.of(
+                          context,
+                        ).showSnackBar(SnackBar(content: Text('操作失败: $e')));
                       }
                     }
                   },
@@ -154,6 +165,35 @@ class NovelInfoPage extends StatelessWidget {
               return const CenteredLoadingIndicator();
             }
             if (state is NovelInfoError) {
+              if (state.loginRequired) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(state.message, textAlign: TextAlign.center),
+                        const SizedBox(height: 16),
+                        FilledButton(
+                          onPressed: () async {
+                            final loggedIn = await Navigator.of(
+                              context,
+                            ).push<bool>(
+                              HorizontalCoverPageRoute(
+                                builder: (_) => const ShelfLoginPage(),
+                              ),
+                            );
+                            if (loggedIn == true && context.mounted) {
+                              context.read<NovelInfoCubit>().load();
+                            }
+                          },
+                          child: const Text('登录轻书架'),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
               return Center(child: Text('加载失败: ${state.message}'));
             }
             if (state is NovelInfoLoaded) {
@@ -224,10 +264,7 @@ class _NovelInfoContent extends StatelessWidget {
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
-          child: _NovelHeader(
-            novelInfo: novelInfo,
-            source: sourceOf(novelId),
-          ),
+          child: _NovelHeader(novelInfo: novelInfo, source: sourceOf(novelId)),
         ),
         SliverToBoxAdapter(
           child: Padding(
@@ -249,12 +286,14 @@ class _NovelInfoContent extends StatelessWidget {
                   value: '',
                   onTap: () {
                     if (sourceOf(novelId) != SourceId.wenku8) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('该书源的评论请前往原站查看')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('该书源的评论请前往原站查看')),
+                      );
                       return;
                     }
                     Navigator.of(context).pushNamed(
                       '/novel/reviews',
-                      arguments: { 'aid': novelId, 'title': novelInfo.title },
+                      arguments: {'aid': novelId, 'title': novelInfo.title},
                     );
                   },
                 ),
@@ -427,17 +466,14 @@ class _StatItem extends StatelessWidget {
         const SizedBox(width: 4),
         value != ''
             ? Text(
-                '$label: $value',
-                style: Theme.of(context).textTheme.bodySmall,
-              )
+              '$label: $value',
+              style: Theme.of(context).textTheme.bodySmall,
+            )
             : Text(label, style: Theme.of(context).textTheme.bodySmall),
       ],
     );
     if (onTap != null) {
-      return InkWell(
-        onTap: onTap,
-        child: row,
-      );
+      return InkWell(onTap: onTap, child: row);
     }
     return row;
   }
@@ -463,7 +499,9 @@ class _NovelDescription extends StatelessWidget {
               'body': Style(
                 margin: Margins.zero,
                 padding: HtmlPaddings.zero,
-                fontFamily: appFontFamily,
+                fontFamily:
+                    Theme.of(context).textTheme.bodyMedium?.fontFamily ??
+                    appFontFamily,
                 fontSize: FontSize(14),
                 color: Theme.of(context).colorScheme.onSurface,
               ),
