@@ -8,7 +8,6 @@ use once_cell::sync::{Lazy, OnceCell};
 use rand::seq::IndexedRandom;
 use rand::Rng;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CONNECTION, REFERER};
-use reqwest::Client;
 use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
@@ -20,6 +19,7 @@ mod database;
 mod downloading;
 mod frb_generated;
 mod local;
+mod request_policy;
 #[cfg(test)]
 mod test;
 mod wenku8;
@@ -45,7 +45,7 @@ pub(crate) static CLIENT: Lazy<Wenku8Client> = Lazy::new(|| {
         HeaderValue::from_static("https://www.wenku8.net/login.php"),
     );
     default_headers.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
-    let client = Client::builder()
+    let client = request_policy::default_client_builder()
         .cookie_provider(cookie_store)
         .gzip(true)
         .default_headers(default_headers)

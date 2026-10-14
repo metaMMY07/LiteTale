@@ -331,10 +331,10 @@ String wenku8ReadDomExtractionScript(
         if (keys.some(function(key) { return allowedSearch.indexOf(key) < 0; }) ||
             parameters.getAll('searchtype').length !== 1 ||
             parameters.getAll('searchkey').length !== 1 ||
-            parameters.getAll('page').length !== 1 ||
+            parameters.getAll('page').length > 1 ||
             !/^(articlename|author)$/.test(parameters.get('searchtype')) ||
             !parameters.get('searchkey') || parameters.get('searchkey').length > 300 ||
-            !/^[1-9][0-9]{0,5}$/.test(parameters.get('page'))) return null;
+            (parameters.has('page') && !/^[1-9][0-9]{0,5}$/.test(parameters.get('page')))) return null;
       } else if (page.pathname === '/modules/article/articlelist.php') {
         var allowedArticle = ['fullflag', 'page', 'charset'];
         if (keys.some(function(key) { return allowedArticle.indexOf(key) < 0; }) ||
@@ -773,9 +773,11 @@ bool _isValidPage(Uri? page, Uri expected, String kind, String? aid) {
             _positivePage(query['page']!.single);
       }
       if (page.path == '/modules/article/search.php') {
+        // /so.php redirects the first results to search.php without page=1.
+        // Pagination links then add an explicit page; both are same-origin.
         return exactQuery(
               const {'searchtype', 'searchkey', 'page', 'charset'},
-              optional: const {'charset'},
+              optional: const {'page', 'charset'},
             ) &&
             charsetAllowed() &&
             const {
@@ -784,7 +786,8 @@ bool _isValidPage(Uri? page, Uri expected, String kind, String? aid) {
             }.contains(query['searchtype']!.single) &&
             query['searchkey']!.single.isNotEmpty &&
             query['searchkey']!.single.length <= 300 &&
-            _positivePage(query['page']!.single);
+            (!query.containsKey('page') ||
+                _positivePage(query['page']!.single));
       }
       if (page.path == '/modules/article/articlelist.php') {
         return exactQuery(

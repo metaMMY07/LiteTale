@@ -24,8 +24,9 @@ class RecommendLoaded extends RecommendState {
 
 class RecommendError extends RecommendState {
   final String message;
+  final Object? cause;
 
-  RecommendError(this.message);
+  RecommendError(this.message, {this.cause});
 }
 
 class RecommendCubit extends Cubit<RecommendState> {
@@ -64,23 +65,30 @@ class RecommendCubit extends Cubit<RecommendState> {
 
   Future<void> load({bool forceRefresh = false}) async {
     final generation = ++_loadGeneration;
+    final source = activeSource.value;
+    final revision = sourceRevision.value;
+    bool current() =>
+        !isClosed &&
+        generation == _loadGeneration &&
+        source == activeSource.value &&
+        revision == sourceRevision.value;
     emit(RecommendLoading());
     // The optional feed must never prevent the existing Wenku8 page loading.
     final shelfBooks = _loadOptionalShelf(forceRefresh);
     try {
       final blocks = await _loadWenku8();
-      if (isClosed || generation != _loadGeneration) return;
+      if (!current()) return;
       emit(RecommendLoaded(blocks));
       final books = await shelfBooks;
-      if (isClosed || generation != _loadGeneration || books.isEmpty) return;
+      if (!current() || books.isEmpty) return;
       emit(RecommendLoaded(blocks, lightNovelShelfBooks: books));
     } catch (e) {
       final books = await shelfBooks;
-      if (isClosed || generation != _loadGeneration) return;
+      if (!current()) return;
       if (books.isNotEmpty) {
         emit(RecommendLoaded(const [], lightNovelShelfBooks: books));
       } else {
-        emit(RecommendError(e.toString()));
+        emit(RecommendError(e.toString(), cause: e));
       }
     }
   }

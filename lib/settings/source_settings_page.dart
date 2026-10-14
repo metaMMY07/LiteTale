@@ -6,6 +6,7 @@ import 'package:wild/sources/source_api.dart';
 import 'package:wild/settings/settings_widgets.dart';
 import 'package:wild/widgets/source_settings.dart';
 import 'package:wild/widgets/left_aligned_scrollable.dart';
+import 'rule_source_manager.dart';
 
 class SourceSettingsPage extends StatefulWidget {
   const SourceSettingsPage({super.key});
@@ -33,6 +34,7 @@ class _SourceSettingsPageState extends State<SourceSettingsPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const SourceSettings(),
+          const RuleSourceManager(),
           SettingsGroup(
             title: '文库8镜像',
             icon: Icons.link_rounded,

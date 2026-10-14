@@ -279,6 +279,49 @@ void main() {
     },
   );
 
+  test('accepts the site form redirect without a first-page parameter', () {
+    const url =
+        '$_apiHost/modules/article/search.php?searchtype=articlename&searchkey=Re';
+    final books =
+        parseWenku8ReadWebViewResult(
+              _payload(
+                kind: 'list',
+                url: url,
+                data: {
+                  'currentPage': 1,
+                  'maxPage': 2,
+                  'records': [
+                    {
+                      'title': '志乃与恋 Future',
+                      'image': 'https://img.wenku8.com/101.jpg',
+                      'detailUrl': '$_apiHost/book/101.htm',
+                      'aid': '101',
+                    },
+                  ],
+                },
+              ),
+              apiHost: _apiHost,
+              loadedUrl: url,
+              kind: 'list',
+            )
+            as PageStatsNovelCover;
+    expect(books.currentPage, 1);
+    expect(books.maxPage, 2);
+    expect(books.records.single.title, '志乃与恋 Future');
+    expect(isWenku8SearchRequest(Uri.parse(url), _apiHost), isTrue);
+    for (final invalid in [
+      '$url&page=',
+      '$url&page=0',
+      '$url&page=100001',
+      '$url&page=1&page=2',
+      '$url&searchkey=another',
+      '$url&redirect=https://unrelated.invalid',
+      url.replaceFirst(_apiHost, 'https://unrelated.invalid'),
+    ]) {
+      expect(isWenku8SearchRequest(Uri.parse(invalid), _apiHost), isFalse);
+    }
+  });
+
   test('rejects changed origin, bad route, wrong book id, and redirects', () {
     final good = _payload(
       kind: 'detail',
@@ -526,7 +569,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH);
             '$_apiHost/modules/article/search.php?searchtype=articlename&searchkey=%C7%E6&page=1&charset=gbk',
         'detailEnglishTags': '$_apiHost/book/$_aid.htm',
         'listModern':
-            '$_apiHost/modules/article/search.php?searchtype=articlename&searchkey=Re&page=1&charset=gbk',
+            '$_apiHost/modules/article/search.php?searchtype=articlename&searchkey=Re',
         'listEmpty':
             '$_apiHost/modules/article/search.php?searchtype=articlename&searchkey=missing&page=1&charset=gbk',
         'listEmptyGrid':

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/wenku8_recovery_button.dart';
 import 'package:wild/widgets/expressive_loading_indicator.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
 import 'package:wild/sources/book_source.dart';
+import 'package:wild/widgets/bili_recovery_button.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/novel/paragraph_spacing_cubit.dart';
 import 'package:wild/pages/novel/reader_cubit.dart';
@@ -114,6 +116,18 @@ class ReaderPage extends StatelessWidget {
                             onPressed:
                                 () => context.read<ReaderCubit>().loadChapter(),
                             child: const Text('重试'),
+                          ),
+                          Wenku8RecoveryButton(
+                            error: state.error,
+                            source: sourceOf(aid),
+                            onRecovered:
+                                () => context.read<ReaderCubit>().loadChapter(),
+                          ),
+                          BiliRecoveryButton(
+                            error: state.cause,
+                            source: sourceOf(aid),
+                            onRecovered:
+                                () => context.read<ReaderCubit>().loadChapter(),
                           ),
                         ],
                       ),

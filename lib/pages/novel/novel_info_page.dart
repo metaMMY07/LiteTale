@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/wenku8_recovery_button.dart';
+import 'package:wild/widgets/bili_recovery_button.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/sources/source_api.dart' as w8;
-import 'package:wild/src/rust/frb_generated.dart';
 import 'package:wild/widgets/cached_image.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/pages/home/bookshelf_cubit.dart';
-import 'package:wild/pages/novel/reviews_page.dart';
 import 'package:wild/widgets/cf_action_loader.dart';
 import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
@@ -32,7 +32,7 @@ class NovelInfoPage extends StatelessWidget {
     // 获取全局的 BookshelfCubit
     final bookshelfCubit = context.read<BookshelfCubit>();
 
-    Future<void> _navigateToDownload(BuildContext context) async {
+    Future<void> navigateToDownload(BuildContext context) async {
       final state = context.read<NovelInfoCubit>().state;
       if (state is! NovelInfoLoaded) return;
 
@@ -51,7 +51,6 @@ class NovelInfoPage extends StatelessWidget {
           },
         );
       } catch (e) {
-        print('获取下载信息失败: $e');
         if (!context.mounted) return;
         ScaffoldMessenger.of(
           context,
@@ -78,7 +77,7 @@ class NovelInfoPage extends StatelessWidget {
                           : '此书源暂不支持离线下载',
                   onPressed:
                       sourceOf(novelId) == SourceId.wenku8
-                          ? () => _navigateToDownload(context)
+                          ? () => navigateToDownload(context)
                           : null,
                 );
               },
@@ -194,7 +193,38 @@ class NovelInfoPage extends StatelessWidget {
                   ),
                 );
               }
-              return Center(child: Text('加载失败: ${state.message}'));
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '加载失败: ${state.message}',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: () => context.read<NovelInfoCubit>().load(),
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('重新加载'),
+                      ),
+                      Wenku8RecoveryButton(
+                        error: state.cause ?? state.message,
+                        source: sourceOf(novelId),
+                        onRecovered:
+                            () => context.read<NovelInfoCubit>().load(),
+                      ),
+                      BiliRecoveryButton(
+                        error: state.cause,
+                        source: sourceOf(novelId),
+                        onRecovered:
+                            () => context.read<NovelInfoCubit>().load(),
+                      ),
+                    ],
+                  ),
+                ),
+              );
             }
             if (state is NovelInfoLoaded) {
               return _NovelInfoContent(
@@ -238,8 +268,6 @@ class _NovelInfoContent extends StatelessWidget {
       initialPage = currentState.readingHistory!.progressPage;
     }
 
-    print('Navigating to reader with initialPage: $initialPage');
-
     await Navigator.pushNamed(
       context,
       '/novel/reader',
@@ -253,7 +281,7 @@ class _NovelInfoContent extends StatelessWidget {
       },
     );
     // 返回后更新历史记录
-    context.read<NovelInfoCubit>().loadHistory();
+    if (context.mounted) context.read<NovelInfoCubit>().loadHistory();
   }
 
   @override
@@ -311,7 +339,9 @@ class _NovelInfoContent extends StatelessWidget {
             ),
           ),
         ),
-        SliverToBoxAdapter(child: _NovelTags(tags: novelInfo.tags)),
+        SliverToBoxAdapter(
+          child: _NovelTags(tags: novelInfo.tags, source: sourceOf(novelId)),
+        ),
         // 添加继续阅读按钮
         if (state.readingHistory != null)
           SliverToBoxAdapter(
@@ -396,7 +426,7 @@ class _NovelHeader extends StatelessWidget {
                 const SizedBox(height: 8),
                 InkWell(
                   onTap: () async {
-                    if (source == SourceId.lnovel) {
+                    if (!w8.sourceSupportsAuthorSearch(source)) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('该书源暂不支持作者查找')),
                       );
@@ -410,7 +440,9 @@ class _NovelHeader extends StatelessWidget {
                         'searchKey': novelInfo.author,
                       },
                     );
-                    context.read<NovelInfoCubit>().loadHistory();
+                    if (context.mounted) {
+                      context.read<NovelInfoCubit>().loadHistory();
+                    }
                   },
                   child: Text(
                     '作者：${novelInfo.author}',
@@ -517,8 +549,9 @@ class _NovelDescription extends StatelessWidget {
 
 class _NovelTags extends StatelessWidget {
   final List<String> tags;
+  final SourceId source;
 
-  const _NovelTags({required this.tags});
+  const _NovelTags({required this.tags, required this.source});
 
   @override
   Widget build(BuildContext context) {
@@ -530,13 +563,14 @@ class _NovelTags extends StatelessWidget {
         children:
             tags.map((tag) {
               return InkWell(
-                onTap: () {
-                  Navigator.pushNamed(
-                    context,
-                    '/category',
-                    arguments: {'tag': tag},
-                  );
-                },
+                onTap:
+                    source == SourceId.wenku8
+                        ? () => Navigator.pushNamed(
+                          context,
+                          '/category',
+                          arguments: {'tag': tag},
+                        )
+                        : null,
                 child: Chip(
                   label: Text(tag),
                   backgroundColor:
@@ -600,7 +634,7 @@ class _VolumeItem extends StatelessWidget {
                 ),
               ),
             );
-          }).toList(),
+          }),
         ],
       ),
     );

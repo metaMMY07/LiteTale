@@ -2,22 +2,60 @@ import 'package:flutter/foundation.dart';
 import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
 import 'package:wild/src/rust/wenku8/models.dart';
 
-enum SourceId {
-  wenku8('文库8'),
-  lightNovelShelf('轻书架'),
-  lnovel('轻小说百科');
+class SourceId {
+  const SourceId._(this.name, this._label);
+  static const wenku8 = SourceId._('wenku8', '文库8');
+  static const lightNovelShelf = SourceId._('lightNovelShelf', '轻书架');
+  static const lnovel = SourceId._('lnovel', '轻小说百科');
+  static const bili = SourceId._('bili', '哔哩轻小说');
+  static final _rules = <String, SourceId>{};
+  final String name;
+  final String _label;
+  String get label => _rules[name]?._label ?? _label;
+  bool get isRule => name.startsWith('rule:');
+  String get ruleId => isRule ? name.substring(5) : '';
+  static List<SourceId> get values => [
+    wenku8,
+    lightNovelShelf,
+    lnovel,
+    bili,
+    ..._rules.values,
+  ];
+  static SourceId rule(String id, {String? label}) =>
+      SourceId._('rule:$id', label ?? '未安装书源（$id）');
+  static void registerRules(Iterable<SourceId> sources) {
+    _rules.clear();
+    for (final source in sources) {
+      _rules[source.name] = source;
+    }
+  }
 
-  const SourceId(this.label);
-  final String label;
+  @override
+  bool operator ==(Object other) => other is SourceId && other.name == name;
+  @override
+  int get hashCode => name.hashCode;
+  @override
+  String toString() => name;
 }
 
 /// Existing Wenku8 ids stay unchanged so installed shelves/history still work.
-SourceId sourceOf(String id) =>
-    id.startsWith('lns:')
-        ? SourceId.lightNovelShelf
-        : id.startsWith('lnv:')
-        ? SourceId.lnovel
-        : SourceId.wenku8;
+SourceId sourceOf(String id) {
+  if (id.startsWith('lns:')) return SourceId.lightNovelShelf;
+  if (id.startsWith('lnv:')) return SourceId.lnovel;
+  if (id.startsWith('bili:')) return SourceId.bili;
+  if (id.startsWith('src:')) {
+    final parts = id.split(':');
+    if (parts.length != 3 ||
+        !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$').hasMatch(parts[1]) ||
+        parts[2].isEmpty) {
+      throw const FormatException('书源书籍编号无效');
+    }
+    return SourceId.rule(parts[1]);
+  }
+  if (id.contains(':')) throw const FormatException('此书源尚未安装或编号无效');
+  return SourceId.wenku8;
+}
+
 String shelfBookId(Object id) => 'lns:$id';
 int remoteShelfId(String id) {
   final match = RegExp(r'^lns:(\d+)$').firstMatch(id);

@@ -4,6 +4,8 @@ import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/sources/source_api.dart';
 import '../widgets/novel_cover_card.dart';
+import '../widgets/wenku8_recovery_button.dart';
+import '../widgets/bili_recovery_button.dart';
 
 typedef NovelSearch =
     Future<PageStatsNovelCover> Function({
@@ -36,7 +38,7 @@ class _SearchPageState extends State<SearchPage> {
   PageStatsNovelCover? _results;
   List<SearchHistory> _histories = [];
   bool _loading = false;
-  String? _error;
+  Object? _error;
   int _request = 0;
   String _submittedKey = '';
   String _submittedType = '';
@@ -46,7 +48,7 @@ class _SearchPageState extends State<SearchPage> {
     super.initState();
     _searchType =
         widget.initialSearchType == 'author' &&
-                activeSource.value != SourceId.lnovel
+                sourceSupportsAuthorSearch(activeSource.value)
             ? 'author'
             : 'articlename';
     _searchController.text = widget.initialSearchKey ?? '';
@@ -150,7 +152,7 @@ class _SearchPageState extends State<SearchPage> {
       if (!mounted || request != _request) return;
       setState(() {
         _loading = false;
-        _error = e.toString();
+        _error = e;
       });
     }
   }
@@ -181,12 +183,22 @@ class _SearchPageState extends State<SearchPage> {
               const SizedBox(height: 16),
               const Text('搜索未完成'),
               const SizedBox(height: 8),
-              Text(_error!, textAlign: TextAlign.center),
+              Text(_error.toString(), textAlign: TextAlign.center),
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed: _search,
                 icon: const Icon(Icons.refresh),
                 label: const Text('重试'),
+              ),
+              Wenku8RecoveryButton(
+                error: _error,
+                source: activeSource.value,
+                onRecovered: () => _search(),
+              ),
+              BiliRecoveryButton(
+                error: _error,
+                source: activeSource.value,
+                onRecovered: () => _search(),
               ),
             ],
           ),
@@ -194,12 +206,13 @@ class _SearchPageState extends State<SearchPage> {
       );
     }
     if (_results != null) {
-      if (_results!.records.isEmpty && activeSource.value != SourceId.lnovel) {
+      if (_results!.records.isEmpty &&
+          !sourceUsesCatalogSearch(activeSource.value)) {
         return const Center(child: Text('没有找到相关书籍，试试其他关键词'));
       }
       return Column(
         children: [
-          if (activeSource.value == SourceId.lnovel)
+          if (sourceUsesCatalogSearch(activeSource.value))
             Padding(
               padding: const EdgeInsets.all(12),
               child: Text(
@@ -211,7 +224,7 @@ class _SearchPageState extends State<SearchPage> {
           Expanded(
             child: NotificationListener<ScrollNotification>(
               onNotification: (notification) {
-                if (activeSource.value != SourceId.lnovel &&
+                if (!sourceUsesCatalogSearch(activeSource.value) &&
                     notification is ScrollEndNotification &&
                     notification.metrics.extentAfter < 200 &&
                     _error == null) {
@@ -234,12 +247,23 @@ class _SearchPageState extends State<SearchPage> {
             ),
           ),
           if (_loading) const LinearProgressIndicator(),
+          if (_error != null)
+            Wenku8RecoveryButton(
+              error: _error,
+              source: activeSource.value,
+              onRecovered: () => _search(more: true),
+            ),
+          BiliRecoveryButton(
+            error: _error,
+            source: activeSource.value,
+            onRecovered: () => _search(more: true),
+          ),
           if (!_loading && _results!.currentPage < _results!.maxPage)
             TextButton(
               onPressed: () => _search(more: true),
               child: Text(
                 _error == null
-                    ? (activeSource.value == SourceId.lnovel
+                    ? (sourceUsesCatalogSearch(activeSource.value)
                         ? '继续查找下一页目录'
                         : '加载更多')
                     : '加载失败，点击重试',
@@ -281,10 +305,10 @@ class _SearchPageState extends State<SearchPage> {
       top: false,
       child: Column(
         children: [
-          if (activeSource.value == SourceId.lnovel)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Text('原站搜索暂不可用，按目录逐页查找书名。请使用繁体关键词。'),
+          if (sourceUsesCatalogSearch(activeSource.value))
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text('此书源按目录逐页查找书名，可继续查找后续目录。'),
             ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
@@ -320,7 +344,7 @@ class _SearchPageState extends State<SearchPage> {
                   ButtonSegment(
                     value: 'author',
                     label: const Text('作者'),
-                    enabled: activeSource.value != SourceId.lnovel,
+                    enabled: sourceSupportsAuthorSearch(activeSource.value),
                   ),
                 ],
                 selected: {_searchType},

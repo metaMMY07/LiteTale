@@ -48,6 +48,13 @@ class CachedImageProvider extends ImageProvider<CachedImageProvider> {
             headers:
                 source == SourceId.lnovel
                     ? LNovelSource.headers
+                    : source == SourceId.bili
+                    ? {
+                      'User-Agent': 'Mozilla/5.0',
+                      'Referer': 'https://www.bilinovel.net/',
+                    }
+                    : source.isRule
+                    ? ruleImageHeaders(source)
                     : {'Referer': 'https://www.lightnovel.app/'},
           )
           .timeout(const Duration(seconds: 25));

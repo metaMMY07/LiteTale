@@ -87,6 +87,14 @@ class _FakeBrowserPort implements Wenku8BrowserPort {
   int readExtractions = 0;
   int persistenceCalls = 0;
   Object? persistenceError;
+  bool stallExtraction = false;
+  bool stallBlank = false;
+  String? searchRedirect;
+  String? searchPageRedirect;
+  int searchSubmissions = 0;
+  final List<int> searchIntervals = [];
+  final Map<String, String> nextSearchUrls = {};
+  int searchReloads = 0;
 
   List<String> get targetLoads =>
       loads.where((value) => value != 'about:blank').toList();
@@ -96,6 +104,7 @@ class _FakeBrowserPort implements Wenku8BrowserPort {
     loads.add(value);
     url = redirects[value] ?? value;
     if (value == 'about:blank') {
+      if (stallBlank) return Completer<void>().future;
       state = _page(value);
       if (staleBlankCallbacks > 0) {
         staleBlankCallbacks--;
@@ -129,6 +138,34 @@ class _FakeBrowserPort implements Wenku8BrowserPort {
     if (script == Wenku8BrowserSession.pageStateScript) {
       return Map<String, Object?>.from(state);
     }
+    if (script.contains('litetale-search-submit')) {
+      searchSubmissions++;
+      if (searchRedirect == null) return false;
+      await loadUrl(searchRedirect!);
+      return true;
+    }
+    if (script.contains('litetale-search-page')) {
+      if (searchPageRedirect == null) return false;
+      await loadUrl(searchPageRedirect!);
+      return true;
+    }
+    if (script.contains('litetale-search-next-url')) {
+      return nextSearchUrls[url] ?? '';
+    }
+    if (script.contains('litetale-search-interval')) {
+      return searchIntervals.isEmpty ? 0 : searchIntervals.removeAt(0);
+    }
+    if (script.contains('location.reload()')) {
+      searchReloads++;
+      await loadUrl(url);
+      return true;
+    }
+    if (script.contains('location.assign(')) {
+      final value =
+          RegExp(r'location\.assign\((".*?")\)').firstMatch(script)![1]!;
+      await loadUrl(jsonDecode(value) as String);
+      return true;
+    }
     if (script.contains('HTMLFormElement.prototype.submit.call(form)')) {
       loginSubmissions++;
       afterLoginSubmit?.call();
@@ -144,6 +181,7 @@ class _FakeBrowserPort implements Wenku8BrowserPort {
     }
     if (script.contains("url.searchParams.set('random'")) return true;
     if (script.contains('expectedKind')) {
+      if (stallExtraction) return Completer<dynamic>().future;
       readExtractions++;
       return readResults[url] ?? _detailPayload(url, '101');
     }
@@ -153,6 +191,305 @@ class _FakeBrowserPort implements Wenku8BrowserPort {
 
 void main() {
   group('Wenku8BrowserSession', () {
+    Map<String, Object?> listing(String url, int page) => {
+      'url': url,
+      'kind': 'list',
+      'aid': '',
+      'challenge': false,
+      'data': {
+        'currentPage': page,
+        'maxPage': 2,
+        'records': [
+          {
+            'aid': '$page',
+            'title': 'Result $page',
+            'image': 'https://img.wenku8.com/$page.jpg',
+            'detailUrl': '$_host/book/$page.htm',
+          },
+        ],
+      },
+    };
+
+    test(
+      'pagination reuses the real link without resubmitting its form',
+      () async {
+        final h = _Harness();
+        const first =
+            '$_host/modules/article/search.php?searchtype=articlename&searchkey=Re';
+        const second = '$first&page=2';
+        h.port.searchRedirect = first;
+        h.port.nextSearchUrls[first] = second;
+        h.port.readResults[first] = listing(first, 1);
+        h.port.readResults[second] = listing(second, 2);
+        await h.session.read<PageStatsNovelCover>(
+          'list',
+          Uri.parse(first),
+          searchKey: 'Re',
+        );
+        final result = await h.session.read<PageStatsNovelCover>(
+          'list',
+          Uri.parse(second),
+          searchKey: 'Re',
+        );
+        expect(result.currentPage, 2);
+        expect(result.records.single.aid, '2');
+        expect(h.port.searchSubmissions, 1);
+        expect(h.port.url, 'about:blank');
+        h.session.dispose();
+      },
+    );
+
+    test(
+      'an explicit interval retries the search GET once, never its POST',
+      () async {
+        final h = _Harness();
+        const first =
+            '$_host/modules/article/search.php?searchtype=articlename&searchkey=Re';
+        h.port
+          ..searchRedirect = first
+          ..searchIntervals.addAll([1, 0]);
+        h.port.readResults[first] = listing(first, 1);
+        final started = DateTime.now();
+        await h.session.read<PageStatsNovelCover>(
+          'list',
+          Uri.parse(first),
+          searchKey: 'Re',
+        );
+        expect(
+          DateTime.now().difference(started),
+          greaterThanOrEqualTo(const Duration(seconds: 1)),
+        );
+        expect(h.port.searchSubmissions, 1);
+        expect(h.port.searchReloads, 1);
+        expect(h.port.url, 'about:blank');
+        h.session.dispose();
+      },
+    );
+
+    test('cached pagination cannot replace a different search query', () async {
+      final h = _Harness();
+      const first =
+          '$_host/modules/article/search.php?searchtype=articlename&searchkey=Re';
+      const other =
+          '$_host/modules/article/search.php?searchtype=author&searchkey=Z';
+      h.port.searchRedirect = first;
+      h.port.nextSearchUrls[first] = '$first&page=2';
+      h.port.readResults[first] = listing(first, 1);
+      h.port.readResults['$other&page=2'] = listing('$other&page=2', 2);
+      await h.session.read<PageStatsNovelCover>(
+        'list',
+        Uri.parse(first),
+        searchKey: 'Re',
+      );
+      h.port
+        ..searchRedirect = other
+        ..searchPageRedirect = '$other&page=2';
+      final result = await h.session.read<PageStatsNovelCover>(
+        'list',
+        Uri.parse('$other&page=2'),
+        searchKey: 'Z',
+      );
+      expect(result.currentPage, 2);
+      expect(h.port.searchSubmissions, 2);
+      expect(h.port.targetLoads, isNot(contains('$first&page=2')));
+      h.session.dispose();
+    });
+
+    test('a repeated interval notice stops after one GET retry', () async {
+      final h = _Harness();
+      const first =
+          '$_host/modules/article/search.php?searchtype=articlename&searchkey=Re';
+      h.port
+        ..searchRedirect = first
+        ..searchIntervals.addAll([1, 1]);
+      await expectLater(
+        h.session.read<PageStatsNovelCover>(
+          'list',
+          Uri.parse(first),
+          searchKey: 'Re',
+        ),
+        throwsA(isA<Wenku8BrowserException>()),
+      );
+      expect(h.port.searchSubmissions, 1);
+      expect(h.port.searchReloads, 1);
+      expect(h.port.url, 'about:blank');
+      h.session.dispose();
+    });
+
+    test('reads the form redirect with an implicit first results page', () async {
+      final h = _Harness();
+      const first =
+          '$_host/modules/article/search.php?searchtype=articlename&searchkey=Re';
+      h.port.searchRedirect = first;
+      h.port.readResults[first] = {
+        'url': first,
+        'kind': 'list',
+        'aid': '',
+        'challenge': false,
+        'data': {
+          'currentPage': 1,
+          'maxPage': 2,
+          'records': [
+            {
+              'aid': '101',
+              'title': '志乃与恋 Future',
+              'image': 'https://img.wenku8.com/101.jpg',
+              'detailUrl': '$_host/book/101.htm',
+            },
+          ],
+        },
+      };
+      final result = await h.session.read<PageStatsNovelCover>(
+        'list',
+        Uri.parse(first),
+        searchKey: 'Re',
+      );
+      expect(result.records.single.title, '志乃与恋 Future');
+      expect(h.port.searchSubmissions, 1);
+      expect(h.port.loginSubmissions, 0);
+      expect(h.port.url, 'about:blank');
+      h.session.dispose();
+    });
+
+    test(
+      'Chinese search uses the site form and follows its real second page',
+      () async {
+        final h = _Harness();
+        const first =
+            '$_host/modules/article/search.php?searchtype=articlename&searchkey=%C4%A7%B7%A8';
+        const second =
+            '$_host/modules/article/search.php?searchtype=articlename&searchkey=%C4%A7%B7%A8&page=2';
+        h.port
+          ..searchRedirect = first
+          ..searchPageRedirect = second;
+        h.port.readResults[second] = {
+          'url': second,
+          'kind': 'list',
+          'aid': '',
+          'challenge': false,
+          'data': {
+            'currentPage': 2,
+            'maxPage': 2,
+            'records': [
+              {
+                'aid': '101',
+                'title': '魔法',
+                'image': 'https://img.wenku8.com/101.jpg',
+                'detailUrl': '$_host/book/101.htm',
+              },
+            ],
+          },
+        };
+        final result = await h.session.read<PageStatsNovelCover>(
+          'list',
+          Uri.parse('$second&charset=gbk'),
+          searchKey: '魔法',
+        );
+        expect(result.currentPage, 2);
+        expect(h.port.searchSubmissions, 1);
+        expect(h.port.loginSubmissions, 0);
+        expect(h.port.targetLoads, ['$_host/', first, second]);
+        expect(h.port.url, 'about:blank');
+        h.session.dispose();
+      },
+    );
+
+    test('search form changes fail finitely without a login POST', () async {
+      final h = _Harness();
+      await expectLater(
+        h.session.read<PageStatsNovelCover>(
+          'list',
+          Uri.parse(
+            '$_host/modules/article/search.php?searchtype=author&searchkey=Re&page=1',
+          ),
+          searchKey: 'Re',
+        ),
+        throwsA(isA<Wenku8BrowserException>()),
+      );
+      expect(h.port.searchSubmissions, 1);
+      expect(h.port.loginSubmissions, 0);
+      expect(h.port.url, 'about:blank');
+      h.session.dispose();
+    });
+
+    test(
+      'reads interactive DOM without waiting for stalled images or load event',
+      () async {
+        final harness = _Harness(autoFinish: false);
+        const url = '$_host/book/101.htm';
+        harness.port.states[url] = {
+          ..._page(url, ready: false),
+          'domReady': true,
+        };
+        final info = await harness.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse(url),
+          aid: '101',
+        );
+        expect(info.title, 'Fixture 101');
+        expect(harness.port.url, 'about:blank');
+        harness.session.dispose();
+      },
+    );
+
+    test(
+      'stalled script releases queue and replaces controller before another read',
+      () async {
+        final harness = _Harness(pageTimeout: const Duration(milliseconds: 40));
+        harness.port.stallExtraction = true;
+        await expectLater(
+          harness.session.read<models.NovelInfo>(
+            'detail',
+            Uri.parse('$_host/book/101.htm'),
+            aid: '101',
+          ),
+          throwsA(isA<Wenku8BrowserException>()),
+        );
+        expect(harness.session.rendererGeneration, 1);
+        final replacement = _FakeBrowserPort(
+          onPageFinished: harness.session.pageFinished,
+          autoFinish: true,
+          staleBlankCallbacks: 0,
+        );
+        harness.session.attach(replacement);
+        final info = await harness.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse('$_host/book/101.htm'),
+          aid: '101',
+        );
+        expect(info.title, 'Fixture 101');
+        expect(harness.port.targetLoads.length, 1);
+        harness.session.dispose();
+      },
+    );
+
+    test('stalled idle command cannot keep loading forever', () async {
+      final harness = _Harness(pageTimeout: const Duration(milliseconds: 30));
+      harness.port.stallBlank = true;
+      await expectLater(
+        harness.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse('$_host/book/101.htm'),
+          aid: '101',
+        ),
+        throwsA(isA<Wenku8BrowserException>()),
+      );
+      expect(harness.session.rendererGeneration, 1);
+      harness.session.dispose();
+    });
+
+    test(
+      'stalled native read falls back without waiting indefinitely',
+      () async {
+        final harness = _Harness(pageTimeout: const Duration(milliseconds: 30));
+        final value = await harness.session.nativeOrBrowser(
+          () => Completer<String>().future,
+          () async => 'browser',
+        );
+        expect(value, 'browser');
+        harness.session.dispose();
+      },
+    );
     test(
       'rejects an exact-search redirect with unknown or duplicate query parameters',
       () async {

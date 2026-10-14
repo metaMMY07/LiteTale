@@ -163,7 +163,9 @@ class _IndexPageState extends State<IndexPage>
                   child: Semantics(
                     button: true,
                     label:
-                        activeSource.value == SourceId.lnovel
+                        activeSource.value == SourceId.bili
+                            ? '搜索书名'
+                            : activeSource.value == SourceId.lnovel
                             ? '按目录查找繁体书名'
                             : '搜索书名、作者',
                     child: InkWell(
@@ -172,8 +174,10 @@ class _IndexPageState extends State<IndexPage>
                       child: IgnorePointer(
                         child: SearchBar(
                           hintText:
-                              activeSource.value == SourceId.lnovel
-                                  ? '按目录查找繁体书名'
+                              activeSource.value == SourceId.bili
+                                  ? '搜索书名'
+                                  : sourceUsesCatalogSearch(activeSource.value)
+                                  ? '按目录查找书名'
                                   : '搜索书名、作者',
                           leading: const Icon(Icons.search_rounded),
                           trailing: const [Icon(Icons.auto_stories_rounded)],

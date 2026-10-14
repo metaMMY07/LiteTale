@@ -10,6 +10,7 @@ import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/utils/wenku8_home_dom.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
 import 'package:wild/utils/wenku8_read_dom.dart';
+import 'package:wild/utils/wenku8_search_navigation.dart';
 
 /// The browser owns its cookies. Only bounded, typed page data leaves it.
 abstract interface class Wenku8BrowserPort {
@@ -17,6 +18,39 @@ abstract interface class Wenku8BrowserPort {
   Future<String> currentUrl();
   Future<dynamic> executeScript(String script);
   Future<void> persistSession();
+}
+
+// A platform-channel future can stall independently of page navigation. Bound
+// every command so one broken WebView request cannot own the read queue forever.
+class _BoundedBrowserPort implements Wenku8BrowserPort {
+  _BoundedBrowserPort(this.inner, this.timeout, this.onTimeout);
+  final Wenku8BrowserPort inner;
+  final Duration timeout;
+  final VoidCallback onTimeout;
+  bool expired = false;
+
+  Future<T> _run<T>(Future<T> Function() operation) async {
+    const error = Wenku8BrowserException('文库8网页组件响应超时，请重试。');
+    if (expired) throw error;
+    return operation().timeout(
+      timeout,
+      onTimeout: () {
+        expired = true;
+        onTimeout();
+        throw error;
+      },
+    );
+  }
+
+  @override
+  Future<void> loadUrl(String url) => _run(() => inner.loadUrl(url));
+  @override
+  Future<String> currentUrl() => _run(inner.currentUrl);
+  @override
+  Future<dynamic> executeScript(String script) =>
+      _run(() => inner.executeScript(script));
+  @override
+  Future<void> persistSession() => _run(inner.persistSession);
 }
 
 class Wenku8BrowserException implements Exception {
@@ -27,8 +61,9 @@ class Wenku8BrowserException implements Exception {
 }
 
 class Wenku8SiteVerificationRequired extends Wenku8BrowserException {
-  const Wenku8SiteVerificationRequired()
+  const Wenku8SiteVerificationRequired({this.target})
     : super('文库8要求站点验证。请打开站点完成验证或登录，再返回重试。');
+  final Uri? target;
 }
 
 class Wenku8BrowserSession extends ChangeNotifier {
@@ -64,6 +99,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
   String? _navigationHost;
   ({String host, bool browser})? _loginTransport;
   int _captchaRequest = 0;
+  ({String query, int page, Uri url})? _nextSearchPage;
   final _sessionInvalidations = StreamController<void>.broadcast();
 
   /// Only a confirmed login redirect invalidates authentication. Ordinary
@@ -71,6 +107,28 @@ class Wenku8BrowserSession extends ChangeNotifier {
   Stream<void> get sessionInvalidations => _sessionInvalidations.stream;
 
   bool get requested => _requested;
+  int rendererGeneration = 0;
+
+  Future<Wenku8BrowserPort> _commands() async {
+    final port = await _renderer();
+    return _BoundedBrowserPort(
+      port,
+      pageTimeout < const Duration(seconds: 5)
+          ? pageTimeout
+          : const Duration(seconds: 5),
+      () {
+        if (!identical(_port, port)) return;
+        _port = null;
+        _attachment = null;
+        _captchaEpoch = null;
+        _epoch++;
+        rendererGeneration++;
+        // Replace the native view: a late command on the abandoned controller
+        // must never navigate the controller used by the next queued request.
+        notifyListeners();
+      },
+    );
+  }
 
   bool allowsNavigation(String url) =>
       url == 'about:blank' ||
@@ -164,9 +222,12 @@ class Wenku8BrowserSession extends ChangeNotifier {
   ) async {
     if (await enabled()) return browserRequest();
     try {
-      return await nativeRequest();
+      return await nativeRequest().timeout(pageTimeout);
     } catch (error) {
-      if (!shouldUseWenku8WebViewFallback(error)) rethrow;
+      if (error is! TimeoutException &&
+          !shouldUseWenku8WebViewFallback(error)) {
+        rethrow;
+      }
       return browserRequest();
     }
   }
@@ -261,25 +322,44 @@ class Wenku8BrowserSession extends ChangeNotifier {
     _epoch++;
     _captchaEpoch = null;
     _navigationError = null;
-    final before = _finished;
     await port.loadUrl(target.toString());
+    await _waitForPage(port, host, target);
+  }
+
+  Future<void> _waitForPage(
+    Wenku8BrowserPort port,
+    String host,
+    Uri target, {
+    bool searchResult = false,
+  }) async {
     final deadline = DateTime.now().add(pageTimeout);
     var verification = false;
     while (DateTime.now().isBefore(deadline)) {
       if (_navigationError case final error?) throw error;
-      if (_finished > before) {
+      {
         final state = await _pageState(port);
         final url = state['url'] as String? ?? '';
-        if (url == 'about:blank' || url.isEmpty) {
+        if (url == 'about:blank' ||
+            url.isEmpty ||
+            state['navigating'] == true) {
           await Future<void>.delayed(pollInterval);
           continue;
         }
         if (!sameOrigin(url, host)) {
           throw const Wenku8BrowserException('文库8网页离开了当前站点，已停止读取。');
         }
+        final path = Uri.parse(url).path;
+        if (searchResult &&
+            path != '/login.php' &&
+            path != '/modules/article/search.php' &&
+            !RegExp(r'^/book/[1-9][0-9]{0,11}\.htm$').hasMatch(path) &&
+            state['challenge'] != true) {
+          await Future<void>.delayed(pollInterval);
+          continue;
+        }
         if (state['challenge'] == true) {
           verification = true;
-        } else if (state['ready'] == true) {
+        } else if (state['domReady'] == true || state['ready'] == true) {
           final loaded = Uri.parse(url);
           if (loaded.path == '/login.php' && target.path != '/login.php') {
             if (host == await apiHost()) {
@@ -297,13 +377,13 @@ class Wenku8BrowserSession extends ChangeNotifier {
       }
       await Future<void>.delayed(pollInterval);
     }
-    if (verification) throw const Wenku8SiteVerificationRequired();
+    if (verification) throw Wenku8SiteVerificationRequired(target: target);
     throw const Wenku8BrowserException('文库8网页加载超时，请重试。');
   }
 
   Future<List<HomeBlock>> home() => _serial(() async {
     final host = await apiHost();
-    final port = await _renderer();
+    final port = await _commands();
     try {
       await _navigate(port, host, Uri.parse('$host/'));
       final loaded = await port.currentUrl();
@@ -320,74 +400,164 @@ class Wenku8BrowserSession extends ChangeNotifier {
     }
   });
 
-  Future<T> read<T>(String kind, Uri target, {String? aid}) => _serial(
-    () async {
-      final host = await apiHost();
-      final port = await _renderer();
-      try {
-        await _navigate(port, host, target);
-        final loaded = await port.currentUrl();
-        // Wenku8 redirects an exact, single search hit to its detail page.
-        // Accept this only for a search GET and parse the strict detail model.
-        final redirect = Uri.parse(loaded);
-        final matchedBook = RegExp(
-          r'^/book/([1-9][0-9]{0,11})\.htm$',
-        ).firstMatch(redirect.path);
-        if (kind == 'list' &&
-            isWenku8SearchRequest(target, host) &&
-            matchedBook != null &&
-            sameOrigin(loaded, host) &&
-            !redirect.hasQuery &&
-            !redirect.hasFragment) {
-          final bookId = matchedBook[1]!;
-          final raw = await port.executeScript(
-            wenku8ReadDomExtractionScript(host, kind: 'detail', aid: bookId),
-          );
-          final info =
-              parseWenku8ReadWebViewResult(
-                    raw,
-                    apiHost: host,
-                    loadedUrl: loaded,
-                    kind: 'detail',
-                    aid: bookId,
-                  )
-                  as NovelInfo;
-          await enable(host);
-          return PageStatsNovelCover(
-                currentPage: 1,
-                maxPage: 1,
-                records: [
-                  NovelCover(
-                    title: info.title,
-                    img: info.imgUrl,
-                    detailUrl: loaded,
-                    aid: bookId,
-                  ),
-                ],
-              )
-              as T;
+  Future<void> _waitForSearchPage(
+    Wenku8BrowserPort port,
+    String host,
+    Uri target,
+  ) async {
+    await _waitForPage(port, host, target, searchResult: true);
+    final interval = await port.executeScript(wenku8SearchIntervalScript(host));
+    if (interval is! int || interval <= 0) return;
+    // The site currently asks for five seconds between searches. Respect its
+    // declared interval, but never wait indefinitely or replay a form POST.
+    final loaded = Uri.tryParse(await port.currentUrl());
+    if (interval > 10 ||
+        loaded == null ||
+        !isWenku8SearchRequest(loaded, host)) {
+      throw const Wenku8BrowserException('文库8限制了搜索频率，请稍后重试。');
+    }
+    await Future<void>.delayed(Duration(seconds: interval, milliseconds: 150));
+    await port.executeScript(
+      'window.__liteTaleNavigating = true; location.reload(); true;',
+    );
+    await _waitForPage(port, host, target, searchResult: true);
+    final repeated = await port.executeScript(wenku8SearchIntervalScript(host));
+    if (repeated is int && repeated > 0) {
+      throw const Wenku8BrowserException('文库8仍限制搜索频率，请稍后重试。');
+    }
+  }
+
+  Future<T> read<T>(
+    String kind,
+    Uri target, {
+    String? aid,
+    String? searchKey,
+  }) => _serial(() async {
+    final host = await apiHost();
+    final port = await _commands();
+    String? searchIdentity;
+    try {
+      if (kind == 'list' &&
+          searchKey != null &&
+          isWenku8SearchRequest(target, host)) {
+        final query = Uri.splitQueryString(target.query, encoding: latin1);
+        final page = int.parse(query['page'] ?? '1');
+        searchIdentity = jsonEncode([host, query['searchtype'], searchKey]);
+        final cached = _nextSearchPage;
+        if (page == 1 || cached?.query != searchIdentity) {
+          _nextSearchPage = null;
         }
-        final raw = await port.executeScript(
-          wenku8ReadDomExtractionScript(host, kind: kind, aid: aid),
+        await _navigate(port, host, Uri.parse('$host/'));
+        if (page > 1 &&
+            cached?.query == searchIdentity &&
+            cached?.page == page) {
+          await port.executeScript(
+            'window.__liteTaleNavigating = true; location.assign(${jsonEncode(cached!.url.toString())}); true;',
+          );
+          await _waitForSearchPage(port, host, target);
+        } else {
+          final submitted = await port.executeScript(
+            wenku8SearchSubmitScript(host, searchKey, query['searchtype']!),
+          );
+          if (submitted != true) {
+            throw const Wenku8BrowserException('文库8搜索表单已变化，请打开站点检查后重试。');
+          }
+          await _waitForSearchPage(port, host, target);
+          if (page > 1) {
+            if (await port.executeScript(wenku8SearchPageScript(host, page)) !=
+                true) {
+              throw const Wenku8BrowserException('文库8没有返回对应的搜索分页，请重新搜索。');
+            }
+            await _waitForSearchPage(port, host, target);
+          }
+        }
+      } else if (target.path == '/modules/article/tags.php') {
+        // Categories also expect ordinary same-origin navigation from home.
+        await _navigate(port, host, Uri.parse('$host/'));
+        if (!sameOrigin(target.toString(), host)) {
+          throw const Wenku8BrowserException('文库8请求地址不属于当前站点。');
+        }
+        await port.executeScript(
+          'window.__liteTaleNavigating = true; location.assign(${jsonEncode(target.toString())}); true;',
         );
-        final value = parseWenku8ReadWebViewResult(
-          raw,
-          apiHost: host,
-          loadedUrl: loaded,
-          kind: kind,
-          aid: aid,
-        );
-        await enable(host);
-        return value as T;
-      } finally {
-        await _idle(port);
+        await _waitForPage(port, host, target);
+      } else {
+        await _navigate(port, host, target);
       }
-    },
-  );
+      final loaded = await port.currentUrl();
+      // Wenku8 redirects an exact, single search hit to its detail page.
+      // Accept this only for a search GET and parse the strict detail model.
+      final redirect = Uri.parse(loaded);
+      final matchedBook = RegExp(
+        r'^/book/([1-9][0-9]{0,11})\.htm$',
+      ).firstMatch(redirect.path);
+      if (kind == 'list' &&
+          isWenku8SearchRequest(target, host) &&
+          matchedBook != null &&
+          sameOrigin(loaded, host) &&
+          !redirect.hasQuery &&
+          !redirect.hasFragment) {
+        final bookId = matchedBook[1]!;
+        final raw = await port.executeScript(
+          wenku8ReadDomExtractionScript(host, kind: 'detail', aid: bookId),
+        );
+        final info =
+            parseWenku8ReadWebViewResult(
+                  raw,
+                  apiHost: host,
+                  loadedUrl: loaded,
+                  kind: 'detail',
+                  aid: bookId,
+                )
+                as NovelInfo;
+        await enable(host);
+        return PageStatsNovelCover(
+              currentPage: 1,
+              maxPage: 1,
+              records: [
+                NovelCover(
+                  title: info.title,
+                  img: info.imgUrl,
+                  detailUrl: loaded,
+                  aid: bookId,
+                ),
+              ],
+            )
+            as T;
+      }
+      final raw = await port.executeScript(
+        wenku8ReadDomExtractionScript(host, kind: kind, aid: aid),
+      );
+      final value = parseWenku8ReadWebViewResult(
+        raw,
+        apiHost: host,
+        loadedUrl: loaded,
+        kind: kind,
+        aid: aid,
+      );
+      await enable(host);
+      if (searchIdentity != null) _nextSearchPage = null;
+      if (searchIdentity != null &&
+          value is PageStatsNovelCover &&
+          value.currentPage < value.maxPage) {
+        final page = value.currentPage + 1;
+        final rawUrl = await port.executeScript(
+          wenku8SearchNextPageUrlScript(host, page),
+        );
+        final next = rawUrl is String ? Uri.tryParse(rawUrl) : null;
+        if (next != null && isWenku8SearchRequest(next, host)) {
+          _nextSearchPage = (query: searchIdentity, page: page, url: next);
+        }
+      }
+      return value as T;
+    } finally {
+      await _idle(port);
+    }
+  });
 
   Future<Uint8List> captcha() => _serial(() async {
     final host = await apiHost();
-    final port = await _renderer();
+    final port = await _commands();
     try {
       await _navigate(port, host, Uri.parse('$host/login.php'));
       await port.executeScript(_refreshCaptchaScript);
@@ -430,7 +600,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
   Future<void> login(String username, String password, String checkcode) =>
       _serial(() async {
         final host = await apiHost();
-        final port = await _renderer();
+        final port = await _commands();
         if (_captchaHost != host || _captchaEpoch != _epoch) {
           throw const Wenku8BrowserException('验证码已过期，请刷新验证码后登录。');
         }
@@ -511,7 +681,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
     _captchaEpoch = null;
     if (!await enabled()) return;
     final host = await apiHost();
-    final port = await _renderer();
+    final port = await _commands();
     try {
       await _navigate(port, host, Uri.parse('$host/logout.php'));
       await port.persistSession();
@@ -549,6 +719,8 @@ class Wenku8BrowserSession extends ChangeNotifier {
     !!document.querySelector('form input[name="password"]');
   var signedIn = !!document.querySelector('a[href*="logout.php"]') && !loginForm;
   return JSON.stringify({url:location.href,ready:document.readyState === 'complete',
+    navigating:window.__liteTaleNavigating === true,
+    domReady:!!document.body && (document.readyState === 'interactive' || document.readyState === 'complete'),
     challenge:challenge,loginForm:loginForm,authenticated:!challenge && signedIn,
     home:!!document.querySelector('#centers,div.main'),loginError:error});
 })()

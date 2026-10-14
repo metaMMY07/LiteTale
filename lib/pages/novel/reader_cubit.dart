@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/models/reader_page.dart';
-import 'package:wild/services/reader_paginator.dart';
+import 'package:wild/services/reader_pagination_cache.dart';
 import 'package:wild/services/reader_viewport_layout.dart';
 import 'package:wild/services/reader_position.dart';
+import 'package:wild/services/reading_progress.dart';
+import 'package:wild/sources/book_source.dart';
 import 'package:wild/pages/novel/line_height_cubit.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
@@ -21,6 +24,17 @@ class ReaderCubit extends Cubit<ReaderState> {
   String? _contentAid;
   String? _contentCid;
   ReaderPosition? _position;
+  ReaderPageOffsets? _offsets;
+  String? _sourceFont;
+  int? _contentSession;
+  bool _closing = false;
+  final Future<SourceChapter> Function({
+    required String aid,
+    required String cid,
+  })
+  _read;
+  final int Function(String aid) _session;
+  final ReadingProgressQueue _progress;
   final NovelInfo novelInfo;
   String initialAid;
   String initialCid;
@@ -47,7 +61,14 @@ class ReaderCubit extends Cubit<ReaderState> {
     required this.leftPaddingCubit,
     required this.rightPaddingCubit,
     required this.fontSettingsCubit,
-  }) : super(ReaderInitial());
+    Future<SourceChapter> Function({required String aid, required String cid})?
+    read,
+    int Function(String aid)? sessionGeneration,
+    ReadingProgressQueue? progress,
+  }) : _read = read ?? readerChapter,
+       _session = sessionGeneration ?? readerSessionGeneration,
+       _progress = progress ?? ReadingProgressQueue.instance,
+       super(ReaderInitial());
 
   String _findChapterTitle(String aid, String cid) {
     for (final volume in initialVolumes) {
@@ -72,22 +93,37 @@ class ReaderCubit extends Cubit<ReaderState> {
   }
 
   Future<void> loadChapter({String? aid, String? cid, int? initialPage}) async {
+    if (_closing || isClosed) return;
     final request = ++_request;
+    final targetAid = aid ?? initialAid;
+    final targetCid = cid ?? initialCid;
+    final session = _session(targetAid);
+    final revision = sourceRevision.value;
+    bool sourceMatches() =>
+        sourceOf(targetAid) != SourceId.bili ||
+        (activeSource.value == SourceId.bili &&
+            sourceRevision.value == revision);
     try {
+      unawaited(_progress.flushBounded());
       emit(ReaderLoading(super.state.showControls));
-      initialAid = aid ?? initialAid;
-      initialCid = cid ?? initialCid;
-
-      final targetAid = initialAid;
-      final targetCid = initialCid;
+      initialAid = targetAid;
+      initialCid = targetCid;
 
       final chapterTitle = _findChapterTitle(targetAid, targetCid);
-      final volume = _findVolume(targetAid, targetCid);
-      final content = await chapterContent(aid: targetAid, cid: targetCid);
-      if (isClosed || request != _request) return;
+      final chapter = await _read(aid: targetAid, cid: targetCid);
+      if (_closing || isClosed || request != _request || !sourceMatches()) {
+        return;
+      }
+      if (_session(targetAid) != session) {
+        emit(ReaderError('账号已变化，请重新打开章节。'));
+        return;
+      }
+      final content = chapter.content;
       _loadedContent = content;
       _contentAid = targetAid;
       _contentCid = targetCid;
+      _sourceFont = chapter.fontFamily;
+      _contentSession = session;
 
       final fontSize = fontSizeCubit.state;
       final paragraphSpacing = paragraphSpacingCubit.state;
@@ -114,24 +150,10 @@ class ReaderCubit extends Cubit<ReaderState> {
       }
 
       // 计算从第一页到当前页的累计字数
-      _position = ReaderPosition.at(pages, pageIndex);
-      final characterCount = _calculateCharacterCountUpToPage(pages, pageIndex);
+      _offsets = ReaderPageOffsets(pages);
+      _position = _offsets!.at(pageIndex);
 
-      // 更新阅读历史
-      await updateHistory(
-        novelId: targetAid,
-        novelName: novelInfo.title,
-        volumeId: volume.id,
-        volumeName: volume.title,
-        chapterId: targetCid,
-        chapterTitle: chapterTitle,
-        progress: characterCount,
-        progressPage: pageIndex,
-        cover: novelInfo.imgUrl,
-        author: novelInfo.author,
-      );
-
-      if (isClosed || request != _request) return;
+      if (isClosed || request != _request || !sourceMatches()) return;
       emit(
         ReaderLoaded(
           aid: targetAid,
@@ -145,18 +167,35 @@ class ReaderCubit extends Cubit<ReaderState> {
           showControls: super.state.showControls,
         ),
       );
+      _savePageHistory(state as ReaderLoaded);
     } catch (e) {
-      if (isClosed || request != _request) return;
-      emit(ReaderError(e.toString()));
+      if (isClosed || request != _request || !sourceMatches()) return;
+      final sessionMatches = _session(targetAid) == session;
+      emit(
+        ReaderError(
+          sessionMatches ? e.toString() : '账号已变化，请重新打开章节。',
+          cause: sessionMatches ? e : null,
+        ),
+      );
     }
   }
 
   Future reloadCurrentPage() async {
-    if (state is! ReaderLoaded) return;
+    if (_closing || state is! ReaderLoaded) return;
     final request = ++_request;
+    final targetAid = initialAid;
+    final targetCid = initialCid;
+    final session = _session(targetAid);
+    final revision = sourceRevision.value;
+    bool sourceMatches() =>
+        sourceOf(targetAid) != SourceId.bili ||
+        (activeSource.value == SourceId.bili &&
+            sourceRevision.value == revision);
     try {
-      final targetAid = initialAid;
-      final targetCid = initialCid;
+      if (_contentSession != session) {
+        emit(ReaderError('账号已变化，请重新打开章节。'));
+        return;
+      }
 
       final chapterTitle = _findChapterTitle(targetAid, targetCid);
       final content =
@@ -164,8 +203,8 @@ class ReaderCubit extends Cubit<ReaderState> {
                   _contentCid == targetCid &&
                   _loadedContent != null
               ? _loadedContent!
-              : await chapterContent(aid: targetAid, cid: targetCid);
-      if (isClosed || request != _request) return;
+              : (await _read(aid: targetAid, cid: targetCid)).content;
+      if (isClosed || request != _request || !sourceMatches()) return;
 
       // Paging remains available while the content request is pending. Read
       // the latest position now, not the one at the start of that request.
@@ -194,6 +233,7 @@ class ReaderCubit extends Cubit<ReaderState> {
       final pages = pagination.pages;
 
       final currentPageIndex = position.pageIn(pages);
+      _offsets = ReaderPageOffsets(pages);
 
       emit(
         ReaderLoaded(
@@ -208,10 +248,16 @@ class ReaderCubit extends Cubit<ReaderState> {
           showControls: super.state.showControls,
         ),
       );
-      await _savePageHistory(state as ReaderLoaded);
+      _savePageHistory(state as ReaderLoaded);
     } catch (e) {
-      if (isClosed || request != _request) return;
-      emit(ReaderError(e.toString()));
+      if (isClosed || request != _request || !sourceMatches()) return;
+      final sessionMatches = _session(targetAid) == session;
+      emit(
+        ReaderError(
+          sessionMatches ? e.toString() : '账号已变化，请重新打开章节。',
+          cause: sessionMatches ? e : null,
+        ),
+      );
     }
   }
 
@@ -219,33 +265,38 @@ class ReaderCubit extends Cubit<ReaderState> {
     if (state is ReaderLoaded) {
       final currentState = state as ReaderLoaded;
       if (index < 0 || index >= currentState.pages.length) return;
-      _position = ReaderPosition.at(currentState.pages, index);
+      _position = (_offsets ??= ReaderPageOffsets(currentState.pages)).at(
+        index,
+      );
       emit(currentState.copyWith(currentPageIndex: index));
 
       _savePageHistory(state as ReaderLoaded);
     }
   }
 
-  Future<void> _savePageHistory(ReaderLoaded currentState) async {
+  void _savePageHistory(ReaderLoaded currentState) {
     final index = currentState.currentPageIndex;
-    // 计算从第一页到当前页的累计字数
-    final characterCount = _calculateCharacterCountUpToPage(
-      currentState.pages,
-      index,
-    );
+    final characterCount = (_offsets ??= ReaderPageOffsets(currentState.pages))
+        .charactersThrough(index);
+    final session = _contentSession;
+    final sessionFor = _session;
+    final bookId = currentState.aid;
 
     // 更新阅读历史中的页码
-    await updateHistory(
-      novelId: currentState.aid,
-      novelName: novelInfo.title,
-      volumeId: _findVolume(currentState.aid, currentState.cid).id,
-      volumeName: _findVolume(currentState.aid, currentState.cid).title,
-      chapterId: currentState.cid,
-      chapterTitle: currentState.title,
-      progress: characterCount,
-      progressPage: index,
-      cover: novelInfo.imgUrl,
-      author: novelInfo.author,
+    _progress.enqueue(
+      ReadingProgress(
+        bookId: currentState.aid,
+        title: novelInfo.title,
+        volumeId: _findVolume(currentState.aid, currentState.cid).id,
+        volumeTitle: _findVolume(currentState.aid, currentState.cid).title,
+        chapterId: currentState.cid,
+        chapterTitle: currentState.title,
+        characters: characterCount,
+        page: index,
+        cover: novelInfo.imgUrl,
+        author: novelInfo.author,
+      ),
+      isValid: () => sessionFor(bookId) == session,
     );
   }
 
@@ -341,19 +392,6 @@ class ReaderCubit extends Cubit<ReaderState> {
     return -1;
   }
 
-  /// 计算从第一页到指定页码的累计字数
-  int _calculateCharacterCountUpToPage(List<ReaderPage> pages, int pageIndex) {
-    int totalCharacters = 0;
-    for (int i = 0; i <= pageIndex && i < pages.length; i++) {
-      final page = pages[i];
-      if (!page.isImage) {
-        // 只计算文本页面的字数，排除图片页面
-        totalCharacters += page.content.length;
-      }
-    }
-    return totalCharacters;
-  }
-
   ({List<ReaderPage> pages, ReaderViewportLayout layout, String fontFamily})
   _paginateContent(
     String aid,
@@ -377,10 +415,12 @@ class ReaderCubit extends Cubit<ReaderState> {
       textScaler: metrics.textScaler,
       boldText: metrics.boldText,
     );
-    final fontFamily = fontSettingsCubit.state.resolveReaderFamily(
-      chapterFont(aid, cid),
-    );
-    final pages = paginateReaderContent(
+    final fontFamily = fontSettingsCubit.state.resolveReaderFamily(_sourceFont);
+    final pages = ReaderPaginationCache.instance.paginate(
+      sourceId: sourceOf(aid).name,
+      bookId: aid,
+      chapterId: cid,
+      sessionGeneration: _contentSession ?? _session(aid),
       content: content,
       canvasWidth: layout.contentWidth,
       canvasHeight: layout.contentHeight,
@@ -399,6 +439,14 @@ class ReaderCubit extends Cubit<ReaderState> {
       final currentState = state as ReaderLoaded;
       emit(currentState.copyWith(showControls: !currentState.showControls));
     }
+  }
+
+  @override
+  Future<void> close() async {
+    _closing = true;
+    _request++;
+    await super.close();
+    await _progress.flushBounded();
   }
 }
 
@@ -420,8 +468,9 @@ class ReaderLoading extends ReaderState {
 
 class ReaderError extends ReaderState {
   final String error;
+  final Object? cause;
 
-  ReaderError(this.error);
+  ReaderError(this.error, {this.cause});
 
   @override
   get showControls => false;

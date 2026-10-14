@@ -1,5 +1,23 @@
 import 'package:wild/models/reader_page.dart';
 
+/// Build once per pagination, then query text/image offsets in constant time.
+class ReaderPageOffsets {
+  ReaderPageOffsets(List<ReaderPage> pages) : pages = List.unmodifiable(pages) {
+    for (final page in pages) {
+      _characters.add(
+        _characters.last + (page.isImage ? 0 : page.content.length),
+      );
+      _images.add(_images.last + (page.isImage ? 1 : 0));
+    }
+  }
+  final List<ReaderPage> pages;
+  final _characters = <int>[0];
+  final _images = <int>[0];
+  ReaderPosition at(int index) =>
+      ReaderPosition(_characters[index], _images[index], pages[index].isImage);
+  int charactersThrough(int index) => _characters[index + 1];
+}
+
 /// Preserve a content anchor until the reader actually turns a page. Using
 /// the newly paginated page's beginning as the next anchor drifts backwards
 /// each time the device rotates. Image positions also need their own ordinal.

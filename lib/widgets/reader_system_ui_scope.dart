@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:wild/widgets/reading_progress_scope.dart';
 
 /// The route owns immersive mode, so changing chapters or repaginating does
 /// not briefly restore the status bar and invalidate the new page bounds.
@@ -35,5 +36,6 @@ class _ReaderSystemUiScopeState extends State<ReaderSystemUiScope>
   }
 
   @override
-  Widget build(BuildContext context) => widget.child;
+  Widget build(BuildContext context) =>
+      ReadingProgressScope(child: widget.child);
 }

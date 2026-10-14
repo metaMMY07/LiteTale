@@ -1,0 +1,91 @@
+{
+  "schema": "litetale-rule-source",
+  "schemaVersion": 1,
+  "source": {
+    "id": "sfacg_import_example",
+    "name": "SF轻小说（导入示例）",
+    "baseUrl": "https://book.sfacg.com",
+    "version": "2026-10",
+    "charset": "utf-8"
+  },
+  "rules": {
+    "discover": {
+      "url": "https://book.sfacg.com/list/default.aspx?PageIndex={{page}}",
+      "items": {
+        "selector": "css:.Comic_Pic_List",
+        "fields": {
+          "title": {
+            "selector": "css:img[alt]",
+            "value": "attr",
+            "attribute": "alt"
+          },
+          "detailUrl": {
+            "selector": "css:a[href^='/Novel/']",
+            "value": "attr",
+            "attribute": "href"
+          },
+          "coverUrl": {
+            "selector": "css:img",
+            "value": "attr",
+            "attribute": "src"
+          }
+        }
+      },
+      "pagination": {
+        "next": {
+          "selector": "css:.pagebarNext a",
+          "value": "attr",
+          "attribute": "href"
+        }
+      }
+    },
+    "detail": {
+      "url": "{{bookUrl}}",
+      "fields": {
+        "title": {
+          "selector": "css:h4.book-title",
+          "value": "text"
+        },
+        "author": {
+          "selector": "css:p.autor-name",
+          "value": "text"
+        },
+        "description": {
+          "selector": "css:p.introduce",
+          "value": "text"
+        },
+        "catalogUrl": {
+          "selector": "css:a[href*='/MainIndex/']",
+          "value": "attr",
+          "attribute": "href"
+        }
+      }
+    },
+    "catalog": {
+      "url": "{{tocUrl}}",
+      "items": {
+        "selector": "css:.story-catalog .catalog-list li > a[href^='/Novel/']",
+        "fields": {
+          "title": {
+            "selector": "css::scope",
+            "value": "text"
+          },
+          "url": {
+            "selector": "css::scope",
+            "value": "attr",
+            "attribute": "href"
+          }
+        }
+      }
+    },
+    "content": {
+      "url": "{{chapterUrl}}",
+      "fields": {
+        "content": {
+          "selector": "css:#ChapterBody",
+          "value": "html"
+        }
+      }
+    }
+  }
+}

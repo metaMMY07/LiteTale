@@ -4,6 +4,7 @@ import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/light_novel_shelf_source.dart';
 import 'package:wild/sources/source_api.dart' as api;
 import 'package:wild/services/reader_paginator.dart';
+import 'package:wild/services/shelf_api_error.dart';
 
 const details = {
   'Book': {
@@ -46,6 +47,8 @@ void main() {
   test('same remote book number remains isolated by provider', () {
     expect(sourceOf('42'), SourceId.wenku8);
     expect(sourceOf(shelfBookId(42)), SourceId.lightNovelShelf);
+    expect(sourceOf('bili:42'), SourceId.bili);
+    expect(sourceOf('lnv:42'), SourceId.lnovel);
     expect(remoteShelfId('lns:42'), 42);
     expect(() => remoteShelfId('42'), throwsFormatException);
   });
@@ -160,7 +163,13 @@ void main() {
   test('provider denial is surfaced without inventing results', () {
     expect(
       () => shelfPayload({'Success': false, 'Msg': 'NoToken'}),
-      throwsStateError,
+      throwsA(
+        isA<ShelfApiException>().having(
+          (error) => error is ShelfSignInRequired,
+          'does not infer expired credentials from untyped text',
+          isFalse,
+        ),
+      ),
     );
     expect(
       shelfPayload({

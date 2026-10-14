@@ -4,6 +4,8 @@ import 'package:wild/sources/source_api.dart' as api;
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
 import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/bili_recovery_button.dart';
+import 'package:wild/sources/rule_book_source.dart';
 
 /// Uses the same card grid, tabs and color scheme as the Wenku8 catalogue.
 class ShelfCatalogPage extends StatefulWidget {
@@ -19,12 +21,14 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
   int? _category;
   int _days = 7;
   bool _loading = false;
-  String? _error;
+  Object? _error;
+  bool _errorMore = false;
   int _request = 0;
   final _source = activeSource.value;
   @override
   void initState() {
     super.initState();
+    if (_source == SourceId.bili) _days = 31;
     _load();
   }
 
@@ -36,6 +40,13 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
 
   Future<void> _load({bool more = false}) async {
     final request = ++_request;
+    final revision = sourceRevision.value;
+    bool currentBiliRequest() =>
+        mounted &&
+        request == _request &&
+        _source == SourceId.bili &&
+        activeSource.value == SourceId.bili &&
+        sourceRevision.value == revision;
     final number = more ? _page!.currentPage + 1 : 1;
     setState(() {
       _loading = true;
@@ -43,6 +54,56 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
       if (!more) _page = null;
     });
     try {
+      if (_source == SourceId.bili) {
+        if (widget.mode == 'category') {
+          _categories =
+              api.biliSource
+                  .categories()
+                  .map((c) => {'Id': c.id, 'Name': c.name})
+                  .toList();
+        }
+        final result = await api.biliSource.listPage(
+          number,
+          mode:
+              widget.mode == 'category' && _category == null
+                  ? 'all'
+                  : widget.mode,
+          category: _category,
+          rank: _days == 7 ? 'weekvisit' : 'monthvisit',
+        );
+        if (!currentBiliRequest()) return;
+        setState(() {
+          _page = api.PageStatsNovelCover(
+            currentPage: result.currentPage,
+            maxPage: result.maxPage,
+            records: [...(more ? _page?.records ?? [] : []), ...result.records],
+          );
+          _loading = false;
+        });
+        return;
+      }
+      if (_source.isRule) {
+        if (widget.mode != 'all') {
+          setState(() {
+            _loading = false;
+            _error =
+                '此书源未提供${widget.mode == 'rank' ? '排行' : '分类'}，请使用“推荐”或“全部”浏览。';
+          });
+          return;
+        }
+        final result = await (api.sourceAdapter(_source) as RuleBookSource)
+            .listPage(number);
+        if (!mounted || request != _request) return;
+        setState(() {
+          _page = api.PageStatsNovelCover(
+            currentPage: result.currentPage,
+            maxPage: result.maxPage,
+            records: [...(more ? _page?.records ?? [] : []), ...result.records],
+          );
+          _loading = false;
+        });
+        return;
+      }
       if (widget.mode == 'category' && _categories.isEmpty) {
         final categories =
             await (_source == SourceId.lnovel
@@ -72,9 +133,11 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
       });
     } catch (e) {
       if (mounted && request == _request) {
+        if (_source == SourceId.bili && !currentBiliRequest()) return;
         setState(() {
           _loading = false;
-          _error = e.toString();
+          _error = _source == SourceId.bili ? e : e.toString();
+          _errorMore = more;
         });
       }
     }
@@ -113,7 +176,7 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
             ],
           ),
         ),
-      if (widget.mode == 'rank' && _source != SourceId.lnovel)
+      if (widget.mode == 'rank' && _source == SourceId.lightNovelShelf)
         Padding(
           padding: const EdgeInsets.all(12),
           child: SegmentedButton<int>(
@@ -131,6 +194,21 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
         ),
       if (widget.mode == 'rank' && _source == SourceId.lnovel)
         const Padding(padding: EdgeInsets.all(12), child: Text('按原站阅读人气排序')),
+      if (_source == SourceId.bili && widget.mode == 'rank')
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(value: 7, label: Text('周点击榜')),
+              ButtonSegment(value: 31, label: Text('月点击榜')),
+            ],
+            selected: {_days},
+            onSelectionChanged: (selection) {
+              _days = selection.first;
+              _load();
+            },
+          ),
+        ),
       if (widget.mode == 'all' && _source == SourceId.lightNovelShelf)
         const Padding(
           padding: EdgeInsets.all(12),
@@ -141,7 +219,12 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
-              Text(_error!, textAlign: TextAlign.center),
+              Text(_error!.toString(), textAlign: TextAlign.center),
+              BiliRecoveryButton(
+                error: _error,
+                source: _source,
+                onRecovered: () => _load(more: _errorMore),
+              ),
               TextButton(
                 onPressed: () => _load(more: _page != null),
                 child: const Text('重试'),

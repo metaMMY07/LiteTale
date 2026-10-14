@@ -3,6 +3,7 @@ import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html;
 import 'package:http/http.dart' as http;
 import 'package:wild/services/light_novel_shelf_service.dart';
+import 'package:wild/services/shelf_api_error.dart';
 import 'package:wild/src/rust/api/font.dart';
 import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
 import 'package:wild/src/rust/wenku8/models.dart';
@@ -15,8 +16,7 @@ typedef ShelfInvoke =
 Object? shelfPayload(Object? value) {
   if (value is! Map) throw const FormatException('轻书架响应格式不正确');
   if ((value['Success'] ?? value['success']) != true) {
-    final message = '${value['Msg'] ?? value['msg'] ?? '请求未完成'}';
-    throw StateError('轻书架：$message。需要账号时请前往设置登录');
+    throw ShelfApiException.envelope(value);
   }
   return _normalizeShelfFields(value['Response'] ?? value['response']);
 }
@@ -129,7 +129,14 @@ SourceBookDetail shelfDetail(Map payload) {
 }
 
 class LightNovelShelfSource implements BookSource {
-  LightNovelShelfSource({ShelfInvoke? invoke}) : _invoke = invoke ?? _call;
+  LightNovelShelfSource({
+    ShelfInvoke? invoke,
+    ShelfSession? session,
+    LightNovelShelfService? service,
+  }) : _invoke =
+           invoke ??
+           ((method, args) =>
+               _call(method, args, session: session, service: service));
   final ShelfInvoke _invoke;
   final _details = <String, SourceBookDetail>{};
   final _pendingDetails = <String, Future<SourceBookDetail>>{};
@@ -139,19 +146,35 @@ class LightNovelShelfSource implements BookSource {
   @override
   SourceId get id => SourceId.lightNovelShelf;
 
-  static Future<Object?> _call(String method, Map<String, Object?> args) async {
-    final session = ShelfSession.instance;
+  static Future<Object?> _call(
+    String method,
+    Map<String, Object?> args, {
+    ShelfSession? session,
+    LightNovelShelfService? service,
+  }) async {
+    session ??= ShelfSession.instance;
+    service ??= LightNovelShelfService.instance;
+    final generation = session.generation;
     final token = await session.token();
+    if (generation != session.generation) {
+      throw const ShelfApiException('轻书架账号状态已变化，请重试。');
+    }
     if (token == null &&
         (method == 'GetBookInfo' || method == 'GetNovelContent')) {
       throw const ShelfSignInRequired();
     }
-    final raw = await LightNovelShelfService.instance.invoke(
-      method,
-      args,
-      token: token,
-    );
-    return shelfPayload(raw);
+    Future<Object?> invoke(String? access) async =>
+        shelfPayload(await service!.invoke(method, args, token: access));
+    try {
+      return await invoke(token);
+    } on ShelfSignInRequired {
+      if (token == null || generation != session.generation) rethrow;
+      final renewed = await session.token(refresh: true, rejectedToken: token);
+      if (renewed == null || generation != session.generation) {
+        throw const ShelfSignInRequired();
+      }
+      return invoke(renewed);
+    }
   }
 
   void clearSessionCache() {

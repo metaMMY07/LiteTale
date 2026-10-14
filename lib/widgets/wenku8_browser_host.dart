@@ -37,10 +37,14 @@ class _Wenku8BrowserHostState extends State<Wenku8BrowserHost> {
     children: [
       widget.child,
       if (session.requested)
-        const Offstage(
+        Offstage(
           child: ExcludeSemantics(
             child: IgnorePointer(
-              child: SizedBox(width: 720, height: 1024, child: _Renderer()),
+              child: SizedBox(
+                width: 720,
+                height: 1024,
+                child: _Renderer(key: ValueKey(session.rendererGeneration)),
+              ),
             ),
           ),
         ),
@@ -49,7 +53,7 @@ class _Wenku8BrowserHostState extends State<Wenku8BrowserHost> {
 }
 
 class _Renderer extends StatefulWidget {
-  const _Renderer();
+  const _Renderer({super.key});
   @override
   State<_Renderer> createState() => _RendererState();
 }
@@ -65,18 +69,31 @@ class _RendererState extends State<_Renderer> implements Wenku8BrowserPort {
   }
 
   Future<void> _initialize() async {
+    final generation = session.rendererGeneration;
     try {
       await web.initialize(
-        onLoaded: session.pageFinished,
-        onError: (_) => session.pageError(),
+        onLoaded: () {
+          if (mounted && generation == session.rendererGeneration) {
+            session.pageFinished();
+          }
+        },
+        onError: (_) {
+          if (mounted && generation == session.rendererGeneration) {
+            session.pageError();
+          }
+        },
         allowMainFrameNavigation: session.allowsNavigation,
       );
-      if (!mounted) return;
+      if (!mounted || generation != session.rendererGeneration) return;
       setState(() => initialized = true);
       await WidgetsBinding.instance.endOfFrame;
-      if (mounted) session.attach(this);
+      if (mounted && generation == session.rendererGeneration) {
+        session.attach(this);
+      }
     } catch (_) {
-      session.attachmentFailed();
+      if (mounted && generation == session.rendererGeneration) {
+        session.attachmentFailed();
+      }
     }
   }
 

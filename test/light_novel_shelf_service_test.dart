@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/services/light_novel_shelf_service.dart';
+import 'package:wild/services/shelf_api_error.dart';
 
 void main() {
   test('decodes public SignalR payload and normalizes display text', () {
@@ -64,7 +65,7 @@ void main() {
         'success': false,
         'msg': 'user is unauthorized',
       }),
-      throwsStateError,
+      throwsA(isA<ShelfApiException>()),
     );
   });
 

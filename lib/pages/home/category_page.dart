@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:wild/sources/book_source.dart';
+import 'package:wild/widgets/wenku8_recovery_button.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/src/rust/api/database.dart';
 import 'package:wild/sources/source_api.dart';
@@ -8,8 +10,24 @@ import 'package:wild/widgets/expressive_loading_indicator.dart';
 
 class CategoryPage extends StatefulWidget {
   final String? initialTag;
-  
-  const CategoryPage({super.key, this.initialTag});
+  final Future<List<TagGroup>> Function()? tagsLoader;
+  final Future<PageStatsNovelCover> Function({
+    required String tag,
+    required String v,
+    required int pageNumber,
+  })?
+  pageLoader;
+  final Future<String> Function(String)? preferenceLoader;
+  final Future<void> Function(String, String)? preferenceSaver;
+
+  const CategoryPage({
+    super.key,
+    this.initialTag,
+    this.tagsLoader,
+    this.pageLoader,
+    this.preferenceLoader,
+    this.preferenceSaver,
+  });
 
   @override
   State<CategoryPage> createState() => _CategoryPageState();
@@ -21,7 +39,12 @@ class _CategoryPageState extends State<CategoryPage> {
   String _viewMode = "0"; // 默认按更新查看
   PageStatsNovelCover? _currentPage;
   bool _isLoading = false;
-  String? _errorMessage;
+  Object? _tagError;
+  Object? _pageError;
+  int _tagRequest = 0;
+  int _pageRequest = 0;
+  int _choiceRevision = 0;
+  Future<void> _preferenceWrites = Future.value();
   static const _keyTag = 'category_page_selected_tag';
   static const _keyViewMode = 'category_page_view_mode';
 
@@ -33,90 +56,122 @@ class _CategoryPageState extends State<CategoryPage> {
     _loadTags();
   }
 
-  Future<void> _loadSavedState() async {
-    try {
-      if (_selectedTag == null) {
-        final savedTag = await loadProperty(key: _keyTag);
-        if (savedTag.isNotEmpty) {
-          setState(() {
-            _selectedTag = savedTag;
-          });
-        }
-      }
-      final savedViewMode = await loadProperty(key: _keyViewMode);
-      setState(() {
-        if (savedViewMode.isNotEmpty) {
-          _viewMode = savedViewMode;
-        }
-      });
-      if (_selectedTag != null) {
-        _loadTagPage(_selectedTag!, refresh: true);
-      }
-    } catch (e) {
-      // 如果加载失败，使用默认值
-    }
+  @override
+  void dispose() {
+    _tagRequest++;
+    _pageRequest++;
+    super.dispose();
   }
 
-  Future<void> _saveState() async {
+  Future<void> _loadSavedState() async {
+    final choice = _choiceRevision;
+    String savedTag = '', savedMode = '';
     try {
-      if (_selectedTag != null) {
-        await saveProperty(key: _keyTag, value: _selectedTag!);
-      }
-      await saveProperty(key: _keyViewMode, value: _viewMode);
-    } catch (e) {
-      // 如果保存失败，继续使用当前状态
+      final values = await Future.wait([
+        (widget.preferenceLoader ?? ((key) => loadProperty(key: key)))(_keyTag),
+        (widget.preferenceLoader ?? ((key) => loadProperty(key: key)))(
+          _keyViewMode,
+        ),
+      ]).timeout(const Duration(seconds: 2));
+      savedTag = values[0];
+      savedMode = values[1];
+    } catch (_) {
+      /* Preferences must not prevent a supplied tag loading. */
     }
+    if (!mounted || choice != _choiceRevision) return;
+    setState(() {
+      _selectedTag ??= savedTag.isEmpty ? null : savedTag;
+      if (const {'0', '1', '2', '3'}.contains(savedMode)) _viewMode = savedMode;
+    });
+    if (_selectedTag case final tag?) await _loadTagPage(tag, refresh: true);
+  }
+
+  Future<void> _saveState() {
+    final tag = _selectedTag, mode = _viewMode;
+    final save =
+        widget.preferenceSaver ??
+        ((String key, String value) => saveProperty(key: key, value: value));
+    // Preserve the user's last choice even if storage completes out of order.
+    return _preferenceWrites = _preferenceWrites.then((_) async {
+      try {
+        if (tag != null) await save(_keyTag, tag);
+        await save(_keyViewMode, mode);
+      } catch (_) {
+        /* Keep the currently selected values on storage failure. */
+      }
+    });
   }
 
   Future<void> _loadTags() async {
+    final request = ++_tagRequest;
+    setState(() => _tagError = null);
     try {
-      final tagGroups = await tags();
-      setState(() {
-        _tagGroups = tagGroups;
-        _errorMessage = null;
-      });
-    } catch (e) {
-      setState(() {
-        _errorMessage = e.toString();
-      });
+      final groups = await (widget.tagsLoader ?? tags)().timeout(
+        const Duration(seconds: 55),
+      );
+      if (!mounted || request != _tagRequest) return;
+      if (groups.isEmpty) throw const FormatException('文库8分类列表为空，请重试。');
+      setState(() => _tagGroups = groups);
+    } catch (error) {
+      if (mounted && request == _tagRequest) setState(() => _tagError = error);
     }
   }
 
   Future<void> _loadTagPage(String tag, {bool refresh = false}) async {
-    if (_isLoading) return;
+    if (!refresh &&
+        (_isLoading ||
+            _currentPage == null ||
+            _currentPage!.currentPage >= _currentPage!.maxPage)) {
+      return;
+    }
+    final request = ++_pageRequest;
+    final mode = _viewMode;
+    final previous = refresh ? null : _currentPage;
     setState(() {
       _isLoading = true;
-      if (refresh) {
-        _currentPage = null;
-        _errorMessage = null;
-      }
+      _pageError = null;
+      if (refresh) _currentPage = null;
     });
-
     try {
-      final page = await tagPage(
-        tag: tag,
-        v: _viewMode,
-        pageNumber: refresh ? 1 : (_currentPage?.currentPage ?? 0) + 1,
-      );
+      final page = await (widget.pageLoader ?? tagPage)(
+            tag: tag,
+            v: mode,
+            pageNumber: (previous?.currentPage ?? 0) + 1,
+          )
+          .timeout(const Duration(seconds: 55));
+      if (!mounted || request != _pageRequest) return;
+      final seen = <String>{};
       setState(() {
-        if (refresh) {
-          _currentPage = page;
-        } else {
-          _currentPage = PageStatsNovelCover(
-            currentPage: page.currentPage,
-            maxPage: page.maxPage,
-            records: [..._currentPage!.records, ...page.records],
-          );
-        }
+        _currentPage = PageStatsNovelCover(
+          currentPage: page.currentPage,
+          maxPage: page.maxPage,
+          records:
+              [
+                ...?previous?.records,
+                ...page.records,
+              ].where((book) => seen.add(book.aid)).toList(),
+        );
         _isLoading = false;
-        _errorMessage = null;
       });
-    } catch (e) {
+    } catch (error) {
+      if (!mounted || request != _pageRequest) return;
       setState(() {
         _isLoading = false;
-        _errorMessage = e.toString();
+        _pageError = error;
       });
     }
+  }
+
+  void _changeSelection({String? tag, String? mode}) {
+    _choiceRevision++;
+    setState(() {
+      _selectedTag = tag ?? _selectedTag;
+      _viewMode = mode ?? _viewMode;
+    });
+    if (_selectedTag case final selected?) {
+      _loadTagPage(selected, refresh: true);
+    }
+    _saveState();
   }
 
   @override
@@ -139,15 +194,8 @@ class _CategoryPageState extends State<CategoryPage> {
                     ButtonSegment(value: "3", label: Text('动画')),
                   ],
                   selected: {_viewMode},
-                  onSelectionChanged: (Set<String> selection) {
-                    _saveState();
-                    setState(() {
-                      _viewMode = selection.first;
-                      if (_selectedTag != null) {
-                        _loadTagPage(_selectedTag!, refresh: true);
-                      }
-                    });
-                  },
+                  onSelectionChanged:
+                      (selection) => _changeSelection(mode: selection.first),
                 ),
               ),
               // Category selector
@@ -235,25 +283,14 @@ class _CategoryPageState extends State<CategoryPage> {
                       }
                       return items;
                     },
-                    onSelected: (tag) async {
-                      setState(() {
-                        _selectedTag = tag;
-                      });
-                      _loadTagPage(tag, refresh: true);
-                      _saveState();
-                    },
+                    onSelected: (tag) => _changeSelection(tag: tag),
                   ),
                 )
-              else if (_errorMessage != null)
+              else if (_tagError != null)
                 Padding(
                   padding: const EdgeInsets.only(left: 8),
                   child: TextButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        _errorMessage = null;
-                      });
-                      _loadTags();
-                    },
+                    onPressed: _loadTags,
                     icon: const Icon(Icons.refresh),
                     label: const Text('重试加载分类'),
                     style: TextButton.styleFrom(
@@ -273,12 +310,18 @@ class _CategoryPageState extends State<CategoryPage> {
             ],
           ),
         ),
+        if (_tagError != null)
+          Wenku8RecoveryButton(
+            error: _tagError,
+            source: SourceId.wenku8,
+            onRecovered: _loadTags,
+          ),
         // Novel grid or error state
         Expanded(
           child:
               _selectedTag == null
                   ? const Center(child: Text('请选择分类'))
-                  : _errorMessage != null
+                  : _pageError != null && _currentPage == null
                   ? RefreshIndicator(
                     onRefresh: () => _loadTagPage(_selectedTag!, refresh: true),
                     child: ListView(
@@ -301,9 +344,26 @@ class _CategoryPageState extends State<CategoryPage> {
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                _errorMessage!,
+                                _pageError.toString(),
                                 style: Theme.of(context).textTheme.bodyMedium,
                                 textAlign: TextAlign.start,
+                              ),
+                              Wenku8RecoveryButton(
+                                error: _pageError,
+                                source: SourceId.wenku8,
+                                onRecovered:
+                                    () => _loadTagPage(
+                                      _selectedTag!,
+                                      refresh: true,
+                                    ),
+                              ),
+                              TextButton(
+                                onPressed:
+                                    () => _loadTagPage(
+                                      _selectedTag!,
+                                      refresh: true,
+                                    ),
+                                child: const Text('重新加载分类书目'),
                               ),
                             ],
                           ),
@@ -319,6 +379,7 @@ class _CategoryPageState extends State<CategoryPage> {
                           notification.metrics.pixels >=
                               notification.metrics.maxScrollExtent - 200 &&
                           !_isLoading &&
+                          _pageError == null &&
                           _currentPage!.currentPage < _currentPage!.maxPage) {
                         _loadTagPage(_selectedTag!);
                       }
@@ -326,12 +387,11 @@ class _CategoryPageState extends State<CategoryPage> {
                     },
                     child: GridView.builder(
                       padding: const EdgeInsets.all(8),
-                      gridDelegate:
-                          const BookGridDelegate(
-                            childAspectRatio: 207 / 307,
-                            crossAxisSpacing: 8,
-                            mainAxisSpacing: 8,
-                          ),
+                      gridDelegate: const BookGridDelegate(
+                        childAspectRatio: 207 / 307,
+                        crossAxisSpacing: 8,
+                        mainAxisSpacing: 8,
+                      ),
                       itemCount:
                           _currentPage!.records.length +
                           (_currentPage!.currentPage < _currentPage!.maxPage
@@ -339,6 +399,14 @@ class _CategoryPageState extends State<CategoryPage> {
                               : 0),
                       itemBuilder: (context, index) {
                         if (index >= _currentPage!.records.length) {
+                          if (_pageError != null) {
+                            return Center(
+                              child: TextButton(
+                                onPressed: () => _loadTagPage(_selectedTag!),
+                                child: const Text('加载失败，点击重试'),
+                              ),
+                            );
+                          }
                           return const Center(
                             child: Padding(
                               padding: EdgeInsets.all(16.0),
@@ -346,8 +414,7 @@ class _CategoryPageState extends State<CategoryPage> {
                             ),
                           );
                         }
-                        final novel =
-                            _currentPage!.records[index] as NovelCover;
+                        final novel = _currentPage!.records[index];
                         return NovelCoverCard(novel: novel);
                       },
                     ),

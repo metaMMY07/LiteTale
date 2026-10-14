@@ -6,6 +6,7 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use once_cell::sync::Lazy;
 use rand::Rng;
 use regex::Regex;
+use crate::request_policy::{self, RequestPolicy};
 use reqwest::{
     header::{
         HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CONNECTION, CONTENT_TYPE,
@@ -20,7 +21,7 @@ use std::collections::HashSet;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use tokio::time::{sleep, Duration};
+use tokio::time::Duration;
 
 const DEFAULT_API_HOST: &str = "https://www.wenku8.net";
 const APP_HOST: &str = "http://app.wenku8.com";
@@ -78,18 +79,6 @@ fn login_error_message(body: &str) -> &'static str {
     else { "登录结果未能确认，请打开站点查看。" }
 }
 
-fn is_retryable_get_error(error: &reqwest::Error) -> bool {
-    let message = error.to_string().to_ascii_lowercase();
-    error.is_connect()
-        || error.is_timeout()
-        || error.is_request()
-        || message.contains("close_notify")
-        || message.contains("unexpected eof")
-        || message.contains("unexpected-eof")
-        || message.contains("connection reset")
-        || message.contains("connection closed")
-}
-
 fn index_error_response_category(status: u16, content_type: &str, body: &[u8]) -> &'static str {
     let preview = String::from_utf8_lossy(&body[..body.len().min(32 * 1024)]).to_ascii_lowercase();
     if status == 403
@@ -117,24 +106,19 @@ fn index_error_response_category(status: u16, content_type: &str, body: &[u8]) -
 /// Retry idempotent GET requests when Wenku8 closes a TLS connection early.
 /// The site intermittently drops keep-alive connections without a TLS
 /// `close_notify`; a fresh request normally succeeds immediately.
-async fn send_idempotent_get(mut request: RequestBuilder) -> reqwest::Result<Response> {
-    for attempt in 0..3 {
-        let retry = request.try_clone();
-        match request.send().await {
-            Ok(response) => return Ok(response),
-            Err(error) => {
-                if attempt == 2 || !is_retryable_get_error(&error) {
-                    return Err(error);
-                }
-                let Some(next_request) = retry else {
-                    return Err(error);
-                };
-                sleep(Duration::from_millis(150 * (attempt + 1))).await;
-                request = next_request;
-            }
-        }
-    }
-    unreachable!("GET retry loop always returns")
+async fn send_idempotent_get(request: RequestBuilder) -> reqwest::Result<Response> {
+    send_idempotent_get_with_policy(request, RequestPolicy::READ).await
+}
+
+async fn send_idempotent_get_with_policy(
+    request: RequestBuilder,
+    policy: RequestPolicy,
+) -> reqwest::Result<Response> {
+    request_policy::send_idempotent_get(request, policy).await
+}
+
+async fn send_download_get(request: RequestBuilder) -> reqwest::Result<Response> {
+    request_policy::send_idempotent_get(request, RequestPolicy::IMAGE).await
 }
 
 pub struct Wenku8Client {
@@ -223,6 +207,15 @@ impl Wenku8Client {
 
     // 先訪問首頁與 login.php，讓伺服器種初始 Cookie（包含 CF 的 __cflb 等）
     pub async fn init_session(&self) -> Result<()> {
+        request_policy::with_operation_timeout(
+            self.init_session_inner(),
+            request_policy::READ_OPERATION_TIMEOUT,
+            "Wenku8 session initialization",
+        )
+        .await
+    }
+
+    async fn init_session_inner(&self) -> Result<()> {
         let api_host = self.load_api_host().await;
         let home_headers = self.bookcase_headers(&format!("{api_host}/")).await;
         let mut login_headers = home_headers.clone();
@@ -250,14 +243,29 @@ impl Wenku8Client {
 
     // 👇 修改：checkcode 先 init，再抓圖；若回 HTML（CF 挑戰）就回傳 cf_challenge
     pub async fn checkcode(&self) -> Result<Vec<u8>> {
+        request_policy::with_operation_timeout(
+            self.checkcode_inner(),
+            request_policy::READ_OPERATION_TIMEOUT,
+            "Wenku8 captcha request",
+        )
+        .await
+    }
+
+    async fn checkcode_inner(&self) -> Result<Vec<u8>> {
         let _guard = AUTH_REQUEST_LOCK.lock().await;
         let host = self.load_api_host().await;
         let login_url = format!("{host}/login.php");
         let login_headers = self.bookcase_headers(&login_url).await;
         // The CAPTCHA belongs to this login document/session. Stop on a denied
         // document instead of fetching another challenge as though it were an image.
-        let page = send_idempotent_get(self.client.get(&login_url).headers(login_headers)
-            .timeout(Duration::from_secs(12))).await?;
+        let page = send_idempotent_get_with_policy(
+            self.client
+                .get(&login_url)
+                .headers(login_headers)
+                .timeout(Duration::from_secs(12)),
+            RequestPolicy::CAPTCHA,
+        )
+        .await?;
         if !page.status().is_success() {
             return Err(anyhow!("captcha_session_failed HTTP {}", page.status().as_u16()));
         }
@@ -276,10 +284,15 @@ impl Wenku8Client {
         headers.insert(ACCEPT, HeaderValue::from_static("image/png,image/jpeg,image/gif,image/webp,image/*;q=0.8"));
 
         // 3) 取驗證碼
-        let resp = send_idempotent_get(self.client.get(url).headers(headers)
-            .timeout(Duration::from_secs(12)))
-            .await
-            .context("checkcode: GET failed")?;
+        let resp = send_idempotent_get_with_policy(
+            self.client
+                .get(url)
+                .headers(headers)
+                .timeout(Duration::from_secs(12)),
+            RequestPolicy::CAPTCHA,
+        )
+        .await
+        .context("checkcode: GET failed")?;
 
         let status = resp.status();
         let ct: String = resp
@@ -585,6 +598,15 @@ impl Wenku8Client {
     }
 
     pub async fn index(&self) -> Result<Vec<HomeBlock>> {
+        request_policy::with_operation_timeout(
+            self.index_inner(),
+            request_policy::READ_OPERATION_TIMEOUT,
+            "Wenku8 index request",
+        )
+        .await
+    }
+
+    async fn index_inner(&self) -> Result<Vec<HomeBlock>> {
         let api_host = self.load_api_host().await;
         // Request the same canonical home as the site's navigation and WebView.
         // `charset` is a display preference, not a required home API parameter.
@@ -1014,8 +1036,8 @@ impl Wenku8Client {
         let request = self.client.get(image_url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
             .header("Referer", "https://www.wenku8.net/")
-            .timeout(Duration::from_secs(25));
-        let response = send_idempotent_get(request).await?;
+            .timeout(request_policy::IMAGE_REQUEST_TIMEOUT);
+        let response = send_download_get(request).await?;
 
         if !response.status().is_success() {
             return Err(anyhow!("Failed to download image: {}", response.status()));
@@ -1108,6 +1130,20 @@ impl Wenku8Client {
     }
 
     pub async fn c_content(&self, aid: &str, cid: &str) -> Result<String> {
+        self.c_content_with_policy(aid, cid, RequestPolicy::READ).await
+    }
+
+    pub(crate) async fn c_content_for_download(&self, aid: &str, cid: &str) -> Result<String> {
+        self.c_content_with_policy(aid, cid, RequestPolicy::DOWNLOAD)
+            .await
+    }
+
+    async fn c_content_with_policy(
+        &self,
+        aid: &str,
+        cid: &str,
+        policy: RequestPolicy,
+    ) -> Result<String> {
         let aid_num: u64 = aid.parse().unwrap_or(0);
         let sub_dir = aid_num / 1000;
         let url = format!(
@@ -1119,7 +1155,11 @@ impl Wenku8Client {
         );
         let ua = self.load_user_agent().await;
         let headers = Self::default_headers_sync(&ua, &self.load_api_host().await);
-        let response = send_idempotent_get(self.client.get(&url).headers(headers)).await?;
+        let response = request_policy::send_idempotent_get(
+            self.client.get(&url).headers(headers),
+            policy,
+        )
+        .await?;
         if !response.status().is_success() {
             return Err(anyhow!("Failed to get novel reader: {}", response.status()));
         }
@@ -1406,7 +1446,7 @@ impl Wenku8Client {
         search_key: &str,
         page: i32,
     ) -> Result<PageStats<NovelCover>> {
-        let cache = tokio::time::timeout(Duration::from_secs(120), self.load_search_index())
+        let cache = tokio::time::timeout(request_policy::READ_OPERATION_TIMEOUT, self.load_search_index())
             .await
             .map_err(|_| anyhow!("搜索数据加载超时，请检查网络后重试"))??;
         let normalized_key = search_key.trim().to_lowercase();
@@ -1455,7 +1495,7 @@ impl Wenku8Client {
         // 使用不跟隨 redirect 的臨時客戶端：
         // addbookcase.php 成功後會 302 redirect 到 bookcase.php
         // 但 bookcase.php 被 Cloudflare 封鎖，所以我們在 302 時就直接返回成功
-        let temp_client = reqwest::Client::builder()
+        let temp_client = request_policy::default_client_builder()
             .cookie_provider(Arc::clone(crate::COOKIE_STORE.deref()))
             .redirect(reqwest::redirect::Policy::none())
             .gzip(true)
@@ -1492,6 +1532,15 @@ impl Wenku8Client {
     }
 
     pub async fn bookcase_list(&self) -> Result<Vec<Bookcase>> {
+        request_policy::with_operation_timeout(
+            self.bookcase_list_inner(),
+            request_policy::READ_OPERATION_TIMEOUT,
+            "Wenku8 bookcase list request",
+        )
+        .await
+    }
+
+    async fn bookcase_list_inner(&self) -> Result<Vec<Bookcase>> {
         // 先訪問首頁，確保 session cookie 已建立（避免 CF 403）
         let _ = self.init_session().await;
         let api_host = self.load_api_host().await;
@@ -1685,7 +1734,7 @@ impl Wenku8Client {
         let referer = format!("{}/modules/article/bookcase.php", api_host);
         let headers = self.bookcase_headers(&referer).await;
         // 刪除後也會 302 redirect，用 no-redirect 客戶端
-        let temp_client = reqwest::Client::builder()
+        let temp_client = request_policy::default_client_builder()
             .cookie_provider(Arc::clone(crate::COOKIE_STORE.deref()))
             .redirect(reqwest::redirect::Policy::none())
             .gzip(true)
@@ -1721,7 +1770,7 @@ impl Wenku8Client {
         params.push(("classid", old_classid));
 
         // move 也是 POST 後 302 redirect
-        let temp_client = reqwest::Client::builder()
+        let temp_client = request_policy::default_client_builder()
             .cookie_provider(Arc::clone(crate::COOKIE_STORE.deref()))
             .redirect(reqwest::redirect::Policy::none())
             .gzip(true)

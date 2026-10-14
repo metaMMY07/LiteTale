@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../src/rust/wenku8/models.dart';
 import 'package:wild/sources/source_api.dart' as w8;
+import 'package:wild/sources/book_source.dart';
+import 'package:wild/services/reading_progress.dart';
 
 // 状态基类
 abstract class HtmlReaderState extends Equatable {
@@ -19,11 +22,12 @@ class HtmlReaderLoading extends HtmlReaderState {
 // 错误状态
 class HtmlReaderError extends HtmlReaderState {
   final String error;
+  final Object? cause;
 
-  const HtmlReaderError(this.error);
+  const HtmlReaderError(this.error, {this.cause});
 
   @override
-  List<Object?> get props => [error];
+  List<Object?> get props => [error, cause];
 }
 
 // 解析后的内容类型
@@ -57,6 +61,7 @@ class HtmlReaderLoaded extends HtmlReaderState {
   final String rawContent;
   final List<ParsedContent> parsedContent;
   final List<Volume> volumes;
+  final String? sourceFont;
 
   const HtmlReaderLoaded({
     required this.aid,
@@ -65,6 +70,7 @@ class HtmlReaderLoaded extends HtmlReaderState {
     required this.rawContent,
     required this.parsedContent,
     required this.volumes,
+    this.sourceFont,
   });
 
   HtmlReaderLoaded copyWith({
@@ -82,14 +88,32 @@ class HtmlReaderLoaded extends HtmlReaderState {
       rawContent: rawContent ?? this.rawContent,
       parsedContent: parsedContent ?? this.parsedContent,
       volumes: volumes ?? this.volumes,
+      sourceFont: sourceFont,
     );
   }
 
   @override
-  List<Object?> get props => [aid, cid, title, rawContent, parsedContent, volumes];
+  List<Object?> get props => [
+    aid,
+    cid,
+    title,
+    rawContent,
+    parsedContent,
+    volumes,
+    sourceFont,
+  ];
 }
 
 class HtmlReaderCubit extends Cubit<HtmlReaderState> {
+  int _request = 0;
+  bool _closing = false;
+  final Future<SourceChapter> Function({
+    required String aid,
+    required String cid,
+  })
+  _read;
+  final int Function(String aid) _session;
+  final ReadingProgressQueue _progress;
   final NovelInfo novelInfo;
   final String initialAid;
   final String initialCid;
@@ -100,7 +124,14 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
     required this.initialAid,
     required this.initialCid,
     required this.initialVolumes,
-  }) : super(const HtmlReaderLoading());
+    Future<SourceChapter> Function({required String aid, required String cid})?
+    read,
+    int Function(String aid)? sessionGeneration,
+    ReadingProgressQueue? progress,
+  }) : _read = read ?? w8.readerChapter,
+       _session = sessionGeneration ?? w8.readerSessionGeneration,
+       _progress = progress ?? ReadingProgressQueue.instance,
+       super(const HtmlReaderLoading());
 
   Volume _findVolume(String aid, String cid) {
     for (final volume in initialVolumes) {
@@ -113,19 +144,23 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
     throw Exception('Volume not found');
   }
 
-  Future<void> _updateHistory(String aid, String cid, String title) async {
+  void _updateHistory(String aid, String cid, String title, int session) {
     final volume = _findVolume(aid, cid);
-    await w8.updateHistory(
-      novelId: aid,
-      novelName: novelInfo.title,
-      volumeId: volume.id,
-      volumeName: volume.title,
-      chapterId: cid,
-      chapterTitle: title,
-      progress: 0,
-      progressPage: 0,
-      cover: novelInfo.imgUrl,
-      author: novelInfo.author,
+    final sessionFor = _session;
+    _progress.enqueue(
+      ReadingProgress(
+        bookId: aid,
+        title: novelInfo.title,
+        volumeId: volume.id,
+        volumeTitle: volume.title,
+        chapterId: cid,
+        chapterTitle: title,
+        characters: 0,
+        page: 0,
+        cover: novelInfo.imgUrl,
+        author: novelInfo.author,
+      ),
+      isValid: () => sessionFor(aid) == session,
     );
   }
 
@@ -137,7 +172,7 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
       if (paragraph.trim().isEmpty) continue;
 
       // 检查是否包含图片标签
-      RegExp regex = RegExp("\<\!\-\-image\-\-\>([^\<]+)\<\!\-\-image\-\-\>");
+      final regex = RegExp(r'<!--image-->([^<]+)<!--image-->');
       if (regex.hasMatch(paragraph)) {
         var currentText = paragraph;
         while (regex.hasMatch(currentText)) {
@@ -173,10 +208,29 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
   }
 
   Future<void> loadChapter({String? aid, String? cid}) async {
+    if (_closing || isClosed) return;
+    final request = ++_request;
+    final targetAid = aid ?? initialAid;
+    final targetCid = cid ?? initialCid;
+    final session = _session(targetAid);
+    final revision = sourceRevision.value;
+    bool current() {
+      if (_closing || isClosed || request != _request) return false;
+      if (sourceOf(targetAid) == SourceId.bili &&
+          (activeSource.value != SourceId.bili ||
+              sourceRevision.value != revision)) {
+        return false;
+      }
+      if (_session(targetAid) != session) {
+        emit(const HtmlReaderError('账号已变化，请重新打开章节。'));
+        return false;
+      }
+      return true;
+    }
+
     try {
+      unawaited(_progress.flushBounded());
       emit(const HtmlReaderLoading());
-      final targetAid = aid ?? initialAid;
-      final targetCid = cid ?? initialCid;
 
       // 查找章节信息
       String? chapterTitle;
@@ -196,25 +250,29 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
       }
 
       // 加载章节内容
-      final rawContent = await w8.chapterContent(aid: targetAid, cid: targetCid);
-      if (isClosed) return;
+      final chapter = await _read(aid: targetAid, cid: targetCid);
+      if (!current()) return;
+      final rawContent = chapter.content;
       final parsedContent = _parseContent(rawContent);
 
       // 更新阅读历史
-      await _updateHistory(targetAid, targetCid, chapterTitle);
-      if (isClosed) return;
+      if (!current()) return;
+      _updateHistory(targetAid, targetCid, chapterTitle, session);
 
-      emit(HtmlReaderLoaded(
-        aid: targetAid,
-        cid: targetCid,
-        title: chapterTitle,
-        rawContent: rawContent,
-        parsedContent: parsedContent,
-        volumes: initialVolumes,
-      ));
+      emit(
+        HtmlReaderLoaded(
+          aid: targetAid,
+          cid: targetCid,
+          title: chapterTitle,
+          rawContent: rawContent,
+          parsedContent: parsedContent,
+          volumes: initialVolumes,
+          sourceFont: chapter.fontFamily,
+        ),
+      );
     } catch (e) {
-      if (isClosed) return;
-      emit(HtmlReaderError(e.toString()));
+      if (!current()) return;
+      emit(HtmlReaderError(e.toString(), cause: e));
     }
   }
 
@@ -229,7 +287,8 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
       final volume = currentState.volumes[i];
       for (var j = 0; j < volume.chapters.length; j++) {
         final chapter = volume.chapters[j];
-        if (chapter.aid == currentState.aid && chapter.cid == currentState.cid) {
+        if (chapter.aid == currentState.aid &&
+            chapter.cid == currentState.cid) {
           currentVolumeIndex = i;
           currentChapterIndex = j;
           break;
@@ -243,14 +302,19 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
     // 尝试获取下一章
     String? nextAid;
     String? nextCid;
-    if (currentChapterIndex < currentState.volumes[currentVolumeIndex].chapters.length - 1) {
+    if (currentChapterIndex <
+        currentState.volumes[currentVolumeIndex].chapters.length - 1) {
       // 当前卷的下一章
-      final nextChapter = currentState.volumes[currentVolumeIndex].chapters[currentChapterIndex + 1];
+      final nextChapter =
+          currentState
+              .volumes[currentVolumeIndex]
+              .chapters[currentChapterIndex + 1];
       nextAid = nextChapter.aid;
       nextCid = nextChapter.cid;
     } else if (currentVolumeIndex < currentState.volumes.length - 1) {
       // 下一卷的第一章
-      final nextChapter = currentState.volumes[currentVolumeIndex + 1].chapters[0];
+      final nextChapter =
+          currentState.volumes[currentVolumeIndex + 1].chapters[0];
       nextAid = nextChapter.aid;
       nextCid = nextChapter.cid;
     }
@@ -271,7 +335,8 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
       final volume = currentState.volumes[i];
       for (var j = 0; j < volume.chapters.length; j++) {
         final chapter = volume.chapters[j];
-        if (chapter.aid == currentState.aid && chapter.cid == currentState.cid) {
+        if (chapter.aid == currentState.aid &&
+            chapter.cid == currentState.cid) {
           currentVolumeIndex = i;
           currentChapterIndex = j;
           break;
@@ -287,7 +352,10 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
     String? prevCid;
     if (currentChapterIndex > 0) {
       // 当前卷的上一章
-      final prevChapter = currentState.volumes[currentVolumeIndex].chapters[currentChapterIndex - 1];
+      final prevChapter =
+          currentState
+              .volumes[currentVolumeIndex]
+              .chapters[currentChapterIndex - 1];
       prevAid = prevChapter.aid;
       prevCid = prevChapter.cid;
     } else if (currentVolumeIndex > 0) {
@@ -301,5 +369,13 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
     if (prevAid != null && prevCid != null) {
       await loadChapter(aid: prevAid, cid: prevCid);
     }
+  }
+
+  @override
+  Future<void> close() async {
+    _closing = true;
+    _request++;
+    await super.close();
+    await _progress.flushBounded();
   }
 }

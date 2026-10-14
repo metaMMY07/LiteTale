@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/bili_browser_host.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:wild/cubits/app_accent_cubit.dart';
@@ -152,7 +153,9 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                       themeAnimationDuration: Duration.zero,
                       builder:
                           (context, child) => Wenku8BrowserHost(
-                            child: ThemeRevealHost(child: child!),
+                            child: BiliBrowserHost(
+                              child: ThemeRevealHost(child: child!),
+                            ),
                           ),
                       themeMode: switch (theme.themeMode) {
                         ReaderThemeMode.auto => ThemeMode.system,

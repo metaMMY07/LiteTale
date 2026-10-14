@@ -179,7 +179,10 @@ async fn downloading_loop() -> Result<()> {
                     let chapter_file_path = novel_dir.join(format!("chapter_{}", chapter.id));
 
                     // Download chapter content
-                    match CLIENT.c_content(&novel.novel_id, &chapter.id).await {
+                    match CLIENT
+                        .c_content_for_download(&novel.novel_id, &chapter.id)
+                        .await
+                    {
                         Ok(chapter_content) => {
                             match tokio::fs::write(&chapter_file_path, chapter_content).await {
                                 Ok(_) => {

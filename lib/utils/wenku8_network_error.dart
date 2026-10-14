@@ -22,6 +22,8 @@ bool shouldUseWenku8WebViewFallback(Object? error) {
     'connection aborted',
     'connection closed',
     'sendrequest',
+    'timed out',
+    'timeout',
     'no usable book recommendations',
     'failed to decode utf-8 wenku8 home',
     'failed to decode gbk',
@@ -29,6 +31,8 @@ bool shouldUseWenku8WebViewFallback(Object? error) {
     '站点验证',
     '请重新登录',
     '网页加载超时',
+    '加载超时',
+    '连接超时',
     '网页连接中断',
     '没有返回可用验证码',
   ];

@@ -5,18 +5,23 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart' as mobile;
+import 'package:webview_flutter_android/webview_flutter_android.dart'
+    as android;
 import 'package:webview_windows/webview_windows.dart' as windows;
 
 /// Shares the Wenku8 fallback parsers across Android WebView and WebView2.
 class WenkuWebView {
   windows.WebviewController? _windows;
   mobile.WebViewController? _mobile;
+  String? _normalMobileAgent;
   final _subscriptions = <StreamSubscription<dynamic>>[];
 
   Future<void> initialize({
     required VoidCallback onLoaded,
     required void Function(String) onError,
     bool Function(String)? allowMainFrameNavigation,
+    bool normalBrowserUserAgent = false,
+    bool enableVerificationCookies = false,
   }) async {
     if (Platform.isWindows) {
       final version = await windows.WebviewController.getWebViewVersion();
@@ -55,6 +60,28 @@ class WenkuWebView {
       await controller.setBackgroundColor(Colors.transparent);
     } else if (Platform.isAndroid || Platform.isIOS) {
       final controller = _mobile = mobile.WebViewController();
+      if (enableVerificationCookies &&
+          Platform.isAndroid &&
+          controller.platform is android.AndroidWebViewController) {
+        final manager = mobile.WebViewCookieManager().platform;
+        if (manager is android.AndroidWebViewCookieManager) {
+          await manager.setAcceptThirdPartyCookies(
+            controller.platform as android.AndroidWebViewController,
+            true,
+          );
+        }
+      }
+      if (normalBrowserUserAgent && Platform.isAndroid) {
+        // Preserve this device's installed Chromium version. Some public sites
+        // serve a blocked or incompatible page to the embedded-WebView marker.
+        final agent = await controller.getUserAgent();
+        if (agent != null) {
+          _normalMobileAgent = agent
+              .replaceFirst('; wv', '')
+              .replaceFirst(RegExp(r' Version/\S+'), '');
+          await controller.setUserAgent(_normalMobileAgent);
+        }
+      }
       await controller.setJavaScriptMode(mobile.JavaScriptMode.unrestricted);
       await controller.setNavigationDelegate(
         mobile.NavigationDelegate(
@@ -84,6 +111,22 @@ class WenkuWebView {
     } else {
       await _mobile!.loadRequest(Uri.parse(url));
     }
+  }
+
+  /// Ordinary desktop-site content negotiation, keeping the installed engine
+  /// version. Used only by the public Bili reader; Wenku8 keeps its own policy.
+  Future<void> setDesktopSite(bool enabled) async {
+    if (_normalMobileAgent == null || _mobile == null) return;
+    final agent =
+        enabled
+            ? _normalMobileAgent!
+                .replaceFirst(
+                  RegExp(r'\([^)]*Android[^)]*\)'),
+                  '(X11; Linux x86_64)',
+                )
+                .replaceFirst(' Mobile ', ' ')
+            : _normalMobileAgent!;
+    await _mobile!.setUserAgent(agent);
   }
 
   Future<dynamic> executeScript(String script) async {
@@ -120,6 +163,15 @@ class WenkuWebView {
           : mobile.WebViewWidget(controller: _mobile!);
 
   Future<void> dispose() async {
+    // Android's platform view owns the controller lifetime. Stop an abandoned
+    // public renderer so late resources cannot continue loading after a timeout.
+    if (_mobile != null) {
+      try {
+        await _mobile!.loadRequest(Uri.parse('about:blank'));
+      } catch (_) {
+        // The platform view may already have been removed.
+      }
+    }
     for (final subscription in _subscriptions) {
       await subscription.cancel();
     }

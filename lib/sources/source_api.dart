@@ -9,6 +9,11 @@ import 'book_source.dart';
 import 'light_novel_shelf_source.dart';
 import 'shelf_session.dart';
 import 'lnovel_source.dart';
+import 'bili_site_source.dart';
+import 'package:wild/services/bili_browser.dart';
+import 'rule_source_registry.dart';
+import 'rule_book_source.dart';
+import 'package:wild/services/reading_progress.dart';
 
 export 'package:wild/src/rust/api/wenku8.dart'
     hide
@@ -24,6 +29,7 @@ export 'package:wild/src/rust/api/wenku8.dart'
         deleteBookcase,
         moveBookcase,
         listReadingHistory,
+        novelHistoryById,
         deleteAllHistory,
         allDownloads,
         tags,
@@ -36,6 +42,17 @@ export 'package:wild/src/rust/api/wenku8.dart'
         logout;
 
 final _wenkuBrowser = Wenku8BrowserSession.instance;
+int _wenkuSessionGeneration = 0;
+
+/// Account identity for an opened book; changing discovery alone is unrelated.
+int readerSessionGeneration(String aid) =>
+    sourceOf(aid) == SourceId.lightNovelShelf
+        ? ShelfSession.instance.generation
+        : sourceOf(aid) == SourceId.wenku8
+        ? _wenkuSessionGeneration
+        : sourceOf(aid).isRule
+        ? RuleSourceRegistry.instance.revision(sourceOf(aid).ruleId)
+        : 0;
 
 Future<Uint8List> downloadCheckcode() =>
     _wenkuBrowser.downloadCheckcode(w8.downloadCheckcode);
@@ -45,6 +62,7 @@ Future<void> wenku8Login({
   required String password,
   required String checkcode,
 }) async {
+  _wenkuSessionGeneration++;
   await _wenkuBrowser.submitLogin(
     username: username,
     password: password,
@@ -64,6 +82,7 @@ Future<bool> preLoginState() async =>
         : w8.preLoginState();
 
 Future<void> logout() async {
+  _wenkuSessionGeneration++;
   await _wenkuBrowser.signOut();
   await w8.logout();
 }
@@ -101,10 +120,15 @@ Future<List<TagGroup>> tags() => _wenkuBrowser.nativeOrBrowser(
 
 Future<w8.PageStatsNovelCover> _wenkuEncodedList(
   String path,
-  String encodedQuery,
-) async {
+  String encodedQuery, {
+  String? searchKey,
+}) async {
   final host = await _wenkuBrowser.apiHost();
-  return _wenkuBrowser.read('list', Uri.parse('$host$path?$encodedQuery'));
+  return _wenkuBrowser.read(
+    'list',
+    Uri.parse('$host$path?$encodedQuery'),
+    searchKey: searchKey,
+  );
 }
 
 Future<w8.PageStatsNovelCover> tagPage({
@@ -159,6 +183,7 @@ class Wenku8Source implements BookSource {
     () async => _wenkuEncodedList(
       '/modules/article/search.php',
       'searchtype=${Uri.encodeComponent(type)}&searchkey=${await wenku8EncodeQuery(keyword)}&page=$page&charset=gbk',
+      searchKey: keyword,
     ),
   );
   @override
@@ -198,11 +223,56 @@ class Wenku8Source implements BookSource {
 
 final shelfSource = LightNovelShelfSource();
 final lnovelSource = LNovelSource();
+final biliSource = BiliSiteSource(
+  searcher: BiliBrowserSession.instance.search,
+  chapterLoader: BiliBrowserSession.instance.chapter,
+  documentLoader: BiliBrowserSession.instance.document,
+);
 final Map<SourceId, BookSource> bookSources = {
   SourceId.wenku8: Wenku8Source(),
   SourceId.lightNovelShelf: shelfSource,
   SourceId.lnovel: lnovelSource,
+  SourceId.bili: biliSource,
 };
+
+BookSource sourceAdapter(SourceId source) =>
+    bookSources[source] ?? (throw StateError('此书源已停用或移除。请在“书源与账号”中恢复或重新导入。'));
+bool sourceUsesCatalogSearch(SourceId source) =>
+    source == SourceId.lnovel ||
+    (bookSources[source] is RuleBookSource &&
+        !(bookSources[source] as RuleBookSource).hasSearch);
+bool sourceSupportsAuthorSearch(SourceId source) =>
+    source == SourceId.wenku8 || source == SourceId.lightNovelShelf;
+List<SourceId> get availableSources =>
+    SourceId.values.where((s) => bookSources.containsKey(s)).toList();
+bool _ruleListenerAttached = false;
+Map<String, String> ruleImageHeaders(SourceId source) {
+  final entry = RuleSourceRegistry.instance[source.ruleId];
+  return entry == null
+      ? const {}
+      : {'Referer': '${entry.definition.baseUrl.origin}/'};
+}
+
+void _refreshRuleSources() {
+  final registry = RuleSourceRegistry.instance;
+  SourceId.registerRules(
+    registry.entries.map(
+      (entry) =>
+          SourceId.rule(entry.definition.id, label: entry.definition.name),
+    ),
+  );
+  bookSources.removeWhere((id, _) => id.isRule);
+  for (final entry in registry.entries.where((e) => e.enabled)) {
+    final adapter = RuleBookSource(entry.definition);
+    bookSources[adapter.id] = adapter;
+  }
+  _detailCache.removeWhere((id, _) => sourceOf(id).isRule);
+  if (!bookSources.containsKey(activeSource.value)) {
+    activeSource.value = SourceId.wenku8;
+  }
+  sourceRevision.value++;
+}
+
 final _detailCache = <String, SourceBookDetail>{};
 final _chapterFonts = <String, String?>{};
 final _shelfCovers = <String, String>{};
@@ -212,9 +282,15 @@ String? chapterFont(String aid, String cid) => _chapterFonts['$aid/$cid'];
 Future<void> _writes = Future.value();
 
 Future<void> loadSourceSelection() async {
+  await RuleSourceRegistry.instance.load();
+  if (!_ruleListenerAttached) {
+    RuleSourceRegistry.instance.addListener(_refreshRuleSources);
+    _ruleListenerAttached = true;
+  }
+  _refreshRuleSources();
   final saved = await db.loadProperty(key: 'litetale.active_source');
   activeSource.value = SourceId.values.firstWhere(
-    (s) => s.name == saved,
+    (s) => s.name == saved && bookSources.containsKey(s),
     orElse: () => SourceId.wenku8,
   );
   try {
@@ -226,6 +302,7 @@ Future<void> loadSourceSelection() async {
 
 Future<void> selectSource(SourceId source) async {
   await _serial(() async {
+    sourceAdapter(source);
     await db.saveProperty(key: 'litetale.active_source', value: source.name);
     activeSource.value = source;
   });
@@ -236,23 +313,46 @@ void clearShelfSessionCache() {
   shelfSource.clearSessionCache();
 }
 
-Future<List<HomeBlock>> index() => bookSources[activeSource.value]!.discover();
+Future<List<HomeBlock>> index() => sourceAdapter(activeSource.value).discover();
 Future<NovelInfo> novelInfo({required String aid}) async {
-  final detail = await bookSources[sourceOf(aid)]!.detail(aid);
+  final generation = readerSessionGeneration(aid);
+  final detail = await sourceAdapter(sourceOf(aid)).detail(aid);
+  if (generation != readerSessionGeneration(aid)) {
+    throw StateError('书源或账号已变化，请重试。');
+  }
   _detailCache[aid] = detail;
   return detail.info;
 }
 
-Future<List<Volume>> novelReader({required String aid}) async =>
-    (_detailCache[aid] ?? await bookSources[sourceOf(aid)]!.detail(aid))
-        .volumes;
+Future<List<Volume>> novelReader({required String aid}) async {
+  final generation = readerSessionGeneration(aid);
+  final detail =
+      _detailCache[aid] ?? await sourceAdapter(sourceOf(aid)).detail(aid);
+  if (generation != readerSessionGeneration(aid)) {
+    throw StateError('书源或账号已变化，请重试。');
+  }
+  return detail.volumes;
+}
+
 Future<String> chapterContent({
   required String aid,
   required String cid,
 }) async {
-  final chapter = await bookSources[sourceOf(aid)]!.chapter(aid, cid);
+  final chapter = await sourceAdapter(sourceOf(aid)).chapter(aid, cid);
   _chapterFonts['$aid/$cid'] = chapter.fontFamily;
   return chapter.content;
+}
+
+Future<SourceChapter> readerChapter({
+  required String aid,
+  required String cid,
+}) async {
+  final generation = readerSessionGeneration(aid);
+  final chapter = await sourceAdapter(sourceOf(aid)).chapter(aid, cid);
+  if (generation != readerSessionGeneration(aid)) {
+    throw StateError('书源或账号已变化，请重试。');
+  }
+  return chapter;
 }
 
 Future<w8.PageStatsNovelCover> search({
@@ -278,7 +378,7 @@ Future<w8.PageStatsNovelCover> search({
       );
     });
   }
-  return bookSources[source]!.search(searchKey, searchType, page);
+  return sourceAdapter(source).search(searchKey, searchType, page);
 }
 
 String _searchKey(SourceId source) =>
@@ -316,6 +416,7 @@ Future<List<w8.ReadingHistory>> listReadingHistory({
   required int offset,
   required int limit,
 }) async {
+  await ReadingProgressQueue.instance.flushBounded();
   final source = activeSource.value;
   final selected = <w8.ReadingHistory>[];
   for (var start = 0; selected.length < offset + limit; start += 100) {
@@ -324,6 +425,11 @@ Future<List<w8.ReadingHistory>> listReadingHistory({
     if (chunk.length < 100) break;
   }
   return selected.skip(offset).take(limit).toList();
+}
+
+Future<w8.ReadingHistory?> novelHistoryById({required String novelId}) async {
+  await ReadingProgressQueue.instance.flushBounded();
+  return w8.novelHistoryById(novelId: novelId);
 }
 
 Future<void> deleteAllHistory() async {
@@ -367,6 +473,9 @@ Future<BookcaseDto> bookInCase({required String caseId}) async {
       SourceId.values
           .where((s) => s != SourceId.wenku8 && _caseId(s) == caseId)
           .firstOrNull;
+  if (source == null && caseId.startsWith('rule:')) {
+    throw StateError('此书源已移除，请重新导入相同书源。');
+  }
   if (source == null) return w8.bookInCase(caseId: caseId);
   final entries = await _jsonList(_shelfKeyFor(source));
   for (final book in entries) {
@@ -394,7 +503,7 @@ Future<void> addBookshelf({required String aid}) async {
   if (sourceOf(aid) == SourceId.wenku8) return w8.addBookshelf(aid: aid);
   final source = sourceOf(aid);
   final shelfKey = _shelfKeyFor(source);
-  final detail = _detailCache[aid] ?? await bookSources[source]!.detail(aid);
+  final detail = _detailCache[aid] ?? await sourceAdapter(source).detail(aid);
   await _serial(() async {
     final items = await _jsonList(shelfKey);
     if (items.any((b) => b['id'] == aid)) return;
@@ -426,9 +535,13 @@ Future<void> moveBookcase({
   required String fromBookcaseId,
   required String toBookcaseId,
 }) async {
-  if (SourceId.values
-      .where((s) => s != SourceId.wenku8)
-      .any((s) => _caseId(s) == fromBookcaseId || _caseId(s) == toBookcaseId)) {
+  if (fromBookcaseId.startsWith('rule:') ||
+      toBookcaseId.startsWith('rule:') ||
+      SourceId.values
+          .where((s) => s != SourceId.wenku8)
+          .any(
+            (s) => _caseId(s) == fromBookcaseId || _caseId(s) == toBookcaseId,
+          )) {
     if (fromBookcaseId == toBookcaseId) return;
     throw StateError('不同书源的收藏不能相互移动');
   }

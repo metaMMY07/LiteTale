@@ -3,15 +3,21 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/light_novel_shelf_browser_page.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/services/light_novel_shelf_service.dart';
+import 'package:wild/services/shelf_api_error.dart';
 import 'package:wild/src/rust/wenku8/models.dart' as w8;
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
 import 'package:wild/widgets/novel_card.dart';
+import 'package:wild/widgets/bili_recovery_button.dart';
 import 'package:wild/widgets/expressive_loading_indicator.dart';
 import 'package:wild/sources/book_source.dart';
+import 'package:wild/sources/bili_api_source.dart';
+import 'package:wild/sources/bili_site_source.dart';
+import 'package:wild/services/bili_browser.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
 import 'package:wild/widgets/wenku8_verification_page.dart';
+import 'package:wild/settings/source_settings_page.dart';
 
 import 'recommend_cubit.dart';
 
@@ -51,6 +57,11 @@ class RecommendPage extends StatelessWidget {
                         Text(
                           isWenku8
                               ? wenku8HomeErrorMessage(state.message)
+                              : state.cause is ShelfApiException ||
+                                  state.cause is BiliApiException ||
+                                  state.cause is BiliSiteException ||
+                                  state.cause is BiliBrowserException
+                              ? state.message
                               : '当前书源暂时无法加载推荐，请检查网络后重试。',
                           textAlign: TextAlign.center,
                           style: Theme.of(context).textTheme.bodyLarge,
@@ -75,6 +86,26 @@ class RecommendPage extends StatelessWidget {
                                 icon: const Icon(Icons.open_in_browser_rounded),
                                 label: const Text('打开文库8验证 / 登录'),
                               ),
+                            BiliRecoveryButton(
+                              error: state.cause,
+                              source: activeSource.value,
+                              onRecovered:
+                                  () => context.read<RecommendCubit>().load(
+                                    forceRefresh: true,
+                                  ),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed:
+                                  () => Navigator.push(
+                                    context,
+                                    HorizontalCoverPageRoute(
+                                      builder:
+                                          (_) => const SourceSettingsPage(),
+                                    ),
+                                  ),
+                              icon: const Icon(Icons.auto_stories_outlined),
+                              label: const Text('选择其他书源'),
+                            ),
                           ],
                         ),
                       ],

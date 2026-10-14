@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:wild/sources/source_api.dart' show chapterFont;
+import 'package:wild/widgets/reading_progress_scope.dart';
+import 'package:wild/services/frame_auto_scroller.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../src/rust/wenku8/models.dart';
@@ -24,10 +25,10 @@ import 'package:wild/cubits/volume_control_cubit.dart';
 import 'package:wild/utils/controller_event.dart';
 import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
-import 'dart:async';
 import 'dart:io';
 import 'package:wild/settings/settings_preferences.dart';
 import 'package:wild/settings/reading_session_scope.dart';
+import 'package:wild/widgets/bili_recovery_button.dart';
 
 class HtmlReaderPage extends StatelessWidget {
   final NovelInfo novelInfo;
@@ -62,7 +63,7 @@ class HtmlReaderPage extends StatelessWidget {
           create: (context) => AutoScrollConfigCubit()..loadConfig(),
         ),
       ],
-      child: const _HtmlReaderViewWrapper(),
+      child: const ReadingProgressScope(child: _HtmlReaderViewWrapper()),
     );
   }
 }
@@ -74,16 +75,31 @@ class _HtmlReaderViewWrapper extends StatefulWidget {
   State<_HtmlReaderViewWrapper> createState() => _HtmlReaderViewWrapperState();
 }
 
-class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper> {
+class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final ScrollController _scrollController;
   final _readingSessionKey = GlobalKey<ReadingSessionScopeState>();
-  Timer? _autoScrollTimer;
+  late final FrameAutoScroller _autoScroller;
 
   @override
   void initState() {
     super.initState();
     setKeepScreenUpOnReading(true);
     _scrollController = ScrollController();
+    WidgetsBinding.instance.addObserver(this);
+    _autoScroller = FrameAutoScroller(
+      vsync: this,
+      controller: _scrollController,
+      pixelsPerSecond: () {
+        final config = context.read<AutoScrollConfigCubit>().state;
+        return config.scrollSpeed *
+            1000 /
+            (config.scrollInterval <= 0 ? 16 : config.scrollInterval);
+      },
+      onEnd: () {
+        if (mounted) context.read<AutoScrollCubit>().stop();
+      },
+    );
 
     // 监听音量键事件
     if (Platform.isAndroid || Platform.isIOS) {
@@ -99,8 +115,9 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper> {
   void dispose() {
     setKeepScreenUpOnReading(false);
     setKeepScreenUpOnScroll(false);
+    WidgetsBinding.instance.removeObserver(this);
+    _autoScroller.dispose();
     _scrollController.dispose();
-    _autoScrollTimer?.cancel();
 
     // 取消音量键事件监听
     if (Platform.isAndroid || Platform.isIOS) {
@@ -166,38 +183,21 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper> {
 
   void _startAutoScroll() {
     setKeepScreenUpOnScroll(true);
-    _autoScrollTimer?.cancel();
-
-    final config = context.read<AutoScrollConfigCubit>().state;
-    _autoScrollTimer = Timer.periodic(
-      Duration(milliseconds: config.scrollInterval),
-      (timer) {
-        if (!mounted) {
-          timer.cancel();
-          return;
-        }
-
-        if (_scrollController.hasClients) {
-          final maxScroll = _scrollController.position.maxScrollExtent;
-          final currentScroll = _scrollController.offset;
-
-          if (currentScroll >= maxScroll) {
-            // Reached the end, stop auto-scroll
-            context.read<AutoScrollCubit>().stop();
-            _stopAutoScroll();
-            return;
-          }
-
-          _scrollController.jumpTo(currentScroll + config.scrollSpeed);
-        }
-      },
-    );
+    _autoScroller.start();
   }
 
   void _stopAutoScroll() {
     setKeepScreenUpOnScroll(false);
-    _autoScrollTimer?.cancel();
-    _autoScrollTimer = null;
+    _autoScroller.stop();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      _stopAutoScroll();
+    } else if (context.read<AutoScrollCubit>().state) {
+      _startAutoScroll();
+    }
   }
 
   void _onController(ReaderControllerEventArgs args) {
@@ -422,6 +422,21 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper> {
                                                   },
                                                   child: const Text('重试'),
                                                 ),
+                                                BiliRecoveryButton(
+                                                  error: state.cause,
+                                                  source: sourceOf(
+                                                    context
+                                                        .read<HtmlReaderCubit>()
+                                                        .initialAid,
+                                                  ),
+                                                  onRecovered:
+                                                      () =>
+                                                          context
+                                                              .read<
+                                                                HtmlReaderCubit
+                                                              >()
+                                                              .loadChapter(),
+                                                ),
                                               ],
                                             ),
                                           )
@@ -482,79 +497,66 @@ class _ReaderContent extends StatelessWidget {
     required this.source,
   });
 
-  List<Widget> _buildContentWidgets(
-    BuildContext context, {
+  Widget _buildContentWidget(
+    BuildContext context,
+    ParsedContent content, {
     required double fontSize,
     required double lineHeight,
     required double paragraphSpacing,
     required Color textColor,
     required String fontFamily,
   }) {
-    final widgets = <Widget>[];
-
-    for (var content in parsedContent) {
-      if (content is ParsedText) {
-        widgets.add(
-          Padding(
-            padding: EdgeInsets.only(bottom: paragraphSpacing),
-            child: Text(
-              content.text,
-              style: TextStyle(
-                fontFamily: fontFamily,
-                locale: readerHanLocale,
-                fontFamilyFallback: const [appFontFamily],
-                fontSize: fontSize,
-                height: lineHeight,
-                color: textColor,
+    if (content is ParsedText) {
+      return Padding(
+        padding: EdgeInsets.only(bottom: paragraphSpacing),
+        child: Text(
+          content.text,
+          style: TextStyle(
+            fontFamily: fontFamily,
+            locale: readerHanLocale,
+            fontFamilyFallback: const [appFontFamily],
+            fontSize: fontSize,
+            height: lineHeight,
+            color: textColor,
+          ),
+        ),
+      );
+    } else if (content is ParsedImage) {
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          return Padding(
+            padding: EdgeInsets.symmetric(vertical: paragraphSpacing),
+            child: SizedBox(
+              width: constraints.maxWidth,
+              child: AspectRatio(
+                aspectRatio: 4 / 3, // 默认图片比例
+                child: Image(
+                  image: CachedImageProvider(content.imageUrl, source: source),
+                  width: constraints.maxWidth,
+                  fit: BoxFit.contain,
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return Container(
+                      width: constraints.maxWidth,
+                      color: Colors.grey[200],
+                      child: const Center(child: CircularProgressIndicator()),
+                    );
+                  },
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      width: constraints.maxWidth,
+                      color: Colors.grey[200],
+                      child: const Center(child: Text('图片加载失败')),
+                    );
+                  },
+                ),
               ),
             ),
-          ),
-        );
-      } else if (content is ParsedImage) {
-        widgets.add(
-          LayoutBuilder(
-            builder: (context, constraints) {
-              return Padding(
-                padding: EdgeInsets.symmetric(vertical: paragraphSpacing),
-                child: SizedBox(
-                  width: constraints.maxWidth,
-                  child: AspectRatio(
-                    aspectRatio: 4 / 3, // 默认图片比例
-                    child: Image(
-                      image: CachedImageProvider(
-                        content.imageUrl,
-                        source: source,
-                      ),
-                      width: constraints.maxWidth,
-                      fit: BoxFit.contain,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return Container(
-                          width: constraints.maxWidth,
-                          color: Colors.grey[200],
-                          child: const Center(
-                            child: CircularProgressIndicator(),
-                          ),
-                        );
-                      },
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          width: constraints.maxWidth,
-                          color: Colors.grey[200],
-                          child: const Center(child: Text('图片加载失败')),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        );
-      }
+          );
+        },
+      );
     }
-
-    return widgets;
+    return const SizedBox.shrink();
   }
 
   @override
@@ -565,7 +567,7 @@ class _ReaderContent extends StatelessWidget {
     final reader = context.read<HtmlReaderCubit>().state;
     final fontFamily =
         reader is HtmlReaderLoaded
-            ? chapterFont(reader.aid, reader.cid) ?? readerFamily
+            ? reader.sourceFont ?? readerFamily
             : readerFamily;
     return BlocBuilder<ThemeCubit, ReaderTheme>(
       builder: (context, theme) {
@@ -603,15 +605,7 @@ class _ReaderContent extends StatelessWidget {
                                       View.of(context),
                                     ).padding.bottom;
 
-                                final col = [
-                                  ..._buildContentWidgets(
-                                    context,
-                                    fontSize: fontSize,
-                                    lineHeight: lineHeight,
-                                    paragraphSpacing: paragraphSpacing,
-                                    textColor: textColor,
-                                    fontFamily: fontFamily,
-                                  ),
+                                final footer = [
                                   ...[
                                     const SizedBox(height: 32),
                                     Row(
@@ -645,15 +639,49 @@ class _ReaderContent extends StatelessWidget {
                                       double
                                     >(
                                       builder: (context, rightPadding) {
-                                        return ListView(
-                                          controller: scrollController,
-                                          padding: EdgeInsets.only(
-                                            left: leftPadding,
-                                            right: rightPadding,
-                                            top: topBarHeight + topPad,
-                                            bottom: bottomBarHeight + bottomPad,
+                                        return NotificationListener<
+                                          ScrollStartNotification
+                                        >(
+                                          onNotification: (notification) {
+                                            if (notification.dragDetails !=
+                                                null) {
+                                              context
+                                                  .read<AutoScrollCubit>()
+                                                  .stop();
+                                            }
+                                            return false;
+                                          },
+                                          child: ListView.builder(
+                                            controller: scrollController,
+                                            padding: EdgeInsets.only(
+                                              left: leftPadding,
+                                              right: rightPadding,
+                                              top: topBarHeight + topPad,
+                                              bottom:
+                                                  bottomBarHeight + bottomPad,
+                                            ),
+                                            itemCount:
+                                                parsedContent.length +
+                                                footer.length,
+                                            itemBuilder:
+                                                (context, index) =>
+                                                    index < parsedContent.length
+                                                        ? _buildContentWidget(
+                                                          context,
+                                                          parsedContent[index],
+                                                          fontSize: fontSize,
+                                                          lineHeight:
+                                                              lineHeight,
+                                                          paragraphSpacing:
+                                                              paragraphSpacing,
+                                                          textColor: textColor,
+                                                          fontFamily:
+                                                              fontFamily,
+                                                        )
+                                                        : footer[index -
+                                                            parsedContent
+                                                                .length],
                                           ),
-                                          children: col,
                                         );
                                       },
                                     );
