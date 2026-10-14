@@ -8,19 +8,21 @@
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
-## Android 正式版 v0.1.15
+## Android 正式版 v0.1.21
 
-LiteTale Android 稳定版现已发布。应用以统一的 Material You 界面阅读轻小说，并分别保存各书源的账号与阅读数据。
+LiteTale 0.1.21 已发布，提供 ARM64 手机／平板版和 x86_64 模拟器版。应用以统一的 Material You 界面阅读轻小说，并分别保存各书源的账号与阅读数据。
 
-[下载 ARM64 手机／平板版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.15/LiteTale-0.1.15-arm64-v8a.apk) · [下载 x86_64 模拟器版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.15/LiteTale-0.1.15-x86_64.apk) · [查看正式版发布页与校验值](https://github.com/metaMMY07/LiteTale/releases/tag/v0.1.15)
+[下载 ARM64 手机／平板版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.21/LiteTale-0.1.21-arm64-v8a.apk) · [下载 x86_64 模拟器版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.21/LiteTale-0.1.21-x86_64.apk) · [查看 0.1.21 发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v0.1.21)
+
+轻书架此前因 Web 端 API 上游故障暂时不可用；网站站主近期已恢复服务，目前轻书架书源已恢复正常。
 
 ### 功能
 
-- 在文库8、轻书架与轻小说百科之间切换；每个书源的登录状态、书架和阅读记录分别保存。
-- 支持书籍搜索、详情、目录与阅读。文库8会复用同站网页登录会话；站点验证与网络策略可能影响个别请求。
+- 在哔哩轻小说、文库8、轻书架与轻小说百科之间切换，也可以导入自定义规则书源；各书源的账号、书架和阅读记录分别保存。
+- 支持搜索、书籍详情、目录与阅读；增加哔哩轻小说原站读取和验证恢复入口，并持续改进文库8与轻书架的读取稳定性。
+- 提供 Material You 配色、多种应用图标配色、平板横屏双页阅读和仿真翻页。
 - 分别导入全局界面字体和阅读字体，支持 TTF／OTF；加密章节继续使用书源所需字体，避免乱码。
-- 提供 Material You 动态配色、深浅色主题和多种应用图标配色。
-- 支持平板横屏双页阅读、阅读进度保存和插图查看；仿真翻页可在阅读设置中开关。
+- 书源导入支持 LiteTale JSON 和 Legado JSON 的部分 CSS／JSON 规则；不执行外部脚本。
 
 APK 使用与既有版本相同的 Android Debug 签名，适合直接安装和从同签名版本升级；目前不用于 Google Play 等商店分发。
 
