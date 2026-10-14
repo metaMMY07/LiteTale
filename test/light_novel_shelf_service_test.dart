@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/services/light_novel_shelf_service.dart';
 import 'package:wild/services/shelf_api_error.dart';
+import 'package:wild/services/shelf_device_id.dart';
 
 void main() {
   test('decodes public SignalR payload and normalizes display text', () {
@@ -91,7 +92,14 @@ void main() {
   test(
     'live anonymous feed can be loaded and cached',
     () async {
-      final service = LightNovelShelfService.instance;
+      String? savedId;
+      final identity = ShelfDeviceId(
+        readValue: () async => savedId,
+        writeValue: (id) async {
+          savedId = id;
+        },
+      );
+      final service = LightNovelShelfService(deviceId: identity.value);
       final books = await service.fetchLatestBooks(forceRefresh: true);
       expect(books, isNotEmpty);
       expect(books.length, lessThanOrEqualTo(6));

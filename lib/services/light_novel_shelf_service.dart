@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 import 'shelf_api_error.dart';
+import 'shelf_device_id.dart';
 
 /// A compact book summary returned by LightNovelShelf's public latest feed.
 class LightNovelShelfBook {
@@ -40,9 +40,11 @@ class LightNovelShelfBook {
 class LightNovelShelfService {
   LightNovelShelfService({
     Uri? testHub,
+    Future<String> Function()? deviceId,
     this.attemptTimeout = const Duration(seconds: 20),
     this.retryDelay = const Duration(milliseconds: 350),
-  }) : _hub = testHub ?? Uri.parse(_hubUrl) {
+  }) : _hub = testHub ?? Uri.parse(_hubUrl),
+       _deviceId = deviceId ?? ShelfDeviceId.instance.value {
     if (testHub != null &&
         !(testHub.scheme == 'ws' && testHub.host == '127.0.0.1')) {
       throw ArgumentError('Only a loopback test hub may override the provider');
@@ -65,6 +67,7 @@ class LightNovelShelfService {
     'GetNovelContent',
   };
   final Uri _hub;
+  final Future<String> Function() _deviceId;
   final Duration attemptTimeout;
   final Duration retryDelay;
   final _pendingReads = <String, Future<Object?>>{};
@@ -149,11 +152,13 @@ class LightNovelShelfService {
     var expired = false;
     try {
       final operation = () async {
+        final deviceId = await _deviceId();
+        if (expired) throw shelfTimeoutError;
         final connection = WebSocket.connect(
           _hub.toString(),
           headers: {
             HttpHeaders.userAgentHeader: 'LiteTale/0.1.17',
-            'x-id': _createUuid(),
+            'x-id': deviceId,
             if (token != null && token.isNotEmpty)
               HttpHeaders.authorizationHeader: 'Bearer $token',
           },
@@ -285,16 +290,6 @@ class LightNovelShelfService {
       return message['result'];
     }
     throw shelfNetworkError;
-  }
-
-  String _createUuid() {
-    final random = Random.secure();
-    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    final value = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-    return '${value.substring(0, 8)}-${value.substring(8, 12)}-'
-        '${value.substring(12, 16)}-${value.substring(16, 20)}-${value.substring(20)}';
   }
 }
 

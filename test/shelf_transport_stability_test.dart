@@ -23,6 +23,7 @@ Future<({HttpServer server, LightNovelShelfService service})> hub(
     server: server,
     service: LightNovelShelfService(
       testHub: Uri.parse('ws://127.0.0.1:${server.port}/hub/api'),
+      deviceId: () async => '00000000-0000-4000-8000-000000000001',
       attemptTimeout: timeout,
       retryDelay: Duration.zero,
     ),
@@ -70,6 +71,7 @@ void main() {
     () async {
       var refreshes = 0, connections = 0;
       final session = ShelfSession(
+        deviceId: () async => '00000000-0000-4000-8000-000000000001',
         createClient:
             () => MockClient((_) async {
               refreshes++;

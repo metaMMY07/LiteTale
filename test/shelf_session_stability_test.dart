@@ -9,6 +9,7 @@ import 'package:wild/sources/shelf_session.dart';
 class MemorySession {
   MemorySession(Future<http.Response> Function(http.Request) handle) {
     session = ShelfSession(
+      deviceId: () async => '00000000-0000-4000-8000-000000000001',
       createClient:
           () => MockClient((request) {
             calls++;

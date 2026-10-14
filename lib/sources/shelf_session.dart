@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:wild/services/shelf_api_error.dart';
+import 'package:wild/services/shelf_device_id.dart';
 
 export 'package:wild/services/shelf_api_error.dart' show ShelfSignInRequired;
 
@@ -16,8 +17,10 @@ class ShelfSession {
     Future<String?> Function()? readCredential,
     Future<void> Function(String)? writeCredential,
     Future<void> Function()? deleteCredential,
+    Future<String> Function()? deviceId,
     this.requestTimeout = const Duration(seconds: 20),
   }) : _createClient = createClient ?? http.Client.new,
+       _deviceId = deviceId ?? ShelfDeviceId.instance.value,
        _readCredential = readCredential ?? (() => _storage.read(key: _key)),
        _writeCredential =
            writeCredential ?? ((v) => _storage.write(key: _key, value: v)),
@@ -27,6 +30,7 @@ class ShelfSession {
   static const _storage = FlutterSecureStorage();
   static const _key = 'litetale.lns.refresh';
   final http.Client Function() _createClient;
+  final Future<String> Function() _deviceId;
   final Future<String?> Function() _readCredential;
   final Future<void> Function(String) _writeCredential;
   final Future<void> Function() _deleteCredential;
@@ -231,17 +235,26 @@ class ShelfSession {
     bool refreshing = false,
   }) async {
     final client = _createClient();
+    final generation = _generation;
+    final elapsed = Stopwatch()..start();
     try {
+      final deviceId = await _deviceId().timeout(requestTimeout);
+      if (generation != _generation) {
+        throw const ShelfApiException('轻书架账号状态已变化，请重试。');
+      }
+      final remaining = requestTimeout - elapsed.elapsed;
+      if (remaining <= Duration.zero) throw shelfTimeoutError;
       final response = await client
           .post(
             Uri.parse('https://api.lightnovel.life$path'),
             headers: {
               'Content-Type': 'application/json',
               'User-Agent': 'LiteTale/0.1.17',
+              'x-id': deviceId,
             },
             body: jsonEncode(body),
           )
-          .timeout(requestTimeout);
+          .timeout(remaining);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw ShelfApiException.http(
           response.statusCode,
