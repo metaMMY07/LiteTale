@@ -11,6 +11,7 @@ import 'package:wild/utils/wenku8_home_dom.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
 import 'package:wild/utils/wenku8_read_dom.dart';
 import 'package:wild/utils/wenku8_search_navigation.dart';
+import 'package:wild/utils/wenku8_document_read.dart';
 
 /// The browser owns its cookies. Only bounded, typed page data leaves it.
 abstract interface class Wenku8BrowserPort {
@@ -20,9 +21,16 @@ abstract interface class Wenku8BrowserPort {
   Future<void> persistSession();
 }
 
+/// Optional platform capability. Only app-owned empty HTML may be loaded with
+/// the configured HTTPS origin; website responses still need strict validation.
+abstract interface class Wenku8DocumentContextPort {
+  Future<bool> prepareDocumentContext(String host, String html);
+}
+
 // A platform-channel future can stall independently of page navigation. Bound
 // every command so one broken WebView request cannot own the read queue forever.
-class _BoundedBrowserPort implements Wenku8BrowserPort {
+class _BoundedBrowserPort
+    implements Wenku8BrowserPort, Wenku8DocumentContextPort {
   _BoundedBrowserPort(this.inner, this.timeout, this.onTimeout);
   final Wenku8BrowserPort inner;
   final Duration timeout;
@@ -51,6 +59,19 @@ class _BoundedBrowserPort implements Wenku8BrowserPort {
       _run(() => inner.executeScript(script));
   @override
   Future<void> persistSession() => _run(inner.persistSession);
+
+  @override
+  Future<bool> prepareDocumentContext(String host, String html) {
+    final port = inner;
+    return port is Wenku8DocumentContextPort
+        ? _run(
+          () => (port as Wenku8DocumentContextPort).prepareDocumentContext(
+            host,
+            html,
+          ),
+        )
+        : Future.value(false);
+  }
 }
 
 class Wenku8BrowserException implements Exception {
@@ -90,6 +111,8 @@ class Wenku8BrowserSession extends ChangeNotifier {
   Wenku8BrowserPort? _port;
   Completer<Wenku8BrowserPort>? _attachment;
   Future<void> _queue = Future.value();
+  int _queuedOperations = 0;
+  VoidCallback? _cancelBackgroundRead;
   bool _requested = false;
   int _finished = 0;
   int _epoch = 0;
@@ -97,6 +120,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
   String? _captchaHost;
   Object? _navigationError;
   String? _navigationHost;
+  String? _readContextHost;
   ({String host, bool browser})? _loginTransport;
   int _captchaRequest = 0;
   ({String query, int page, Uri url})? _nextSearchPage;
@@ -108,6 +132,10 @@ class Wenku8BrowserSession extends ChangeNotifier {
 
   bool get requested => _requested;
   int rendererGeneration = 0;
+  // Includes sessions adopted from a visible verification/login page. Kept
+  // synchronous so a caller cannot hit an old cache before a stream delivers.
+  int _readingSessionRevision = 0;
+  int get readingSessionRevision => _readingSessionRevision;
 
   Future<Wenku8BrowserPort> _commands() async {
     final port = await _renderer();
@@ -119,6 +147,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
       () {
         if (!identical(_port, port)) return;
         _port = null;
+        _readContextHost = null;
         _attachment = null;
         _captchaEpoch = null;
         _epoch++;
@@ -161,6 +190,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
 
   void attach(Wenku8BrowserPort port) {
     _port = port;
+    _readContextHost = null;
     final waiting = _attachment;
     if (waiting != null && !waiting.isCompleted) waiting.complete(port);
   }
@@ -168,6 +198,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
   void detach(Wenku8BrowserPort port) {
     if (identical(port, _port)) {
       _port = null;
+      _readContextHost = null;
       _attachment = null;
       _captchaEpoch = null;
       _epoch++;
@@ -210,10 +241,81 @@ class Wenku8BrowserSession extends ChangeNotifier {
     }
   }
 
-  Future<T> _serial<T>(Future<T> Function() operation) {
-    final next = _queue.then((_) => operation());
+  Future<T> _serial<T>(
+    Future<T> Function() operation, {
+    bool background = false,
+  }) {
+    if (!background) _cancelBackgroundRead?.call();
+    _queuedOperations++;
+    final next = _queue.then((_) => operation()).whenComplete(() {
+      _queuedOperations--;
+    });
     _queue = next.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     return next;
+  }
+
+  /// Speculation uses only an established inert document. It never navigates,
+  /// starts a renderer, touches a CAPTCHA, retries, or opens a verification UI.
+  /// Any foreground browser command cancels it at the next poll, then parking
+  /// aborts fetch before the foreground request takes ownership of the view.
+  Future<String?> prefetchChapter(
+    Uri target, {
+    required String aid,
+    required bool Function() isCurrent,
+  }) {
+    final admittedPort = _port;
+    if (_queuedOperations != 0 ||
+        admittedPort == null ||
+        _captchaEpoch != null ||
+        _readContextHost == null ||
+        !isCurrent()) {
+      return Future.value(null);
+    }
+    var cancelled = false;
+    void cancel() => cancelled = true;
+    bool interrupted() => cancelled || !isCurrent();
+    _cancelBackgroundRead = cancel;
+    return _serial(() async {
+      String? host;
+      Wenku8BrowserPort? port;
+      try {
+        host = await apiHost();
+        if (interrupted() ||
+            !identical(_port, admittedPort) ||
+            _readContextHost != host ||
+            !sameOrigin(target.toString(), host) ||
+            _captchaEpoch != null) {
+          return null;
+        }
+        port = await _commands();
+        final snapshot = await _readDocument(
+          port,
+          host,
+          target,
+          wenku8ReadDomExtractionScript(host, kind: 'chapter', aid: aid),
+          maxDuration: const Duration(seconds: 3),
+          isCancelled: interrupted,
+        );
+        if (snapshot == null || interrupted() || await apiHost() != host) {
+          return null;
+        }
+        return parseWenku8ReadWebViewResult(
+              snapshot,
+              apiHost: host,
+              loadedUrl: target.toString(),
+              kind: 'chapter',
+              aid: aid,
+            )
+            as String;
+      } catch (_) {
+        return null;
+      } finally {
+        if (port != null && host != null) await _park(port, host);
+        if (identical(_cancelBackgroundRead, cancel)) {
+          _cancelBackgroundRead = null;
+        }
+      }
+    }, background: true);
   }
 
   Future<T> nativeOrBrowser<T>(
@@ -359,7 +461,9 @@ class Wenku8BrowserSession extends ChangeNotifier {
         }
         if (state['challenge'] == true) {
           verification = true;
-        } else if (state['domReady'] == true || state['ready'] == true) {
+        } else if (state['domReady'] == true ||
+            state['ready'] == true ||
+            (searchResult && state['searchReady'] == true)) {
           final loaded = Uri.parse(url);
           if (loaded.path == '/login.php' && target.path != '/login.php') {
             if (host == await apiHost()) {
@@ -368,6 +472,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
               // to browser mode before AuthCubit rechecks the current marker.
               await enable(host);
               await _writeProperty(_loginKey, '');
+              _readingSessionRevision++;
               _sessionInvalidations.add(null);
             }
             throw const Wenku8BrowserException('文库8登录已失效，请重新登录。');
@@ -384,7 +489,28 @@ class Wenku8BrowserSession extends ChangeNotifier {
   Future<List<HomeBlock>> home() => _serial(() async {
     final host = await apiHost();
     final port = await _commands();
+    var succeeded = false;
     try {
+      final snapshot = await _readDocument(
+        port,
+        host,
+        Uri.parse('$host/'),
+        wenku8HomeDomExtractionScript(host),
+      );
+      if (snapshot != null) {
+        try {
+          final blocks = parseWenku8HomeWebViewResult(
+            snapshot,
+            apiHost: host,
+            loadedUrl: '$host/',
+          );
+          await enable(host);
+          succeeded = true;
+          return blocks;
+        } on FormatException {
+          // Some site versions need normal navigation to initialize a page.
+        }
+      }
       await _navigate(port, host, Uri.parse('$host/'));
       final loaded = await port.currentUrl();
       final raw = await port.executeScript(wenku8HomeDomExtractionScript(host));
@@ -394,9 +520,14 @@ class Wenku8BrowserSession extends ChangeNotifier {
         loadedUrl: loaded,
       );
       await enable(host);
+      succeeded = true;
       return blocks;
     } finally {
-      await _idle(port);
+      if (succeeded) {
+        await _park(port, host);
+      } else {
+        await _idle(port);
+      }
     }
   });
 
@@ -436,7 +567,32 @@ class Wenku8BrowserSession extends ChangeNotifier {
     final host = await apiHost();
     final port = await _commands();
     String? searchIdentity;
+    var succeeded = false;
     try {
+      if (searchKey == null) {
+        final snapshot = await _readDocument(
+          port,
+          host,
+          target,
+          wenku8ReadDomExtractionScript(host, kind: kind, aid: aid),
+        );
+        if (snapshot != null) {
+          try {
+            final value = parseWenku8ReadWebViewResult(
+              snapshot,
+              apiHost: host,
+              loadedUrl: target.toString(),
+              kind: kind,
+              aid: aid,
+            );
+            await enable(host);
+            succeeded = true;
+            return value as T;
+          } on FormatException {
+            // Preserve the existing renderer path for changed/dynamic pages.
+          }
+        }
+      }
       if (kind == 'list' &&
           searchKey != null &&
           isWenku8SearchRequest(target, host)) {
@@ -447,7 +603,9 @@ class Wenku8BrowserSession extends ChangeNotifier {
         if (page == 1 || cached?.query != searchIdentity) {
           _nextSearchPage = null;
         }
-        await _navigate(port, host, Uri.parse('$host/'));
+        if (_readContextHost != host) {
+          await _navigate(port, host, Uri.parse('$host/'));
+        }
         if (page > 1 &&
             cached?.query == searchIdentity &&
             cached?.page == page) {
@@ -456,9 +614,15 @@ class Wenku8BrowserSession extends ChangeNotifier {
           );
           await _waitForSearchPage(port, host, target);
         } else {
-          final submitted = await port.executeScript(
+          var submitted = await port.executeScript(
             wenku8SearchSubmitScript(host, searchKey, query['searchtype']!),
           );
+          if (submitted != true && _readContextHost == host) {
+            await _navigate(port, host, Uri.parse('$host/'));
+            submitted = await port.executeScript(
+              wenku8SearchSubmitScript(host, searchKey, query['searchtype']!),
+            );
+          }
           if (submitted != true) {
             throw const Wenku8BrowserException('文库8搜索表单已变化，请打开站点检查后重试。');
           }
@@ -511,6 +675,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
                 )
                 as NovelInfo;
         await enable(host);
+        succeeded = true;
         return PageStatsNovelCover(
               currentPage: 1,
               maxPage: 1,
@@ -549,9 +714,14 @@ class Wenku8BrowserSession extends ChangeNotifier {
           _nextSearchPage = (query: searchIdentity, page: page, url: next);
         }
       }
+      succeeded = true;
       return value as T;
     } finally {
-      await _idle(port);
+      if (succeeded) {
+        await _park(port, host);
+      } else {
+        await _idle(port);
+      }
     }
   });
 
@@ -630,6 +800,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
               throw const Wenku8SiteVerificationRequired();
             }
             if (state['ready'] == true && state['authenticated'] == true) {
+              _readingSessionRevision++;
               await port.persistSession();
               await _writeProperty(_loginKey, host);
               await enable(host);
@@ -662,6 +833,8 @@ class Wenku8BrowserSession extends ChangeNotifier {
         data['home'] != true) {
       throw const Wenku8BrowserException('请在文库8登录页或首页完成验证后返回。');
     }
+    _readingSessionRevision++;
+    _cancelBackgroundRead?.call();
     await persistSession?.call();
     await enable(host);
     _loginTransport = null;
@@ -675,6 +848,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
   static String get pageStateScript => _pageStateScript;
 
   Future<void> signOut() => _serial(() async {
+    _readingSessionRevision++;
     await _writeProperty(_loginKey, '');
     _loginTransport = null;
     ++_captchaRequest;
@@ -690,7 +864,109 @@ class Wenku8BrowserSession extends ChangeNotifier {
     }
   });
 
+  Future<Object?> _readDocument(
+    Wenku8BrowserPort port,
+    String host,
+    Uri target,
+    String extraction, {
+    Duration maxDuration = const Duration(seconds: 8),
+    bool Function()? isCancelled,
+  }) async {
+    if (isCancelled?.call() == true) return null;
+    if (!sameOrigin(target.toString(), host)) return null;
+    if (_readContextHost != host && !await _prepareReadContext(port, host)) {
+      return null;
+    }
+    if (isCancelled?.call() == true) return null;
+    final budget = pageTimeout < maxDuration ? pageTimeout : maxDuration;
+    final started = await port.executeScript(
+      wenku8DocumentReadScript(
+        host: host,
+        target: target,
+        extraction: extraction,
+        timeoutMs: budget.inMilliseconds,
+      ),
+    );
+    if (started != true) {
+      _readContextHost = null;
+      return null;
+    }
+    final deadline = DateTime.now().add(budget);
+    while (DateTime.now().isBefore(deadline)) {
+      if (isCancelled?.call() == true) return null;
+      final raw = await port.executeScript(wenku8DocumentReadStateScript);
+      if (isCancelled?.call() == true) return null;
+      final value = raw is String ? jsonDecode(raw) : raw;
+      if (value is! Map) return null;
+      if (value['pending'] == true) {
+        await Future<void>.delayed(pollInterval);
+        continue;
+      }
+      if (value['error'] == 'timeout') break;
+      if (value['error'] == 'size') {
+        throw const Wenku8BrowserException('文库8网页数据过大，请重试。');
+      }
+      final status = value['status'];
+      if (status is int && status != 403 && status != 429) {
+        throw Wenku8BrowserException('文库8请求失败（HTTP $status），请稍后重试。');
+      }
+      if (value['url'] != target.toString()) return null;
+      return value['payload'];
+    }
+    throw const Wenku8BrowserException('文库8网页加载超时，请重试。');
+  }
+
+  Future<bool> _prepareReadContext(Wenku8BrowserPort port, String host) async {
+    if (port is! Wenku8DocumentContextPort) return false;
+    _readContextHost = null;
+    _captchaEpoch = null;
+    _epoch++;
+    _navigationHost = host;
+    _navigationError = null;
+    try {
+      if (!await (port as Wenku8DocumentContextPort).prepareDocumentContext(
+        host,
+        wenku8EmptyReadContextHtml,
+      )) {
+        return false;
+      }
+    } catch (_) {
+      if (port is _BoundedBrowserPort && port.expired) rethrow;
+      return false;
+    }
+    final budget =
+        pageTimeout < const Duration(seconds: 1)
+            ? pageTimeout
+            : const Duration(seconds: 1);
+    final deadline = DateTime.now().add(budget);
+    while (DateTime.now().isBefore(deadline)) {
+      if (await port.executeScript(wenku8DocumentContextReadyScript(host)) ==
+          true) {
+        _readContextHost = host;
+        return true;
+      }
+      await Future<void>.delayed(pollInterval);
+    }
+    await _idle(port);
+    return false;
+  }
+
+  Future<void> _park(Wenku8BrowserPort port, String host) async {
+    _captchaEpoch = null;
+    _epoch++;
+    try {
+      if (await port.executeScript(wenku8ParkDocumentScript(host)) == true) {
+        _readContextHost = host;
+        return;
+      }
+    } catch (_) {
+      // Older browser engines can still use the normal navigation path.
+    }
+    await _idle(port);
+  }
+
   Future<void> _idle(Wenku8BrowserPort port) async {
+    _readContextHost = null;
     _captchaEpoch = null;
     _epoch++;
     try {
@@ -707,7 +983,9 @@ class Wenku8BrowserSession extends ChangeNotifier {
   static const _pageStateScript = r'''
 (function() {
   var title = (document.title || '').toLowerCase();
-  var text = document.body ? document.body.innerText : '';
+  // Login errors need no style/layout calculation for an entire book page.
+  var text = location.pathname === '/login.php' && document.body ?
+    document.body.textContent.slice(0,32000) : '';
   var challenge = !!document.querySelector('#challenge-form,#cf-challenge-running,.cf-browser-verification,#cf-wrapper') ||
     /just a moment|attention required|sorry, you have been blocked/.test(title);
   var error = null;
@@ -718,10 +996,17 @@ class Wenku8BrowserSession extends ChangeNotifier {
   var loginForm = !!document.querySelector('form input[name="username"]') &&
     !!document.querySelector('form input[name="password"]');
   var signedIn = !!document.querySelector('a[href*="logout.php"]') && !loginForm;
+  var stats=document.querySelector('#pagestats');
+  var pages=stats && /([0-9]+)\s*\/\s*([0-9]+)/.exec(stats.textContent || '');
+  // The result table and final paginator arrive before trailing site scripts.
+  // Do not cut off a still-streaming table or lose its real next-page link.
+  var searchReady=location.pathname==='/modules/article/search.php' &&
+    !!document.querySelector('table.grid') && !!pages &&
+    (Number(pages[2])===1 || !!document.querySelector('#pagelink a.last'));
   return JSON.stringify({url:location.href,ready:document.readyState === 'complete',
     navigating:window.__liteTaleNavigating === true,
     domReady:!!document.body && (document.readyState === 'interactive' || document.readyState === 'complete'),
-    challenge:challenge,loginForm:loginForm,authenticated:!challenge && signedIn,
+    challenge:challenge,searchReady:searchReady,loginForm:loginForm,authenticated:!challenge && signedIn,
     home:!!document.querySelector('#centers,div.main'),loginError:error});
 })()
 ''';

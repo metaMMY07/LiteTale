@@ -13,6 +13,7 @@ import 'package:wild/src/rust/wenku8/models.dart';
 /// 这个组件用真正的 Edge WebView2 完成验证，再从已登录的页面解析书架。
 class CfBookshelfLoader extends StatefulWidget {
   final String apiHost;
+  final WenkuWebView? webView;
   final void Function(
     List<Bookcase> bookcases,
     Map<String, BookcaseDto> contents,
@@ -28,6 +29,7 @@ class CfBookshelfLoader extends StatefulWidget {
   const CfBookshelfLoader({
     super.key,
     required this.apiHost,
+    this.webView,
     this.onPartialData,
     required this.onSuccess,
     required this.onError,
@@ -38,7 +40,8 @@ class CfBookshelfLoader extends StatefulWidget {
 }
 
 class CfBookshelfLoaderState extends State<CfBookshelfLoader> {
-  final WenkuWebView _controller = WenkuWebView();
+  late final WenkuWebView _controller = widget.webView ?? WenkuWebView();
+  Future<void>? _initializing;
 
   bool _initialized = false;
   String? _initializationError;
@@ -99,12 +102,6 @@ class CfBookshelfLoaderState extends State<CfBookshelfLoader> {
 })()
 ''';
 
-  @override
-  void initState() {
-    super.initState();
-    _initializeWebView();
-  }
-
   Future<void> _initializeWebView() async {
     try {
       await _controller.initialize(
@@ -113,7 +110,10 @@ class CfBookshelfLoaderState extends State<CfBookshelfLoader> {
           if (_active) _fail(error);
         },
       );
-      if (!mounted) return;
+      if (!mounted) {
+        await _controller.dispose();
+        return;
+      }
       setState(() => _initialized = true);
       await _controller.loadUrl('${widget.apiHost}/');
     } catch (e) {
@@ -133,7 +133,9 @@ class CfBookshelfLoaderState extends State<CfBookshelfLoader> {
     if (_initializationError != null) {
       _fail(_initializationError!);
     } else if (!_initialized) {
-      // 初始化完成后，首页导航事件会继续流程。
+      // The tab exists in an IndexedStack even while discovery is visible.
+      // Create its browser only when a real bookshelf fallback is requested.
+      _initializing ??= _initializeWebView();
     } else if (_homeLoaded) {
       _navigateToBookcase();
     } else {
@@ -203,9 +205,10 @@ class CfBookshelfLoaderState extends State<CfBookshelfLoader> {
 
   Future<void> _onNavigationCompleted() async {
     await Future<void>.delayed(const Duration(milliseconds: 1000));
-    if (!mounted || !_initialized) return;
+    if (!mounted || !_initialized || !_active) return;
 
     try {
+      if (await _controller.currentUrl() == 'about:blank') return;
       final blocked =
           await _controller.executeScript(r'''
 (function() {
@@ -335,6 +338,11 @@ class CfBookshelfLoaderState extends State<CfBookshelfLoader> {
   void _complete() {
     _active = false;
     _timeout?.cancel();
+    _homeLoaded = false;
+    // Do not keep the site's scripts/ads painting behind the native reader.
+    if (_initialized) {
+      unawaited(_controller.loadUrl('about:blank').catchError((Object _) {}));
+    }
   }
 
   void _fail(String message) {
@@ -345,6 +353,7 @@ class CfBookshelfLoaderState extends State<CfBookshelfLoader> {
 
   @override
   void dispose() {
+    _active = false;
     _timeout?.cancel();
     if (_initialized) unawaited(_controller.dispose());
     super.dispose();

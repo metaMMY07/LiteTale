@@ -58,7 +58,8 @@ class _Renderer extends StatefulWidget {
   State<_Renderer> createState() => _RendererState();
 }
 
-class _RendererState extends State<_Renderer> implements Wenku8BrowserPort {
+class _RendererState extends State<_Renderer>
+    implements Wenku8BrowserPort, Wenku8DocumentContextPort {
   final web = WenkuWebView();
   final session = Wenku8BrowserSession.instance;
   bool initialized = false;
@@ -105,6 +106,9 @@ class _RendererState extends State<_Renderer> implements Wenku8BrowserPort {
   Future<dynamic> executeScript(String script) => web.executeScript(script);
   @override
   Future<void> persistSession() => web.persistSession();
+  @override
+  Future<bool> prepareDocumentContext(String host, String html) =>
+      web.prepareDocumentContext(host, html);
 
   @override
   void dispose() {

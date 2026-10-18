@@ -1,0 +1,126 @@
+{
+  "events": [
+    {
+      "event": "tap",
+      "atMs": 17,
+      "x": 220,
+      "y": 838
+    },
+    {
+      "event": "state",
+      "atMs": 138,
+      "path": "/",
+      "ready": "complete",
+      "parked": true,
+      "fetchPending": false,
+      "book": false,
+      "catalog": false,
+      "chapter": false,
+      "navigation": [
+        {
+          "response": 40,
+          "body": 237,
+          "interactive": 356,
+          "dom": 356,
+          "load": 363
+        }
+      ]
+    },
+    {
+      "event": "request",
+      "pathname": "/book/4343.htm",
+      "type": "Fetch",
+      "atMs": 159
+    },
+    {
+      "event": "state",
+      "atMs": 414,
+      "path": "/",
+      "ready": "complete",
+      "parked": true,
+      "fetchPending": true,
+      "book": false,
+      "catalog": false,
+      "chapter": false,
+      "navigation": [
+        {
+          "response": 40,
+          "body": 237,
+          "interactive": 356,
+          "dom": 356,
+          "load": 363
+        }
+      ]
+    },
+    {
+      "event": "response",
+      "pathname": "/book/4343.htm",
+      "status": 200,
+      "atMs": 620,
+      "elapsedMs": 461,
+      "fromDiskCache": false
+    },
+    {
+      "event": "body",
+      "pathname": "/book/4343.htm",
+      "atMs": 693,
+      "elapsedMs": 534
+    },
+    {
+      "event": "Page.domContentEventFired",
+      "atMs": 825
+    },
+    {
+      "event": "Page.loadEventFired",
+      "atMs": 825
+    },
+    {
+      "event": "request",
+      "pathname": "/novel/4/4343/index.htm",
+      "type": "Fetch",
+      "atMs": 858
+    },
+    {
+      "event": "response",
+      "pathname": "/novel/4/4343/index.htm",
+      "status": 200,
+      "atMs": 1252,
+      "elapsedMs": 394,
+      "fromDiskCache": false
+    },
+    {
+      "event": "body",
+      "pathname": "/novel/4/4343/index.htm",
+      "atMs": 1261,
+      "elapsedMs": 403
+    },
+    {
+      "event": "Page.domContentEventFired",
+      "atMs": 1380
+    },
+    {
+      "event": "Page.loadEventFired",
+      "atMs": 1380
+    },
+    {
+      "event": "state",
+      "atMs": 1472,
+      "path": "/",
+      "ready": "complete",
+      "parked": true,
+      "fetchPending": false,
+      "book": false,
+      "catalog": false,
+      "chapter": false,
+      "navigation": [
+        {
+          "response": 40,
+          "body": 237,
+          "interactive": 356,
+          "dom": 356,
+          "load": 363
+        }
+      ]
+    }
+  ]
+}

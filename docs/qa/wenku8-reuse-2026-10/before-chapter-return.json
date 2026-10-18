@@ -1,0 +1,98 @@
+{
+  "events": [
+    {
+      "event": "tap",
+      "atMs": 16,
+      "x": 1280,
+      "y": 1392
+    },
+    {
+      "event": "state",
+      "atMs": 146,
+      "path": "/",
+      "ready": "complete",
+      "parked": true,
+      "fetchPending": false,
+      "book": false,
+      "catalog": false,
+      "chapter": false,
+      "navigation": [
+        {
+          "response": 99,
+          "body": 689,
+          "interactive": 935,
+          "dom": 944,
+          "load": 970
+        }
+      ]
+    },
+    {
+      "event": "request",
+      "pathname": "/novel/4/4343/177990.htm",
+      "type": "Fetch",
+      "atMs": 178
+    },
+    {
+      "event": "state",
+      "atMs": 450,
+      "path": "/",
+      "ready": "complete",
+      "parked": true,
+      "fetchPending": true,
+      "book": false,
+      "catalog": false,
+      "chapter": false,
+      "navigation": [
+        {
+          "response": 99,
+          "body": 689,
+          "interactive": 935,
+          "dom": 944,
+          "load": 970
+        }
+      ]
+    },
+    {
+      "event": "response",
+      "pathname": "/novel/4/4343/177990.htm",
+      "status": 200,
+      "atMs": 1170,
+      "elapsedMs": 992,
+      "fromDiskCache": false
+    },
+    {
+      "event": "body",
+      "pathname": "/novel/4/4343/177990.htm",
+      "atMs": 1185,
+      "elapsedMs": 1007
+    },
+    {
+      "event": "state",
+      "atMs": 1247,
+      "path": "/",
+      "ready": "complete",
+      "parked": true,
+      "fetchPending": false,
+      "book": false,
+      "catalog": false,
+      "chapter": false,
+      "navigation": [
+        {
+          "response": 99,
+          "body": 689,
+          "interactive": 935,
+          "dom": 944,
+          "load": 970
+        }
+      ]
+    },
+    {
+      "event": "Page.domContentEventFired",
+      "atMs": 1334
+    },
+    {
+      "event": "Page.loadEventFired",
+      "atMs": 1339
+    }
+  ]
+}

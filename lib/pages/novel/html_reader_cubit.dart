@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:wild/services/reader_chapter_prefetch.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../src/rust/wenku8/models.dart';
@@ -110,10 +111,12 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
   final Future<SourceChapter> Function({
     required String aid,
     required String cid,
+    required bool Function() isCurrent,
   })
   _read;
   final int Function(String aid) _session;
   final ReadingProgressQueue _progress;
+  final ReaderChapterPrefetch? _prefetch;
   final NovelInfo novelInfo;
   final String initialAid;
   final String initialCid;
@@ -128,9 +131,21 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
     read,
     int Function(String aid)? sessionGeneration,
     ReadingProgressQueue? progress,
-  }) : _read = read ?? w8.readerChapter,
+    ReaderPrefetchLoad? prefetch,
+  }) : _read =
+           read == null
+               ? w8.readerChapter
+               : (({
+                 required String aid,
+                 required String cid,
+                 required bool Function() isCurrent,
+               }) => read(aid: aid, cid: cid)),
        _session = sessionGeneration ?? w8.readerSessionGeneration,
        _progress = progress ?? ReadingProgressQueue.instance,
+       _prefetch =
+           read != null && prefetch == null
+               ? null
+               : ReaderChapterPrefetch(prefetch ?? w8.prefetchReaderChapter),
        super(const HtmlReaderLoading());
 
   Volume _findVolume(String aid, String cid) {
@@ -212,6 +227,7 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
     final request = ++_request;
     final targetAid = aid ?? initialAid;
     final targetCid = cid ?? initialCid;
+    _prefetch?.foreground(targetAid, targetCid);
     final session = _session(targetAid);
     final revision = sourceRevision.value;
     bool current() {
@@ -250,7 +266,19 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
       }
 
       // 加载章节内容
-      final chapter = await _read(aid: targetAid, cid: targetCid);
+      final chapter = await _read(
+        aid: targetAid,
+        cid: targetCid,
+        isCurrent:
+            () =>
+                !_closing &&
+                !isClosed &&
+                request == _request &&
+                _session(targetAid) == session &&
+                (sourceOf(targetAid) != SourceId.bili ||
+                    (activeSource.value == SourceId.bili &&
+                        sourceRevision.value == revision)),
+      );
       if (!current()) return;
       final rawContent = chapter.content;
       final parsedContent = _parseContent(rawContent);
@@ -269,6 +297,18 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
           volumes: initialVolumes,
           sourceFont: chapter.fontFamily,
         ),
+      );
+      _prefetch?.schedule(
+        aid: targetAid,
+        cid: targetCid,
+        volumes: initialVolumes,
+        isCurrent:
+            () =>
+                !_closing &&
+                !isClosed &&
+                _session(targetAid) == session &&
+                sourceRevision.value == revision &&
+                activeSource.value == sourceOf(targetAid),
       );
     } catch (e) {
       if (!current()) return;
@@ -374,6 +414,7 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
   @override
   Future<void> close() async {
     _closing = true;
+    _prefetch?.cancel();
     _request++;
     await super.close();
     await _progress.flushBounded();

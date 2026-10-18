@@ -113,6 +113,15 @@ class WenkuWebView {
     }
   }
 
+  /// Android's HTTPS base URL supplies a normal same-origin fetch context
+  /// without first downloading a whole website. Other engines retain their
+  /// established navigation flow until this capability is verified there.
+  Future<bool> prepareDocumentContext(String host, String html) async {
+    if (!Platform.isAndroid || _mobile == null) return false;
+    await _mobile!.loadHtmlString(html, baseUrl: '$host/');
+    return true;
+  }
+
   /// Ordinary desktop-site content negotiation, keeping the installed engine
   /// version. Used only by the public Bili reader; Wenku8 keeps its own policy.
   Future<void> setDesktopSite(bool enabled) async {

@@ -14,6 +14,7 @@ import 'package:wild/services/bili_browser.dart';
 import 'rule_source_registry.dart';
 import 'rule_book_source.dart';
 import 'package:wild/services/reading_progress.dart';
+import 'package:wild/services/wenku8_read_repository.dart';
 
 export 'package:wild/src/rust/api/wenku8.dart'
     hide
@@ -23,6 +24,7 @@ export 'package:wild/src/rust/api/wenku8.dart'
         novelInfo,
         novelReader,
         chapterContent,
+        cleanAllWebCache,
         bookcaseList,
         bookInCase,
         addBookshelf,
@@ -44,12 +46,24 @@ export 'package:wild/src/rust/api/wenku8.dart'
 final _wenkuBrowser = Wenku8BrowserSession.instance;
 int _wenkuSessionGeneration = 0;
 
+void invalidateWenku8ReadingCache() {
+  _wenkuSessionGeneration++;
+  final source = bookSources[SourceId.wenku8];
+  if (source is Wenku8Source) source._reads.clear();
+  _detailCache.removeWhere((key, _) => sourceOf(key) == SourceId.wenku8);
+}
+
+Future<void> cleanAllWebCache() async {
+  invalidateWenku8ReadingCache();
+  await w8.cleanAllWebCache();
+}
+
 /// Account identity for an opened book; changing discovery alone is unrelated.
 int readerSessionGeneration(String aid) =>
     sourceOf(aid) == SourceId.lightNovelShelf
         ? ShelfSession.instance.generation
         : sourceOf(aid) == SourceId.wenku8
-        ? _wenkuSessionGeneration
+        ? _wenkuSessionGeneration + _wenkuBrowser.readingSessionRevision
         : sourceOf(aid).isRule
         ? RuleSourceRegistry.instance.revision(sourceOf(aid).ruleId)
         : 0;
@@ -62,7 +76,7 @@ Future<void> wenku8Login({
   required String password,
   required String checkcode,
 }) async {
-  _wenkuSessionGeneration++;
+  invalidateWenku8ReadingCache();
   await _wenkuBrowser.submitLogin(
     username: username,
     password: password,
@@ -82,7 +96,7 @@ Future<bool> preLoginState() async =>
         : w8.preLoginState();
 
 Future<void> logout() async {
-  _wenkuSessionGeneration++;
+  invalidateWenku8ReadingCache();
   await _wenkuBrowser.signOut();
   await w8.logout();
 }
@@ -168,6 +182,26 @@ Future<w8.PageStatsNovelCover> articlelist({
 );
 
 class Wenku8Source implements BookSource {
+  late final _reads = Wenku8ReadRepository(
+    host: _wenkuBrowser.apiHost,
+    session: () => readerSessionGeneration('1'),
+    detail: _loadDetail,
+    chapter: _loadChapter,
+    prefetch: (book, chapter, isCurrent) async {
+      // Native reads already have durable chapter storage. Speculation here is
+      // limited to the cancellable browser transport, never a second native GET
+      // that could hold the Rust per-chapter lock behind a long timeout.
+      if (!isCurrent() || !await _wenkuBrowser.enabled()) return null;
+      final host = await _wenkuBrowser.apiHost();
+      final content = await _wenkuBrowser.prefetchChapter(
+        Uri.parse('$host/novel/${int.parse(book) ~/ 1000}/$book/$chapter.htm'),
+        aid: book,
+        isCurrent: isCurrent,
+      );
+      return content == null ? null : SourceChapter(content);
+    },
+  );
+
   @override
   SourceId get id => SourceId.wenku8;
   @override
@@ -189,6 +223,10 @@ class Wenku8Source implements BookSource {
   @override
   Future<SourceBookDetail> detail(String bookId) async {
     _wenkuId(bookId);
+    return _reads.detail(bookId);
+  }
+
+  Future<SourceBookDetail> _loadDetail(String bookId) async {
     final info = await _wenkuBrowser.nativeOrBrowser(
       () => w8.novelInfo(aid: bookId),
       () => _wenkuRead<NovelInfo>('detail', '/book/$bookId.htm', aid: bookId),
@@ -205,9 +243,17 @@ class Wenku8Source implements BookSource {
   }
 
   @override
-  Future<SourceChapter> chapter(String bookId, String chapterId) async {
+  Future<SourceChapter> chapter(
+    String bookId,
+    String chapterId, {
+    bool Function()? isCurrent,
+  }) async {
     _wenkuId(bookId);
     _wenkuId(chapterId);
+    return _reads.chapter(bookId, chapterId, isCurrent: isCurrent);
+  }
+
+  Future<SourceChapter> _loadChapter(String bookId, String chapterId) async {
     return SourceChapter(
       await _wenkuBrowser.nativeOrBrowser(
         () => w8.chapterContent(aid: bookId, cid: chapterId),
@@ -246,6 +292,7 @@ bool sourceSupportsAuthorSearch(SourceId source) =>
 List<SourceId> get availableSources =>
     SourceId.values.where((s) => bookSources.containsKey(s)).toList();
 bool _ruleListenerAttached = false;
+bool _wenkuInvalidationAttached = false;
 Map<String, String> ruleImageHeaders(SourceId source) {
   final entry = RuleSourceRegistry.instance[source.ruleId];
   return entry == null
@@ -282,6 +329,12 @@ String? chapterFont(String aid, String cid) => _chapterFonts['$aid/$cid'];
 Future<void> _writes = Future.value();
 
 Future<void> loadSourceSelection() async {
+  if (!_wenkuInvalidationAttached) {
+    _wenkuInvalidationAttached = true;
+    _wenkuBrowser.sessionInvalidations.listen(
+      (_) => invalidateWenku8ReadingCache(),
+    );
+  }
   await RuleSourceRegistry.instance.load();
   if (!_ruleListenerAttached) {
     RuleSourceRegistry.instance.addListener(_refreshRuleSources);
@@ -321,13 +374,18 @@ Future<NovelInfo> novelInfo({required String aid}) async {
     throw StateError('书源或账号已变化，请重试。');
   }
   _detailCache[aid] = detail;
+  while (_detailCache.length > 32) {
+    _detailCache.remove(_detailCache.keys.first);
+  }
   return detail.info;
 }
 
 Future<List<Volume>> novelReader({required String aid}) async {
   final generation = readerSessionGeneration(aid);
   final detail =
-      _detailCache[aid] ?? await sourceAdapter(sourceOf(aid)).detail(aid);
+      sourceOf(aid) == SourceId.wenku8
+          ? await sourceAdapter(SourceId.wenku8).detail(aid)
+          : _detailCache[aid] ?? await sourceAdapter(sourceOf(aid)).detail(aid);
   if (generation != readerSessionGeneration(aid)) {
     throw StateError('书源或账号已变化，请重试。');
   }
@@ -346,13 +404,37 @@ Future<String> chapterContent({
 Future<SourceChapter> readerChapter({
   required String aid,
   required String cid,
+  bool Function()? isCurrent,
 }) async {
   final generation = readerSessionGeneration(aid);
-  final chapter = await sourceAdapter(sourceOf(aid)).chapter(aid, cid);
+  if (isCurrent?.call() == false) throw const Wenku8PrefetchDeferred();
+  final adapter = sourceAdapter(sourceOf(aid));
+  final chapter =
+      adapter is Wenku8Source
+          ? await adapter.chapter(aid, cid, isCurrent: isCurrent)
+          : await adapter.chapter(aid, cid);
   if (generation != readerSessionGeneration(aid)) {
     throw StateError('书源或账号已变化，请重试。');
   }
   return chapter;
+}
+
+Future<void> prefetchReaderChapter({
+  required String aid,
+  required String cid,
+  required bool Function() isCurrent,
+}) async {
+  if (!isCurrent() ||
+      sourceOf(aid) != SourceId.wenku8 ||
+      activeSource.value != SourceId.wenku8) {
+    return;
+  }
+  _wenkuId(aid);
+  _wenkuId(cid);
+  final source = sourceAdapter(SourceId.wenku8);
+  if (source is Wenku8Source) {
+    await source._reads.prefetch(aid, cid, isCurrent: isCurrent);
+  }
 }
 
 Future<w8.PageStatsNovelCover> search({

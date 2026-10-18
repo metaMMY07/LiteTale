@@ -5,6 +5,7 @@ import 'package:wild/models/reader_page.dart';
 import 'package:wild/services/reader_pagination_cache.dart';
 import 'package:wild/services/reader_viewport_layout.dart';
 import 'package:wild/services/reader_position.dart';
+import 'package:wild/services/reader_chapter_prefetch.dart';
 import 'package:wild/services/reading_progress.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/pages/novel/line_height_cubit.dart';
@@ -31,10 +32,12 @@ class ReaderCubit extends Cubit<ReaderState> {
   final Future<SourceChapter> Function({
     required String aid,
     required String cid,
+    required bool Function() isCurrent,
   })
   _read;
   final int Function(String aid) _session;
   final ReadingProgressQueue _progress;
+  final ReaderChapterPrefetch? _prefetch;
   final NovelInfo novelInfo;
   String initialAid;
   String initialCid;
@@ -65,9 +68,21 @@ class ReaderCubit extends Cubit<ReaderState> {
     read,
     int Function(String aid)? sessionGeneration,
     ReadingProgressQueue? progress,
-  }) : _read = read ?? readerChapter,
+    ReaderPrefetchLoad? prefetch,
+  }) : _read =
+           read == null
+               ? readerChapter
+               : (({
+                 required String aid,
+                 required String cid,
+                 required bool Function() isCurrent,
+               }) => read(aid: aid, cid: cid)),
        _session = sessionGeneration ?? readerSessionGeneration,
        _progress = progress ?? ReadingProgressQueue.instance,
+       _prefetch =
+           read != null && prefetch == null
+               ? null
+               : ReaderChapterPrefetch(prefetch ?? prefetchReaderChapter),
        super(ReaderInitial());
 
   String _findChapterTitle(String aid, String cid) {
@@ -97,6 +112,7 @@ class ReaderCubit extends Cubit<ReaderState> {
     final request = ++_request;
     final targetAid = aid ?? initialAid;
     final targetCid = cid ?? initialCid;
+    _prefetch?.foreground(targetAid, targetCid);
     final session = _session(targetAid);
     final revision = sourceRevision.value;
     bool sourceMatches() =>
@@ -110,7 +126,17 @@ class ReaderCubit extends Cubit<ReaderState> {
       initialCid = targetCid;
 
       final chapterTitle = _findChapterTitle(targetAid, targetCid);
-      final chapter = await _read(aid: targetAid, cid: targetCid);
+      final chapter = await _read(
+        aid: targetAid,
+        cid: targetCid,
+        isCurrent:
+            () =>
+                !_closing &&
+                !isClosed &&
+                request == _request &&
+                sourceMatches() &&
+                _session(targetAid) == session,
+      );
       if (_closing || isClosed || request != _request || !sourceMatches()) {
         return;
       }
@@ -168,6 +194,18 @@ class ReaderCubit extends Cubit<ReaderState> {
         ),
       );
       _savePageHistory(state as ReaderLoaded);
+      _prefetch?.schedule(
+        aid: targetAid,
+        cid: targetCid,
+        volumes: initialVolumes,
+        isCurrent:
+            () =>
+                !_closing &&
+                !isClosed &&
+                _session(targetAid) == session &&
+                sourceRevision.value == revision &&
+                activeSource.value == sourceOf(targetAid),
+      );
     } catch (e) {
       if (isClosed || request != _request || !sourceMatches()) return;
       final sessionMatches = _session(targetAid) == session;
@@ -203,7 +241,17 @@ class ReaderCubit extends Cubit<ReaderState> {
                   _contentCid == targetCid &&
                   _loadedContent != null
               ? _loadedContent!
-              : (await _read(aid: targetAid, cid: targetCid)).content;
+              : (await _read(
+                aid: targetAid,
+                cid: targetCid,
+                isCurrent:
+                    () =>
+                        !_closing &&
+                        !isClosed &&
+                        request == _request &&
+                        sourceMatches() &&
+                        _session(targetAid) == session,
+              )).content;
       if (isClosed || request != _request || !sourceMatches()) return;
 
       // Paging remains available while the content request is pending. Read
@@ -444,6 +492,7 @@ class ReaderCubit extends Cubit<ReaderState> {
   @override
   Future<void> close() async {
     _closing = true;
+    _prefetch?.cancel();
     _request++;
     await super.close();
     await _progress.flushBounded();

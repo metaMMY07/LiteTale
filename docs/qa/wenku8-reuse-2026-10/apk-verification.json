@@ -1,0 +1,24 @@
+[
+  {
+    "abi": "arm64-v8a",
+    "version": "0.1.24",
+    "versionCode": 2066,
+    "sha256": "0371f88934ba6ca439111cffc4ca0dee3332935ef1e77cc9ebe06e01555cfaf0",
+    "bytes": 31046805,
+    "experimentalPredictiveBack": false,
+    "zipIntegrity": "passed",
+    "alignment16KB": "passed",
+    "certificate": "Signer #1 certificate SHA-256 digest: 583079a20081a1bedaf8c1fbdf93e92bf3cc3544e0f7246fef7b1625d9066a02"
+  },
+  {
+    "abi": "x86_64",
+    "version": "0.1.24",
+    "versionCode": 4066,
+    "sha256": "ab8f730cf68c0c3ab83994a1d52b8dab79ce28bd37e98004b4b094669a21b7f9",
+    "bytes": 31662305,
+    "experimentalPredictiveBack": false,
+    "zipIntegrity": "passed",
+    "alignment16KB": "passed",
+    "certificate": "Signer #1 certificate SHA-256 digest: 583079a20081a1bedaf8c1fbdf93e92bf3cc3544e0f7246fef7b1625d9066a02"
+  }
+]

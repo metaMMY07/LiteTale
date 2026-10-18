@@ -1,0 +1,30 @@
+{
+  "events": [
+    {
+      "event": "tap",
+      "atMs": 14,
+      "x": 1280,
+      "y": 1392
+    },
+    {
+      "event": "state",
+      "atMs": 108,
+      "path": "/",
+      "ready": "complete",
+      "parked": true,
+      "fetchPending": false,
+      "book": false,
+      "catalog": false,
+      "chapter": false,
+      "navigation": [
+        {
+          "response": 40,
+          "body": 237,
+          "interactive": 356,
+          "dom": 356,
+          "load": 363
+        }
+      ]
+    }
+  ]
+}

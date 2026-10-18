@@ -1,6 +1,7 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/services/wenku8_host.dart';
 import 'package:wild/src/rust/api/wenku8.dart';
+import 'package:wild/sources/source_api.dart' show invalidateWenku8ReadingCache;
 
 class ApiHostCubit extends Cubit<String> {
   ApiHostCubit({
@@ -29,6 +30,9 @@ class ApiHostCubit extends Cubit<String> {
     final normalized = normalizeWenku8Host(apiHost);
     await initialized;
     try {
+      if ((normalized.isEmpty ? defaultWenku8Host : normalized) != state) {
+        invalidateWenku8ReadingCache();
+      }
       await _write(normalized);
       if (!isClosed) {
         emit(normalized.isEmpty ? defaultWenku8Host : normalized);

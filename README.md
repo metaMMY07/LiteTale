@@ -8,13 +8,13 @@
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
-## Android 正式版 v0.1.21
+## Android 正式版 v0.1.24
 
-LiteTale 0.1.21 已发布，提供 ARM64 手机／平板版和 x86_64 模拟器版。应用以统一的 Material You 界面阅读轻小说，并分别保存各书源的账号与阅读数据。
+LiteTale 0.1.24 已发布，提供 ARM64 手机／平板版和 x86_64 模拟器版。本版重点改善文库8的重复加载与切章等待：详情和已读章节可在有效期内复用，阅读时会在后台准备下一章。
 
-[下载 ARM64 手机／平板版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.21/LiteTale-0.1.21-arm64-v8a.apk) · [下载 x86_64 模拟器版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.21/LiteTale-0.1.21-x86_64.apk) · [查看 0.1.21 发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v0.1.21)
+[下载 ARM64 手机／平板版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.24/LiteTale-0.1.24-arm64-v8a.apk) · [下载 x86_64 模拟器版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.24/LiteTale-0.1.24-x86_64.apk) · [查看 0.1.24 发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v0.1.24)
 
-轻书架此前因 Web 端 API 上游故障暂时不可用；网站站主近期已恢复服务，目前轻书架书源已恢复正常。
+文库8网页章节缓存仅在应用进程运行期间保留；首次读取或缓存失效时仍需联网。详细测试结果与版本说明见 [0.1.24 发布记录](docs/releases/0.1.24.md)。
 
 ### 功能
 

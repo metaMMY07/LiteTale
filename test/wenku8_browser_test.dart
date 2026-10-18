@@ -40,6 +40,8 @@ class _Harness {
     Map<String, String> properties = const {},
     bool autoFinish = true,
     int staleBlankCallbacks = 0,
+    bool supportDocuments = false,
+    bool supportColdDocuments = false,
     Duration pageTimeout = const Duration(milliseconds: 500),
   }) : properties = Map<String, String>.from(properties) {
     session = Wenku8BrowserSession(
@@ -53,6 +55,8 @@ class _Harness {
       onPageFinished: session.pageFinished,
       autoFinish: autoFinish,
       staleBlankCallbacks: staleBlankCallbacks,
+      supportDocuments: supportDocuments,
+      supportColdDocuments: supportColdDocuments,
     );
     session.attach(port);
   }
@@ -63,15 +67,20 @@ class _Harness {
   late final _FakeBrowserPort port;
 }
 
-class _FakeBrowserPort implements Wenku8BrowserPort {
+class _FakeBrowserPort implements Wenku8BrowserPort, Wenku8DocumentContextPort {
   _FakeBrowserPort({
     required this.onPageFinished,
     required this.autoFinish,
     required this.staleBlankCallbacks,
+    this.supportDocuments = false,
+    this.supportColdDocuments = false,
   });
 
   final void Function() onPageFinished;
   final bool autoFinish;
+  final bool supportDocuments;
+  final bool supportColdDocuments;
+  int contextPreparations = 0;
   int staleBlankCallbacks;
   final List<String> loads = [];
   final List<String> scripts = [];
@@ -95,6 +104,9 @@ class _FakeBrowserPort implements Wenku8BrowserPort {
   final List<int> searchIntervals = [];
   final Map<String, String> nextSearchUrls = {};
   int searchReloads = 0;
+  final List<String> documentReads = [];
+  Map<String, Object?>? documentState;
+  String? _documentTarget;
 
   List<String> get targetLoads =>
       loads.where((value) => value != 'about:blank').toList();
@@ -122,6 +134,15 @@ class _FakeBrowserPort implements Wenku8BrowserPort {
   Future<String> currentUrl() async => url;
 
   @override
+  Future<bool> prepareDocumentContext(String host, String html) async {
+    if (!supportColdDocuments) return false;
+    contextPreparations++;
+    url = '$host/';
+    state = _page(url);
+    return true;
+  }
+
+  @override
   Future<void> persistSession() async {
     persistenceCalls++;
     if (persistenceError case final error?) throw error;
@@ -137,6 +158,26 @@ class _FakeBrowserPort implements Wenku8BrowserPort {
     scripts.add(script);
     if (script == Wenku8BrowserSession.pageStateScript) {
       return Map<String, Object?>.from(state);
+    }
+    if (script.contains('litetale-document-park')) return supportDocuments;
+    if (script.contains('litetale-document-context-ready')) {
+      return supportColdDocuments;
+    }
+    if (script.contains('litetale-document-start')) {
+      if (!supportDocuments) return false;
+      final match = RegExp(r'\}\)\([^,]+,("[^"]+"),\d+\)').firstMatch(script)!;
+      _documentTarget = jsonDecode(match[1]!) as String;
+      documentReads.add(_documentTarget!);
+      return true;
+    }
+    if (script.contains('litetale-document-state')) {
+      return documentState ??
+          {
+            'url': _documentTarget,
+            'payload':
+                readResults[_documentTarget] ??
+                _detailPayload(_documentTarget!, '101'),
+          };
     }
     if (script.contains('litetale-search-submit')) {
       searchSubmissions++;
@@ -191,6 +232,191 @@ class _FakeBrowserPort implements Wenku8BrowserPort {
 
 void main() {
   group('Wenku8BrowserSession', () {
+    test(
+      'visible session adoption synchronously changes reading cache identity',
+      () async {
+        final h = _Harness();
+        final before = h.session.readingSessionRevision;
+        await h.session.adoptVisiblePage(_host, {
+          ..._page('$_host/'),
+          'authenticated': true,
+          'home': true,
+        });
+        expect(h.session.readingSessionRevision, greaterThan(before));
+        final after = h.session.readingSessionRevision;
+        await expectLater(
+          h.session.adoptVisiblePage(_host, {
+            ..._page('$_host/'),
+            'challenge': true,
+          }),
+          throwsA(isA<Wenku8SiteVerificationRequired>()),
+        );
+        expect(h.session.readingSessionRevision, after);
+        h.session.dispose();
+      },
+    );
+    test('prefetch never starts a renderer or loads a whole page', () async {
+      final h = _Harness(supportDocuments: true, supportColdDocuments: true);
+      final value = await h.session.prefetchChapter(
+        Uri.parse('$_host/novel/0/101/19.htm'),
+        aid: '101',
+        isCurrent: () => true,
+      );
+      expect(value, null);
+      expect(h.port.loads, isEmpty);
+      expect(h.port.documentReads, isEmpty);
+      expect(h.port.contextPreparations, 0);
+      h.session.dispose();
+    });
+
+    test(
+      'renderer detached after prefetch admission is never restarted by background work',
+      () async {
+        final h = _Harness(supportDocuments: true, supportColdDocuments: true);
+        await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse('$_host/book/101.htm'),
+          aid: '101',
+        );
+        final background = h.session.prefetchChapter(
+          Uri.parse('$_host/novel/0/101/19.htm'),
+          aid: '101',
+          isCurrent: () => true,
+        );
+        h.session.detach(h.port);
+        expect(await background, null);
+        expect(h.session.requested, false);
+        expect(h.port.documentReads, ['$_host/book/101.htm']);
+        h.session.dispose();
+      },
+    );
+
+    test(
+      'foreground read interrupts a pending prefetch without navigation fallback',
+      () async {
+        final h = _Harness(supportDocuments: true, supportColdDocuments: true);
+        await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse('$_host/book/101.htm'),
+          aid: '101',
+        );
+        h.port.documentState = {'pending': true};
+        final background = h.session.prefetchChapter(
+          Uri.parse('$_host/novel/0/101/19.htm'),
+          aid: '101',
+          isCurrent: () => true,
+        );
+        for (var i = 0; i < 100 && h.port.documentReads.length < 2; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 1));
+        }
+        expect(h.port.documentReads.length, 2);
+        const next = '$_host/book/202.htm';
+        h.port.readResults[next] = _detailPayload(next, '202');
+        h.port.documentState = null;
+        final foreground = h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse(next),
+          aid: '202',
+        );
+        expect(await background, null);
+        expect((await foreground).title, 'Fixture 202');
+        expect(h.port.loads, isEmpty);
+        expect(h.port.documentReads, [
+          '$_host/book/101.htm',
+          '$_host/novel/0/101/19.htm',
+          next,
+        ]);
+        h.session.dispose();
+      },
+    );
+
+    test(
+      'prefetch uses strict chapter parsing, never returns a challenge as text',
+      () async {
+        final h = _Harness(supportDocuments: true, supportColdDocuments: true);
+        await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse('$_host/book/101.htm'),
+          aid: '101',
+        );
+        const url = '$_host/novel/0/101/19.htm';
+        h.port.readResults[url] = {
+          'url': url,
+          'kind': 'chapter',
+          'aid': '101',
+          'challenge': false,
+          'data': {'content': '真实正文'},
+        };
+        expect(
+          await h.session.prefetchChapter(
+            Uri.parse(url),
+            aid: '101',
+            isCurrent: () => true,
+          ),
+          '真实正文',
+        );
+        h.port.readResults[url] = {
+          'url': url,
+          'kind': 'chapter',
+          'aid': '101',
+          'challenge': true,
+          'data': {'content': 'challenge page'},
+        };
+        expect(
+          await h.session.prefetchChapter(
+            Uri.parse(url),
+            aid: '101',
+            isCurrent: () => true,
+          ),
+          null,
+        );
+        expect(h.port.loads, isEmpty);
+        expect(h.port.loginSubmissions, 0);
+        h.session.dispose();
+      },
+    );
+
+    test(
+      'leaving reader cancels speculative polling and another prefetch is admitted',
+      () async {
+        final h = _Harness(supportDocuments: true, supportColdDocuments: true);
+        await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse('$_host/book/101.htm'),
+          aid: '101',
+        );
+        var current = true;
+        h.port.documentState = {'pending': true};
+        final background = h.session.prefetchChapter(
+          Uri.parse('$_host/novel/0/101/19.htm'),
+          aid: '101',
+          isCurrent: () => current,
+        );
+        for (var i = 0; i < 100 && h.port.documentReads.length < 2; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 1));
+        }
+        current = false;
+        expect(await background, null);
+        h.port.documentState = null;
+        const url = '$_host/novel/0/101/20.htm';
+        h.port.readResults[url] = {
+          'url': url,
+          'kind': 'chapter',
+          'aid': '101',
+          'challenge': false,
+          'data': {'content': '另一个正文'},
+        };
+        expect(
+          await h.session.prefetchChapter(
+            Uri.parse(url),
+            aid: '101',
+            isCurrent: () => true,
+          ),
+          '另一个正文',
+        );
+        h.session.dispose();
+      },
+    );
     Map<String, Object?> listing(String url, int page) => {
       'url': url,
       'kind': 'list',
@@ -209,6 +435,263 @@ void main() {
         ],
       },
     };
+
+    test(
+      'complete search results need not wait for trailing page scripts',
+      () async {
+        final h = _Harness(autoFinish: false);
+        const url =
+            '$_host/modules/article/search.php?searchtype=articlename&searchkey=Re';
+        h.port.searchRedirect = url;
+        h.port.states[url] = {
+          ..._page(url, ready: false),
+          'domReady': false,
+          'searchReady': true,
+        };
+        h.port.readResults[url] = listing(url, 1);
+        final result = await h.session.read<PageStatsNovelCover>(
+          'list',
+          Uri.parse(url),
+          searchKey: 'Re',
+        );
+        expect(result.records.single.title, 'Result 1');
+        expect(h.port.searchSubmissions, 1);
+        h.session.dispose();
+      },
+    );
+
+    test(
+      'cold supported engine reads data without first rendering the site',
+      () async {
+        final h = _Harness(supportDocuments: true, supportColdDocuments: true);
+        const url = '$_host/book/101.htm';
+        final info = await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse(url),
+          aid: '101',
+        );
+        expect(info.title, 'Fixture 101');
+        expect(h.port.contextPreparations, 1);
+        expect(h.port.documentReads, [url]);
+        expect(h.port.targetLoads, isEmpty);
+        h.session.dispose();
+      },
+    );
+
+    test(
+      'first cold fetch denied by the site still uses normal navigation',
+      () async {
+        final h = _Harness(supportDocuments: true, supportColdDocuments: true);
+        const url = '$_host/book/101.htm';
+        h.port.documentState = {'status': 403};
+        final info = await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse(url),
+          aid: '101',
+        );
+        expect(info.title, 'Fixture 101');
+        expect(h.port.contextPreparations, 1);
+        expect(h.port.documentReads, [url]);
+        expect(h.port.targetLoads, [url]);
+        h.session.dispose();
+      },
+    );
+
+    test(
+      'warm reads use inert documents without loading book assets again',
+      () async {
+        final h = _Harness(supportDocuments: true);
+        const first = '$_host/book/101.htm', second = '$_host/book/102.htm';
+        h.port.readResults[second] = _detailPayload(second, '102');
+        await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse(first),
+          aid: '101',
+        );
+        final info = await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse(second),
+          aid: '102',
+        );
+        expect(info.title, 'Fixture 102');
+        expect(h.port.targetLoads, [first]);
+        expect(h.port.documentReads, [second]);
+        expect(h.port.url, first); // payload validation uses the fetched URL.
+        h.session.dispose();
+      },
+    );
+
+    test('retained real search form avoids another home navigation', () async {
+      final h = _Harness(supportDocuments: true);
+      const first = '$_host/book/101.htm';
+      const search =
+          '$_host/modules/article/search.php?searchtype=articlename&searchkey=Re';
+      h.port.searchRedirect = search;
+      h.port.readResults[search] = listing(search, 1);
+      await h.session.read<models.NovelInfo>(
+        'detail',
+        Uri.parse(first),
+        aid: '101',
+      );
+      await h.session.read<PageStatsNovelCover>(
+        'list',
+        Uri.parse(search),
+        searchKey: 'Re',
+      );
+      expect(h.port.targetLoads, [first, search]);
+      expect(h.port.searchSubmissions, 1);
+      expect(h.port.documentReads, isEmpty); // Search still uses the site form.
+      h.session.dispose();
+    });
+
+    test(
+      'denied document read falls back and invalidates a real login redirect',
+      () async {
+        final h = _Harness(
+          supportDocuments: true,
+          properties: {'litetale.wenku8.browser_login_host': _host},
+        );
+        const url = '$_host/book/101.htm';
+        await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse(url),
+          aid: '101',
+        );
+        h.port.documentState = {'status': 403};
+        h.port.redirects[url] = '$_host/login.php';
+        var invalidated = false;
+        final subscription = h.session.sessionInvalidations.listen(
+          (_) => invalidated = true,
+        );
+        await expectLater(
+          h.session.read<models.NovelInfo>(
+            'detail',
+            Uri.parse(url),
+            aid: '101',
+          ),
+          throwsA(isA<Wenku8BrowserException>()),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(invalidated, isTrue);
+        expect(h.properties['litetale.wenku8.browser_login_host'], isEmpty);
+        expect(h.port.targetLoads, [url, url]);
+        expect(h.port.url, 'about:blank');
+        await subscription.cancel();
+        h.session.dispose();
+      },
+    );
+
+    test(
+      'server failure does not issue a second request or poison the queue',
+      () async {
+        final h = _Harness(supportDocuments: true);
+        const url = '$_host/book/101.htm';
+        await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse(url),
+          aid: '101',
+        );
+        h.port.documentState = {'status': 502};
+        await expectLater(
+          h.session.read<models.NovelInfo>(
+            'detail',
+            Uri.parse(url),
+            aid: '101',
+          ),
+          throwsA(isA<Wenku8BrowserException>()),
+        );
+        expect(h.port.targetLoads, [url]);
+        expect(h.port.url, 'about:blank');
+        final info = await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse(url),
+          aid: '101',
+        );
+        expect(info.title, 'Fixture 101');
+        expect(h.port.targetLoads, [url, url]);
+        h.session.dispose();
+      },
+    );
+
+    test(
+      'malformed fast payload retries once using normal DOM extraction',
+      () async {
+        final h = _Harness(supportDocuments: true);
+        const url = '$_host/book/101.htm';
+        await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse(url),
+          aid: '101',
+        );
+        h.port.documentState = {
+          'url': url,
+          'payload': {'data': 'changed'},
+        };
+        final info = await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse(url),
+          aid: '101',
+        );
+        expect(info.title, 'Fixture 101');
+        expect(h.port.targetLoads, [url, url]);
+        expect(h.port.documentReads, [url]);
+        h.session.dispose();
+      },
+    );
+
+    test('a changed host never reuses the previous origin document', () async {
+      final h = _Harness(supportDocuments: true);
+      const first = '$_host/book/101.htm',
+          second = 'https://wenku8.net/book/101.htm';
+      await h.session.read<models.NovelInfo>(
+        'detail',
+        Uri.parse(first),
+        aid: '101',
+      );
+      h.host = 'https://wenku8.net';
+      h.port.readResults[second] = _detailPayload(second, '101');
+      await h.session.read<models.NovelInfo>(
+        'detail',
+        Uri.parse(second),
+        aid: '101',
+      );
+      expect(h.port.documentReads, isEmpty);
+      expect(h.port.targetLoads, [first, second]);
+      h.session.dispose();
+    });
+
+    test(
+      'a stalled fetch finishes finitely and the next read can navigate',
+      () async {
+        final h = _Harness(
+          supportDocuments: true,
+          pageTimeout: const Duration(milliseconds: 40),
+        );
+        const url = '$_host/book/101.htm';
+        await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse(url),
+          aid: '101',
+        );
+        h.port.documentState = {'pending': true};
+        await expectLater(
+          h.session.read<models.NovelInfo>(
+            'detail',
+            Uri.parse(url),
+            aid: '101',
+          ),
+          throwsA(isA<Wenku8BrowserException>()),
+        );
+        expect(h.port.url, 'about:blank');
+        final info = await h.session.read<models.NovelInfo>(
+          'detail',
+          Uri.parse(url),
+          aid: '101',
+        );
+        expect(info.title, 'Fixture 101');
+        h.session.dispose();
+      },
+    );
 
     test(
       'pagination reuses the real link without resubmitting its form',

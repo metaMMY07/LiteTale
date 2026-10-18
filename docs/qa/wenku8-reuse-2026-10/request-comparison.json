@@ -1,0 +1,64 @@
+{
+  "before-detail-reopen": {
+    "requests": [
+      "/book/4343.htm",
+      "/novel/4/4343/index.htm"
+    ],
+    "responses": [
+      [
+        "/book/4343.htm",
+        200
+      ],
+      [
+        "/novel/4/4343/index.htm",
+        200
+      ]
+    ]
+  },
+  "after-detail-reopen": {
+    "requests": [],
+    "responses": []
+  },
+  "before-chapter-return": {
+    "requests": [
+      "/novel/4/4343/177990.htm"
+    ],
+    "responses": [
+      [
+        "/novel/4/4343/177990.htm",
+        200
+      ]
+    ]
+  },
+  "after-chapter-return": {
+    "requests": [],
+    "responses": []
+  },
+  "after-chapter-prefetch": {
+    "requests": [
+      "/novel/4/4343/177990.htm",
+      "/novel/4/4343/177991.htm"
+    ],
+    "responses": [
+      [
+        "/novel/4/4343/177990.htm",
+        200
+      ],
+      [
+        "/novel/4/4343/177991.htm",
+        200
+      ]
+    ]
+  },
+  "after-next-chapter": {
+    "requests": [
+      "/novel/4/4343/177992.htm"
+    ],
+    "responses": [
+      [
+        "/novel/4/4343/177992.htm",
+        200
+      ]
+    ]
+  }
+}

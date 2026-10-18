@@ -1,6 +1,6 @@
 param(
-    [string]$Version = '0.1.22',
-    [int]$BuildNumber = 64,
+    [string]$Version = '0.1.24',
+    [int]$BuildNumber = 66,
     [string]$Toolchains = 'D:\CodexToolchains',
     [string]$AndroidSdk = 'D:\Codex-Migrated\Android\Sdk',
     [string]$Proxy = 'http://127.0.0.1:10808'

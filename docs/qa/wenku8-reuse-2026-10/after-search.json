@@ -1,0 +1,142 @@
+{
+  "events": [
+    {
+      "event": "tap",
+      "atMs": 16,
+      "x": 1280,
+      "y": 550
+    },
+    {
+      "event": "state",
+      "atMs": 133,
+      "path": "/",
+      "ready": "complete",
+      "parked": true,
+      "fetchPending": false,
+      "book": false,
+      "catalog": false,
+      "chapter": false,
+      "navigation": [
+        {
+          "response": 40,
+          "body": 237,
+          "interactive": 356,
+          "dom": 356,
+          "load": 363
+        }
+      ]
+    },
+    {
+      "event": "request",
+      "pathname": "/modules/article/search.php",
+      "type": "Document",
+      "atMs": 1172
+    },
+    {
+      "event": "response",
+      "pathname": "/modules/article/search.php",
+      "status": 200,
+      "atMs": 1652,
+      "elapsedMs": 480,
+      "fromDiskCache": false
+    },
+    {
+      "event": "state",
+      "atMs": 1740,
+      "path": "/modules/article/search.php",
+      "ready": "loading",
+      "parked": false,
+      "fetchPending": false,
+      "book": false,
+      "catalog": false,
+      "chapter": false,
+      "navigation": [
+        {
+          "response": 480,
+          "body": 0,
+          "interactive": 0,
+          "dom": 0,
+          "load": 0
+        }
+      ]
+    },
+    {
+      "event": "body",
+      "pathname": "/modules/article/search.php",
+      "atMs": 1744,
+      "elapsedMs": 572
+    },
+    {
+      "event": "state",
+      "atMs": 2013,
+      "path": "/modules/article/search.php",
+      "ready": "loading",
+      "parked": false,
+      "fetchPending": false,
+      "book": false,
+      "catalog": false,
+      "chapter": false,
+      "navigation": [
+        {
+          "response": 480,
+          "body": 488,
+          "interactive": 0,
+          "dom": 0,
+          "load": 0
+        }
+      ]
+    },
+    {
+      "event": "Page.domContentEventFired",
+      "atMs": 3815
+    },
+    {
+      "event": "state",
+      "atMs": 3831,
+      "path": "/modules/article/search.php",
+      "ready": "interactive",
+      "parked": false,
+      "fetchPending": false,
+      "book": false,
+      "catalog": false,
+      "chapter": true,
+      "navigation": [
+        {
+          "response": 480,
+          "body": 488,
+          "interactive": 1792,
+          "dom": 1800,
+          "load": 0
+        }
+      ]
+    },
+    {
+      "event": "Page.domContentEventFired",
+      "atMs": 4459
+    },
+    {
+      "event": "Page.loadEventFired",
+      "atMs": 4483
+    },
+    {
+      "event": "state",
+      "atMs": 4486,
+      "path": "/modules/article/search.php",
+      "ready": "complete",
+      "parked": true,
+      "fetchPending": false,
+      "book": false,
+      "catalog": false,
+      "chapter": false,
+      "navigation": [
+        {
+          "response": 480,
+          "body": 488,
+          "interactive": 1792,
+          "dom": 1800,
+          "load": 3308
+        }
+      ]
+    }
+  ]
+}
