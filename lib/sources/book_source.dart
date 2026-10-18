@@ -8,6 +8,7 @@ class SourceId {
   static const lightNovelShelf = SourceId._('lightNovelShelf', '轻书架');
   static const lnovel = SourceId._('lnovel', '轻小说百科');
   static const bili = SourceId._('bili', '哔哩轻小说');
+  static const localEpub = SourceId._('localEpub', '本地 EPUB');
   static final _rules = <String, SourceId>{};
   final String name;
   final String _label;
@@ -19,6 +20,7 @@ class SourceId {
     lightNovelShelf,
     lnovel,
     bili,
+    localEpub,
     ..._rules.values,
   ];
   static SourceId rule(String id, {String? label}) =>
@@ -40,6 +42,12 @@ class SourceId {
 
 /// Existing Wenku8 ids stay unchanged so installed shelves/history still work.
 SourceId sourceOf(String id) {
+  if (id.startsWith('epub:')) {
+    if (!RegExp(r'^epub:[a-f0-9]{64}$').hasMatch(id)) {
+      throw const FormatException('本地书籍编号无效');
+    }
+    return SourceId.localEpub;
+  }
   if (id.startsWith('lns:')) return SourceId.lightNovelShelf;
   if (id.startsWith('lnv:')) return SourceId.lnovel;
   if (id.startsWith('bili:')) return SourceId.bili;

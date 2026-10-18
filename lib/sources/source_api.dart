@@ -13,8 +13,11 @@ import 'bili_site_source.dart';
 import 'package:wild/services/bili_browser.dart';
 import 'rule_source_registry.dart';
 import 'rule_book_source.dart';
+import 'local_epub_source.dart';
+import 'package:wild/services/epub/local_epub_library.dart';
 import 'package:wild/services/reading_progress.dart';
 import 'package:wild/services/wenku8_read_repository.dart';
+import 'package:wild/services/reader_pagination_cache.dart';
 
 export 'package:wild/src/rust/api/wenku8.dart'
     hide
@@ -60,7 +63,9 @@ Future<void> cleanAllWebCache() async {
 
 /// Account identity for an opened book; changing discovery alone is unrelated.
 int readerSessionGeneration(String aid) =>
-    sourceOf(aid) == SourceId.lightNovelShelf
+    sourceOf(aid) == SourceId.localEpub
+        ? LocalEpubLibrary.instance.revisionFor(aid)
+        : sourceOf(aid) == SourceId.lightNovelShelf
         ? ShelfSession.instance.generation
         : sourceOf(aid) == SourceId.wenku8
         ? _wenkuSessionGeneration + _wenkuBrowser.readingSessionRevision
@@ -279,6 +284,7 @@ final Map<SourceId, BookSource> bookSources = {
   SourceId.lightNovelShelf: shelfSource,
   SourceId.lnovel: lnovelSource,
   SourceId.bili: biliSource,
+  SourceId.localEpub: LocalEpubSource(),
 };
 
 BookSource sourceAdapter(SourceId source) =>
@@ -290,7 +296,9 @@ bool sourceUsesCatalogSearch(SourceId source) =>
 bool sourceSupportsAuthorSearch(SourceId source) =>
     source == SourceId.wenku8 || source == SourceId.lightNovelShelf;
 List<SourceId> get availableSources =>
-    SourceId.values.where((s) => bookSources.containsKey(s)).toList();
+    SourceId.values
+        .where((s) => s != SourceId.localEpub && bookSources.containsKey(s))
+        .toList();
 bool _ruleListenerAttached = false;
 bool _wenkuInvalidationAttached = false;
 Map<String, String> ruleImageHeaders(SourceId source) {
@@ -343,7 +351,7 @@ Future<void> loadSourceSelection() async {
   _refreshRuleSources();
   final saved = await db.loadProperty(key: 'litetale.active_source');
   activeSource.value = SourceId.values.firstWhere(
-    (s) => s.name == saved && bookSources.containsKey(s),
+    (s) => s.name == saved && availableSources.contains(s),
     orElse: () => SourceId.wenku8,
   );
   try {
@@ -355,6 +363,7 @@ Future<void> loadSourceSelection() async {
 
 Future<void> selectSource(SourceId source) async {
   await _serial(() async {
+    if (!availableSources.contains(source)) throw StateError('请选择在线书源');
     sourceAdapter(source);
     await db.saveProperty(key: 'litetale.active_source', value: source.name);
     activeSource.value = source;
@@ -424,6 +433,10 @@ Future<void> prefetchReaderChapter({
   required String cid,
   required bool Function() isCurrent,
 }) async {
+  if (isCurrent() && sourceOf(aid) == SourceId.localEpub) {
+    await LocalEpubLibrary.instance.chapter(aid, cid);
+    return;
+  }
   if (!isCurrent() ||
       sourceOf(aid) != SourceId.wenku8 ||
       activeSource.value != SourceId.wenku8) {
@@ -497,13 +510,21 @@ Future<List<w8.SearchHistory>> searchHistories() async {
 Future<List<w8.ReadingHistory>> listReadingHistory({
   required int offset,
   required int limit,
+  SourceId? source,
 }) async {
   await ReadingProgressQueue.instance.flushBounded();
-  final source = activeSource.value;
+  final selectedSource = source ?? activeSource.value;
   final selected = <w8.ReadingHistory>[];
   for (var start = 0; selected.length < offset + limit; start += 100) {
     final chunk = await w8.listReadingHistory(offset: start, limit: 100);
-    selected.addAll(chunk.where((h) => sourceOf(h.novelId) == source));
+    selected.addAll(
+      chunk.where(
+        (h) =>
+            sourceOf(h.novelId) == selectedSource &&
+            (selectedSource != SourceId.localEpub ||
+                LocalEpubLibrary.instance.contains(h.novelId)),
+      ),
+    );
     if (chunk.length < 100) break;
   }
   return selected.skip(offset).take(limit).toList();
@@ -514,8 +535,12 @@ Future<w8.ReadingHistory?> novelHistoryById({required String novelId}) async {
   return w8.novelHistoryById(novelId: novelId);
 }
 
-Future<void> deleteAllHistory() async {
-  final entries = await listReadingHistory(offset: 0, limit: 1000000);
+Future<void> deleteAllHistory({SourceId? source}) async {
+  final entries = await listReadingHistory(
+    offset: 0,
+    limit: 1000000,
+    source: source,
+  );
   // Only the selected source's records are affected.
   for (final entry in entries) {
     await w8.deleteHistoryByNovelId(novelId: entry.novelId);
@@ -582,6 +607,7 @@ Future<BookcaseDto> bookInCase({required String caseId}) async {
 }
 
 Future<void> addBookshelf({required String aid}) async {
+  if (sourceOf(aid) == SourceId.localEpub) return;
   if (sourceOf(aid) == SourceId.wenku8) return w8.addBookshelf(aid: aid);
   final source = sourceOf(aid);
   final shelfKey = _shelfKeyFor(source);
@@ -603,6 +629,7 @@ Future<void> addBookshelf({required String aid}) async {
 }
 
 Future<void> deleteBookcase({required String bid}) async {
+  if (sourceOf(bid) == SourceId.localEpub) return removeLocalEpub(bid);
   if (sourceOf(bid) == SourceId.wenku8) return w8.deleteBookcase(bid: bid);
   final shelfKey = _shelfKeyFor(sourceOf(bid));
   await _serial(() async {
@@ -632,4 +659,20 @@ Future<void> moveBookcase({
     fromBookcaseId: fromBookcaseId,
     toBookcaseId: toBookcaseId,
   );
+}
+
+Future<void> removeLocalEpub(String bookId) async {
+  if (sourceOf(bookId) != SourceId.localEpub) throw ArgumentError('不是本地 EPUB');
+  await LocalEpubLibrary.instance.remove(bookId);
+  // Revision invalidation makes late reader positions obsolete. An already
+  // active write must finish before history is removed, or it could reappear.
+  await ReadingProgressQueue.instance.discard(bookId);
+  try {
+    await w8.deleteHistoryByNovelId(novelId: bookId);
+  } finally {
+    _detailCache.remove(bookId);
+    _chapterFonts.removeWhere((key, _) => key.startsWith('$bookId/'));
+    _shelfCovers.remove(bookId);
+    ReaderPaginationCache.instance.evictBook(bookId);
+  }
 }

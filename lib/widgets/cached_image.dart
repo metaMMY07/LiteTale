@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/lnovel_source.dart';
+import 'package:wild/services/epub/local_epub_library.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'dart:ui' as ui;
@@ -35,6 +36,10 @@ class CachedImageProvider extends ImageProvider<CachedImageProvider> {
     ImageDecoderCallback decode,
   ) async {
     assert(key == this);
+    if (source == SourceId.localEpub) {
+      final bytes = await LocalEpubLibrary.instance.readAsset(url);
+      return decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+    }
     final uri = Uri.tryParse(url);
     if (uri == null || !['https', 'http'].contains(uri.scheme)) {
       throw const FormatException('图片地址无效');

@@ -8,17 +8,18 @@
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
-## Android 正式版 v0.1.24
+## Android 正式版 v0.1.25
 
-LiteTale 0.1.24 已发布，提供 ARM64 手机／平板版和 x86_64 模拟器版。本版重点改善文库8的重复加载与切章等待：详情和已读章节可在有效期内复用，阅读时会在后台准备下一章。
+LiteTale 0.1.25 已发布，提供 ARM64 手机／平板版和 x86_64 模拟器版。本版新增本地 EPUB 2/3 图文书导入，支持离线阅读，并沿用现有阅读字体、横屏双页与仿真翻页。
 
-[下载 ARM64 手机／平板版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.24/LiteTale-0.1.24-arm64-v8a.apk) · [下载 x86_64 模拟器版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.24/LiteTale-0.1.24-x86_64.apk) · [查看 0.1.24 发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v0.1.24)
+[下载 ARM64 手机／平板版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.25/LiteTale-0.1.25-arm64-v8a.apk) · [下载 x86_64 模拟器版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.25/LiteTale-0.1.25-x86_64.apk) · [查看 0.1.25 发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v0.1.25)
 
-文库8网页章节缓存仅在应用进程运行期间保留；首次读取或缓存失效时仍需联网。详细测试结果与版本说明见 [0.1.24 发布记录](docs/releases/0.1.24.md)。
+本地书籍从“书架 → 本地书籍”导入。支持边界和测试结果见 [0.1.25 发布记录](docs/releases/0.1.25.md) 与 [EPUB 整合验收](docs/qa/epub-local-2026-10/INTEGRATION.md)。
 
 ### 功能
 
 - 在哔哩轻小说、文库8、轻书架与轻小说百科之间切换，也可以导入自定义规则书源；各书源的账号、书架和阅读记录分别保存。
+- 支持 EPUB 2/3 图文书导入：从“书架 → 本地书籍”选择文件，离线阅读并沿用字体、横屏双页及仿真翻页。格式取舍和 REA 参考研究见 [EPUB 研究记录](docs/qa/epub-local-2026-10/RESEARCH.md)。
 - 支持搜索、书籍详情、目录与阅读；增加哔哩轻小说原站读取和验证恢复入口，并持续改进文库8与轻书架的读取稳定性。
 - 提供 Material You 配色、多种应用图标配色、平板横屏双页阅读和仿真翻页。
 - 分别导入全局界面字体和阅读字体，支持 TTF／OTF；加密章节继续使用书源所需字体，避免乱码。

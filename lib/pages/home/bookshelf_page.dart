@@ -10,6 +10,8 @@ import 'package:wild/widgets/cf_bookshelf_loader.dart';
 import 'package:wild/widgets/novel_card.dart';
 import 'package:wild/widgets/expressive_loading_indicator.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
+import 'package:wild/pages/local_epub_library_page.dart';
+import 'package:wild/theme/horizontal_page_transitions.dart';
 
 class BookshelfPage extends StatefulWidget {
   const BookshelfPage({super.key});
@@ -21,6 +23,17 @@ class BookshelfPage extends StatefulWidget {
 class _BookshelfPageState extends State<BookshelfPage> {
   final _cfKey = GlobalKey<CfBookshelfLoaderState>();
   bool _cfActive = false;
+
+  Widget _localLibraryButton(BuildContext context) => TextButton.icon(
+    icon: const Icon(Icons.folder_open_rounded),
+    label: const Text('本地书籍'),
+    onPressed:
+        () => Navigator.of(context).push(
+          HorizontalCoverPageRoute(
+            builder: (_) => const LocalEpubLibraryPage(),
+          ),
+        ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -85,6 +98,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
       return Scaffold(
         appBar: AppBar(
           title: const Text('我的书架'),
+          actions: [_localLibraryButton(context)],
         ),
         body: const CenteredLoadingIndicator(),
       );
@@ -92,7 +106,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
     if (state.status == BookshelfStatus.error && !isCfLoading) {
       return Scaffold(
-        appBar: AppBar(title: const Text('我的书架')),
+        appBar: AppBar(
+          title: const Text('我的书架'),
+          actions: [_localLibraryButton(context)],
+        ),
         body: RefreshIndicator(
           onRefresh: () => context.read<BookshelfCubit>().loadBookcases(),
           child: ListView(
@@ -127,7 +144,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
     if (state.bookcases.isEmpty) {
       return Scaffold(
-        appBar: AppBar(title: const Text('我的书架')),
+        appBar: AppBar(
+          title: const Text('我的书架'),
+          actions: [_localLibraryButton(context)],
+        ),
         body: const Center(child: Text('暂无书架')),
       );
     }
@@ -136,6 +156,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
       appBar: AppBar(
         title: const Text('我的书架'),
         actions: [
+          if (!state.isSelecting) _localLibraryButton(context),
           if (state.isSelecting) ...[
             IconButton(
               icon: const Icon(Icons.delete_outline),
@@ -342,8 +363,9 @@ class _BookshelfPageState extends State<BookshelfPage> {
                 itemCount: state.bookcases.length,
                 itemBuilder: (context, index) {
                   final bookcase = state.bookcases[index];
-                  if (bookcase.id == state.currentCaseId)
+                  if (bookcase.id == state.currentCaseId) {
                     return const SizedBox.shrink();
+                  }
                   return ListTile(
                     title: Text(bookcase.title),
                     onTap: () async {

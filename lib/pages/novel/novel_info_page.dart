@@ -64,98 +64,104 @@ class NovelInfoPage extends StatelessWidget {
         appBar: AppBar(
           title: const Text('小说详情'),
           actions: [
-            BlocBuilder<NovelInfoCubit, NovelInfoState>(
-              builder: (context, state) {
-                if (state is! NovelInfoLoaded) {
-                  return const SizedBox.shrink();
-                }
-                return IconButton(
-                  icon: const Icon(Icons.download_outlined),
-                  tooltip:
-                      sourceOf(novelId) == SourceId.wenku8
-                          ? '离线下载'
-                          : '此书源暂不支持离线下载',
-                  onPressed:
-                      sourceOf(novelId) == SourceId.wenku8
-                          ? () => navigateToDownload(context)
-                          : null,
-                );
-              },
-            ),
-            BlocBuilder<BookshelfCubit, BookshelfState>(
-              builder: (context, state) {
-                if (state.status == BookshelfStatus.loading) {
-                  return const Center(
-                    child: SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  );
-                }
-                final isInBookshelf = state.isBookInBookshelf(novelId);
-                return IconButton(
-                  icon: Icon(
-                    isInBookshelf ? Icons.bookmark : Icons.bookmark_border,
-                    color:
-                        isInBookshelf
-                            ? Theme.of(context).colorScheme.primary
+            if (sourceOf(novelId) != SourceId.localEpub)
+              BlocBuilder<NovelInfoCubit, NovelInfoState>(
+                builder: (context, state) {
+                  if (state is! NovelInfoLoaded) {
+                    return const SizedBox.shrink();
+                  }
+                  return IconButton(
+                    icon: const Icon(Icons.download_outlined),
+                    tooltip:
+                        sourceOf(novelId) == SourceId.wenku8
+                            ? '离线下载'
+                            : '此书源暂不支持离线下载',
+                    onPressed:
+                        sourceOf(novelId) == SourceId.wenku8
+                            ? () => navigateToDownload(context)
                             : null,
-                  ),
-                  onPressed: () async {
-                    try {
-                      if (isInBookshelf) {
-                        await bookshelfCubit.removeFromBookshelf(novelId);
-                      } else {
-                        await bookshelfCubit.addToBookshelf(novelId);
-                      }
-                    } catch (e) {
-                      if (!context.mounted) return;
-                      if (_isCfError(e)) {
-                        final apiHost = context.read<ApiHostCubit>().state;
-                        String actionPath;
+                  );
+                },
+              ),
+            if (sourceOf(novelId) != SourceId.localEpub)
+              BlocBuilder<BookshelfCubit, BookshelfState>(
+                builder: (context, state) {
+                  if (state.status == BookshelfStatus.loading) {
+                    return const Center(
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    );
+                  }
+                  final isInBookshelf = state.isBookInBookshelf(novelId);
+                  return IconButton(
+                    icon: Icon(
+                      isInBookshelf ? Icons.bookmark : Icons.bookmark_border,
+                      color:
+                          isInBookshelf
+                              ? Theme.of(context).colorScheme.primary
+                              : null,
+                    ),
+                    onPressed: () async {
+                      try {
                         if (isInBookshelf) {
-                          final bid = bookshelfCubit.state.getBookBid(novelId);
-                          if (bid == null) return;
-                          actionPath =
-                              '/modules/article/bookcase.php?delid=$bid';
+                          await bookshelfCubit.removeFromBookshelf(novelId);
                         } else {
-                          actionPath =
-                              '/modules/article/addbookcase.php?bid=$novelId';
+                          await bookshelfCubit.addToBookshelf(novelId);
                         }
-                        showDialog(
-                          context: context,
-                          barrierDismissible: false,
-                          builder:
-                              (ctx) => Dialog.fullscreen(
-                                child: CfActionLoader(
-                                  apiHost: apiHost,
-                                  actionPath: actionPath,
-                                  successUrlKeyword: 'bookcase.php',
-                                  successBodyKeyword: '处理成功',
-                                  onSuccess: () {
-                                    Navigator.of(ctx).pop();
-                                    bookshelfCubit.loadBookcases();
-                                  },
-                                  onError: (err) {
-                                    Navigator.of(ctx).pop();
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('操作失敗: $err')),
-                                    );
-                                  },
+                      } catch (e) {
+                        if (!context.mounted) return;
+                        if (_isCfError(e)) {
+                          final apiHost = context.read<ApiHostCubit>().state;
+                          String actionPath;
+                          if (isInBookshelf) {
+                            final bid = bookshelfCubit.state.getBookBid(
+                              novelId,
+                            );
+                            if (bid == null) return;
+                            actionPath =
+                                '/modules/article/bookcase.php?delid=$bid';
+                          } else {
+                            actionPath =
+                                '/modules/article/addbookcase.php?bid=$novelId';
+                          }
+                          showDialog(
+                            context: context,
+                            barrierDismissible: false,
+                            builder:
+                                (ctx) => Dialog.fullscreen(
+                                  child: CfActionLoader(
+                                    apiHost: apiHost,
+                                    actionPath: actionPath,
+                                    successUrlKeyword: 'bookcase.php',
+                                    successBodyKeyword: '处理成功',
+                                    onSuccess: () {
+                                      Navigator.of(ctx).pop();
+                                      bookshelfCubit.loadBookcases();
+                                    },
+                                    onError: (err) {
+                                      Navigator.of(ctx).pop();
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(content: Text('操作失敗: $err')),
+                                      );
+                                    },
+                                  ),
                                 ),
-                              ),
-                        );
-                      } else {
-                        ScaffoldMessenger.of(
-                          context,
-                        ).showSnackBar(SnackBar(content: Text('操作失败: $e')));
+                          );
+                        } else {
+                          ScaffoldMessenger.of(
+                            context,
+                          ).showSnackBar(SnackBar(content: Text('操作失败: $e')));
+                        }
                       }
-                    }
-                  },
-                );
-              },
-            ),
+                    },
+                  );
+                },
+              ),
           ],
         ),
         body: BlocBuilder<NovelInfoCubit, NovelInfoState>(
@@ -305,26 +311,27 @@ class _NovelInfoContent extends StatelessWidget {
               children: [
                 _StatItem(
                   icon: Icons.update,
-                  label: '更新',
+                  label: sourceOf(novelId) == SourceId.localEpub ? '导入' : '更新',
                   value: novelInfo.finUpdate,
                 ),
-                _StatItem(
-                  icon: Icons.comment,
-                  label: '评论',
-                  value: '',
-                  onTap: () {
-                    if (sourceOf(novelId) != SourceId.wenku8) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('该书源的评论请前往原站查看')),
+                if (sourceOf(novelId) != SourceId.localEpub)
+                  _StatItem(
+                    icon: Icons.comment,
+                    label: '评论',
+                    value: '',
+                    onTap: () {
+                      if (sourceOf(novelId) != SourceId.wenku8) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('该书源的评论请前往原站查看')),
+                        );
+                        return;
+                      }
+                      Navigator.of(context).pushNamed(
+                        '/novel/reviews',
+                        arguments: {'aid': novelId, 'title': novelInfo.title},
                       );
-                      return;
-                    }
-                    Navigator.of(context).pushNamed(
-                      '/novel/reviews',
-                      arguments: {'aid': novelId, 'title': novelInfo.title},
-                    );
-                  },
-                ),
+                    },
+                  ),
                 // _StatItem(
                 //   icon: Icons.local_fire_department,
                 //   label: '热度',
@@ -406,14 +413,29 @@ class _NovelHeader extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CachedImage(
-            url: novelInfo.imgUrl,
-            source: source,
-            width: 120,
-            height: 160,
-            fit: BoxFit.cover,
-            borderRadius: BorderRadius.circular(8),
-          ),
+          if (source == SourceId.localEpub && novelInfo.imgUrl.isEmpty)
+            Container(
+              width: 120,
+              height: 160,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                Icons.menu_book_rounded,
+                size: 48,
+                color: Theme.of(context).colorScheme.onPrimaryContainer,
+              ),
+            )
+          else
+            CachedImage(
+              url: novelInfo.imgUrl,
+              source: source,
+              width: 120,
+              height: 160,
+              fit: BoxFit.cover,
+              borderRadius: BorderRadius.circular(8),
+            ),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
@@ -425,30 +447,39 @@ class _NovelHeader extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 InkWell(
-                  onTap: () async {
-                    if (!w8.sourceSupportsAuthorSearch(source)) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('该书源暂不支持作者查找')),
-                      );
-                      return;
-                    }
-                    await Navigator.pushNamed(
-                      context,
-                      '/search',
-                      arguments: {
-                        'searchType': 'author',
-                        'searchKey': novelInfo.author,
-                      },
-                    );
-                    if (context.mounted) {
-                      context.read<NovelInfoCubit>().loadHistory();
-                    }
-                  },
+                  onTap:
+                      source == SourceId.localEpub
+                          ? null
+                          : () async {
+                            if (!w8.sourceSupportsAuthorSearch(source)) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('该书源暂不支持作者查找')),
+                              );
+                              return;
+                            }
+                            await Navigator.pushNamed(
+                              context,
+                              '/search',
+                              arguments: {
+                                'searchType': 'author',
+                                'searchKey': novelInfo.author,
+                              },
+                            );
+                            if (context.mounted) {
+                              context.read<NovelInfoCubit>().loadHistory();
+                            }
+                          },
                   child: Text(
                     '作者：${novelInfo.author}',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
-                      decoration: TextDecoration.underline,
+                      color:
+                          source == SourceId.localEpub
+                              ? null
+                              : Theme.of(context).colorScheme.primary,
+                      decoration:
+                          source == SourceId.localEpub
+                              ? TextDecoration.none
+                              : TextDecoration.underline,
                     ),
                   ),
                 ),

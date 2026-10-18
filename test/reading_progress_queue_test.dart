@@ -19,6 +19,31 @@ ReadingProgress position(int page, {String book = 'lns:1'}) => ReadingProgress(
 
 void main() {
   test(
+    'removing a local book drains old write and discards pending positions',
+    () async {
+      final gate = Completer<void>();
+      final events = <String>[];
+      final queue = ReadingProgressQueue(
+        write: (p) async {
+          if (p.page == 1) await gate.future;
+          events.add('write:${p.page}');
+        },
+      );
+      queue.enqueue(position(1));
+      final flush = queue.flush();
+      await Future<void>.delayed(Duration.zero);
+      queue.enqueue(position(2));
+      final removed = queue.discard('lns:1').then((_) => events.add('removed'));
+      await Future<void>.delayed(Duration.zero);
+      expect(events, isEmpty);
+      gate.complete();
+      await Future.wait([flush, removed]);
+      await queue.flush();
+      expect(events, ['write:1', 'removed']);
+    },
+  );
+
+  test(
     'fast turns coalesce but different sources remain independent',
     () async {
       final saved = <ReadingProgress>[];

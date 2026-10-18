@@ -4,7 +4,7 @@ import 'package:wild/services/reader_viewport_layout.dart';
 import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/cached_image.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/reader_raster_readiness.dart';
 
 /// A real spread contains two independently paginated leaves. Text continues
 /// from the left leaf to the right, rather than being laid out across the seam.
@@ -135,21 +135,14 @@ class ReaderPaperLeaf extends StatelessWidget {
             width: layout.contentWidth,
             child:
                 page!.isImage
-                    ? Image(
+                    ? ReaderRasterImage(
                       image: CachedImageProvider(content, source: source),
-                      fit: BoxFit.contain,
-                      loadingBuilder:
-                          (context, child, progress) =>
-                              progress == null
-                                  ? child
-                                  : const CenteredLoadingIndicator(),
-                      errorBuilder:
-                          (context, error, stack) => Center(
-                            child: Text(
-                              '图片加载失败',
-                              style: textStyle.copyWith(fontSize: 14),
-                            ),
-                          ),
+                      errorChild: Center(
+                        child: Text(
+                          '图片加载失败',
+                          style: textStyle.copyWith(fontSize: 14),
+                        ),
+                      ),
                     )
                     : Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,

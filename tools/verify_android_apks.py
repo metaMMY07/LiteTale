@@ -9,8 +9,8 @@ import subprocess
 import zipfile
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--version', default='0.1.24')
-parser.add_argument('--build-number', type=int, default=66)
+parser.add_argument('--version', default='0.1.25')
+parser.add_argument('--build-number', type=int, default=67)
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
 sdk = Path(os.environ.get('ANDROID_HOME', 'D:/Codex-Migrated/Android/Sdk'))

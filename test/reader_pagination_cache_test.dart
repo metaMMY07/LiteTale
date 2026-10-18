@@ -11,6 +11,23 @@ void main() {
   setUp(() => readerHanLocale = null);
   tearDown(() => readerHanLocale = originalHanLocale);
 
+  test('removing one book evicts its layouts without dropping other books', () {
+    var computes = 0;
+    final cache = ReaderPaginationCache(
+      compute: (input) {
+        computes++;
+        return [ReaderPage(content: input.content, isImage: false)];
+      },
+    );
+    _paginate(cache, bookId: 'local-book');
+    _paginate(cache, bookId: 'online-book');
+    cache.evictBook('local-book');
+    _paginate(cache, bookId: 'online-book');
+    expect(computes, 2);
+    _paginate(cache, bookId: 'local-book');
+    expect(computes, 3);
+  });
+
   test('exact hit skips compute, returns the same immutable list', () {
     var computes = 0;
     final cache = ReaderPaginationCache(

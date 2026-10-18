@@ -58,6 +58,17 @@ class ReadingProgressQueue {
 
   Object? errorFor(String bookId) => _failed[bookId];
 
+  /// Called after a local book's revision changes, before deleting its history.
+  Future<void> discard(String bookId) async {
+    _pending.remove(bookId);
+    _retry.remove(bookId);
+    _failed.remove(bookId);
+    await _draining;
+    _pending.remove(bookId);
+    _retry.remove(bookId);
+    _failed.remove(bookId);
+  }
+
   void enqueue(ReadingProgress progress, {bool Function()? isValid}) {
     if (isValid != null && !isValid()) return;
     _retry.remove(progress.bookId);

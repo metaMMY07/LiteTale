@@ -203,8 +203,9 @@ class ReaderCubit extends Cubit<ReaderState> {
                 !_closing &&
                 !isClosed &&
                 _session(targetAid) == session &&
-                sourceRevision.value == revision &&
-                activeSource.value == sourceOf(targetAid),
+                (sourceOf(targetAid) == SourceId.localEpub ||
+                    (sourceRevision.value == revision &&
+                        activeSource.value == sourceOf(targetAid))),
       );
     } catch (e) {
       if (isClosed || request != _request || !sourceMatches()) return;

@@ -8,6 +8,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:wild/widgets/reader_raster_readiness.dart';
 
 /// PTQFlipper page curl on Android, with a blank, opaque reverse side.
 ///
@@ -59,6 +60,7 @@ class PageCurlViewState extends State<PageCurlView>
   // PTQFlipper owns the actual curl on Android. Flutter pages are rasterized
   // only when pagination changes; no Dart geometry runs on drag frames.
   final Map<int, GlobalKey> _nativeKeys = {};
+  final Map<int, ReaderRasterReadiness> _nativeRasterReadiness = {};
   final Map<int, Uint8List> _nativePages = {};
   final Set<int> _nativeRequestedPages = {};
   MethodChannel? _nativeChannel;
@@ -100,6 +102,7 @@ class PageCurlViewState extends State<PageCurlView>
 
   @override
   void dispose() {
+    _nativeRasterReadiness.clear();
     _nativeChannel?.setMethodCallHandler(null);
     _progress.dispose();
     _foldPoint.dispose();
@@ -120,6 +123,7 @@ class PageCurlViewState extends State<PageCurlView>
     if (paperChanged || widget.pageCount != oldWidget.pageCount) {
       _nativeGeneration++;
       _nativePages.clear();
+      _nativeRasterReadiness.clear();
       _nativeRequestedPages.clear();
       _nativeReady = false;
       _nativeInteractive = false;
@@ -188,6 +192,21 @@ class PageCurlViewState extends State<PageCurlView>
     WidgetsBinding.instance.scheduleFrame();
   }
 
+  ReaderRasterReadiness _readinessFor(int index) =>
+      _nativeRasterReadiness.putIfAbsent(index, () {
+        late final ReaderRasterReadiness readiness;
+        readiness = ReaderRasterReadiness(
+          onChanged: () {
+            // A disposed/rotated page must never schedule a stale capture.
+            if (mounted &&
+                identical(_nativeRasterReadiness[index], readiness)) {
+              _scheduleNativeCapture();
+            }
+          },
+        );
+        return readiness;
+      });
+
   Future<void> _captureNativePages() async {
     if (_nativeCaptureRunning) {
       _nativeCaptureAgain = true;
@@ -204,6 +223,11 @@ class PageCurlViewState extends State<PageCurlView>
       for (final index in _nativeVisibleIndices) {
         if (!mounted || generation != _nativeGeneration) break;
         if (_nativePages.containsKey(index)) continue;
+        final readiness = _nativeRasterReadiness[index];
+        // Leave the Flutter page mounted while an illustration decodes. Its
+        // first frame (or error) schedules capture after it has been painted.
+        if (readiness == null || !readiness.isReady) continue;
+        final resourceRevision = readiness.revision;
         final boundary = _nativeKeys[index]?.currentContext?.findRenderObject();
         if (boundary is! RenderRepaintBoundary) {
           _nativeCaptureAgain = true;
@@ -227,6 +251,11 @@ class PageCurlViewState extends State<PageCurlView>
           final data = await image.toByteData(format: ui.ImageByteFormat.png);
           if (data == null) throw StateError('Page image encoding failed');
           if (!mounted || generation != _nativeGeneration) break;
+          if (!identical(_nativeRasterReadiness[index], readiness) ||
+              !readiness.isReady ||
+              readiness.revision != resourceRevision) {
+            continue;
+          }
           final bytes = data.buffer.asUint8List();
           _nativePages[index] = bytes;
           capturedAny = true;
@@ -435,6 +464,7 @@ class PageCurlViewState extends State<PageCurlView>
     // Native PNGs keep the nearby history; offscreen Flutter page widgets do
     // not need a GlobalKey for every page the reader has ever visited.
     _nativeKeys.removeWhere((index, _) => !visible.contains(index));
+    _nativeRasterReadiness.removeWhere((index, _) => !visible.contains(index));
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
@@ -447,6 +477,7 @@ class PageCurlViewState extends State<PageCurlView>
           if (_nativeViewportSize != null) {
             _nativeGeneration++;
             _nativePages.clear();
+            _nativeRasterReadiness.clear();
             _nativeRequestedPages.clear();
             _nativeReady = false;
             _nativeInteractive = false;
@@ -480,10 +511,13 @@ class PageCurlViewState extends State<PageCurlView>
                 opacity: !_nativeReady && index == widget.index ? 1 : 0.01,
                 child: RepaintBoundary(
                   key: _nativeKeys.putIfAbsent(index, GlobalKey.new),
-                  child: DecoratedBox(
-                    decoration: widget.paperDecoration,
-                    child: SizedBox.expand(
-                      child: widget.pageBuilder(context, index),
+                  child: ReaderRasterScope(
+                    readiness: _readinessFor(index),
+                    child: DecoratedBox(
+                      decoration: widget.paperDecoration,
+                      child: SizedBox.expand(
+                        child: widget.pageBuilder(context, index),
+                      ),
                     ),
                   ),
                 ),

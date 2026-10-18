@@ -307,8 +307,9 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
                 !_closing &&
                 !isClosed &&
                 _session(targetAid) == session &&
-                sourceRevision.value == revision &&
-                activeSource.value == sourceOf(targetAid),
+                (sourceOf(targetAid) == SourceId.localEpub ||
+                    (sourceRevision.value == revision &&
+                        activeSource.value == sourceOf(targetAid))),
       );
     } catch (e) {
       if (!current()) return;

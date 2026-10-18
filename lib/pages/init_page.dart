@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:wild/services/epub/local_epub_library.dart';
 import 'package:wild/cubits/app_accent_cubit.dart';
 import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
@@ -66,6 +67,9 @@ class _InitPageState extends State<InitPage> {
 
     // 等待所有 Cubit 初始化完成
     await Future.wait([
+      LocalEpubLibrary.instance.initialize(root).catchError((Object _) {
+        // Local library exposes a retryable error; online reading still starts.
+      }),
       context.read<FontSettingsCubit>().initialize(root),
       context.read<AppAccentCubit>().load(),
       context.read<ReaderCurlCubit>().load(),

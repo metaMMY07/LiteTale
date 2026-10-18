@@ -175,6 +175,13 @@ class ReaderPaginationCache {
     _retainedCodeUnits = 0;
   }
 
+  void evictBook(String bookId) {
+    for (final key
+        in _entries.keys.where((key) => key.bookId == bookId).toList()) {
+      _retainedCodeUnits -= _entries.remove(key)!.retainedCodeUnits;
+    }
+  }
+
   static List<ReaderPage> _paginate(ReaderPaginationInput input) =>
       paginateReaderContent(
         content: input.content,
