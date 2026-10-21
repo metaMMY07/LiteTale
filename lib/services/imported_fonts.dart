@@ -187,6 +187,18 @@ class ImportedFontStore {
     await _load(font, bytes);
   }
 
+  Future<Uint8List> bytesFor(ImportedFont font) async {
+    final file = _file(font);
+    if (await file.length() > maxImportedFontBytes) {
+      throw const FontImportException('字体文件过大');
+    }
+    final bytes = await file.readAsBytes();
+    if (await compute(inspectFontBytes, bytes) != font.digest) {
+      throw const FontImportException('字体文件已损坏');
+    }
+    return bytes;
+  }
+
   Future<void> _load(ImportedFont font, Uint8List bytes) async {
     if (_registered.contains(font.family)) return;
     await _register(font.family, bytes);

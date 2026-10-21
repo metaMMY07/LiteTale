@@ -46,7 +46,7 @@ class SettingsPage extends StatelessWidget {
               SettingsEntry(
                 icon: Icons.chrome_reader_mode_outlined,
                 title: '阅读显示',
-                description: '字号、行距、页边距与翻页效果',
+                description: '字号、行距、页边距、翻页效果与音量键翻页',
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap:
                     () => openSettingsPage(context, const ReaderSettingsPage()),

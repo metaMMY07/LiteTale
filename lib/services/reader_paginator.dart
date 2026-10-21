@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:wild/models/reader_page.dart';
 import 'package:wild/services/reader_typography.dart';
+import 'package:wild/models/reader_document.dart';
+import 'package:wild/services/reader_rich_paginator.dart';
 
 /// Every iteration consumes content or flushes a nonempty page.
 List<ReaderPage> paginateReaderContent({
@@ -13,6 +15,7 @@ List<ReaderPage> paginateReaderContent({
   String? fontFamily,
   TextScaler textScaler = TextScaler.noScaling,
   bool boldText = false,
+  ReaderDocument? document,
 }) {
   if (canvasWidth <= 0 ||
       canvasHeight <= 0 ||
@@ -35,6 +38,16 @@ List<ReaderPage> paginateReaderContent({
     fontFamily: fontFamily,
     boldText: boldText,
   );
+  if (document != null) {
+    return paginateReaderDocument(
+      document: document,
+      width: canvasWidth,
+      height: canvasHeight,
+      style: style,
+      textScaler: textScaler,
+      paragraphSpacing: paragraphSpacing,
+    );
+  }
 
   void flush() {
     if (currentPage.isNotEmpty) {

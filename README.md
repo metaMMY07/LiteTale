@@ -8,18 +8,35 @@
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
-## Android 正式版 v0.1.25
+## Android 正式版 v1.0.0
 
-LiteTale 0.1.25 已发布，提供 ARM64 手机／平板版和 x86_64 模拟器版。本版新增本地 EPUB 2/3 图文书导入，支持离线阅读，并沿用现有阅读字体、横屏双页与仿真翻页。
+LiteTale 1.0.0 已发布，提供 ARM64 手机／平板版和 x86_64 模拟器版。在线轻小说与本地 EPUB 书籍可以在同一书架管理；本地 EPUB 支持离线阅读、常见原书 CSS、自选字体、横屏双页和跨章节连续翻页。
 
-[下载 ARM64 手机／平板版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.25/LiteTale-0.1.25-arm64-v8a.apk) · [下载 x86_64 模拟器版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v0.1.25/LiteTale-0.1.25-x86_64.apk) · [查看 0.1.25 发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v0.1.25)
+[下载 ARM64 手机／平板版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0/LiteTale-1.0.0-arm64-v8a.apk) · [下载 x86_64 模拟器版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0/LiteTale-1.0.0-x86_64.apk) · [查看 v1.0.0 发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v1.0.0)
 
-本地书籍从“书架 → 本地书籍”导入。支持边界和测试结果见 [0.1.25 发布记录](docs/releases/0.1.25.md) 与 [EPUB 整合验收](docs/qa/epub-local-2026-10/INTEGRATION.md)。
+完整功能和安装包校验值见 [1.0.0 发布记录](docs/releases/1.0.0.md)。
+
+### 界面预览
+
+以下截图均为 v1.0.0 的竖屏界面，包含首页、书架、设置与真实 EPUB 原书样式。
+
+<table>
+  <tr>
+    <td align="center"><img src="assets/screenshots/v1.0.0/01-discover.png" width="230" alt="发现首页"><br>发现首页</td>
+    <td align="center"><img src="assets/screenshots/v1.0.0/02-bookshelf.png" width="230" alt="在线书架"><br>在线书架</td>
+    <td align="center"><img src="assets/screenshots/v1.0.0/03-my.png" width="230" alt="我的页面"><br>我的页面</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="assets/screenshots/v1.0.0/04-display.png" width="230" alt="显示设置"><br>显示设置</td>
+    <td align="center"><img src="assets/screenshots/v1.0.0/05-font-settings.png" width="230" alt="全局与阅读字体设置"><br>字体设置</td>
+    <td align="center"><img src="assets/screenshots/v1.0.0/06-real-epub-css.png" width="230" alt="真实 EPUB 原书标题页与 CSS 样式"><br>真实 EPUB 原书样式</td>
+  </tr>
+</table>
 
 ### 功能
 
 - 在哔哩轻小说、文库8、轻书架与轻小说百科之间切换，也可以导入自定义规则书源；各书源的账号、书架和阅读记录分别保存。
-- 支持 EPUB 2/3 图文书导入：从“书架 → 本地书籍”选择文件，离线阅读并沿用字体、横屏双页及仿真翻页。格式取舍和 REA 参考研究见 [EPUB 研究记录](docs/qa/epub-local-2026-10/RESEARCH.md)。
+- 支持 EPUB 2/3 图文书导入：从“书架 → 本地书籍”选择文件，离线阅读，支持常见原书 CSS、阅读字体、横屏双页、连续翻页与音量键翻页。
 - 支持搜索、书籍详情、目录与阅读；增加哔哩轻小说原站读取和验证恢复入口，并持续改进文库8与轻书架的读取稳定性。
 - 提供 Material You 配色、多种应用图标配色、平板横屏双页阅读和仿真翻页。
 - 分别导入全局界面字体和阅读字体，支持 TTF／OTF；加密章节继续使用书源所需字体，避免乱码。

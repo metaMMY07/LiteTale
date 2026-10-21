@@ -1,4 +1,11 @@
 import 'dart:async';
+import 'package:wild/utils/wenku8_network_error.dart';
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:wild/services/epub/local_epub_library.dart';
+import 'package:wild/services/epub/epub_css_reader.dart';
+import 'theme_cubit.dart';
+import 'package:wild/models/reader_document.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/models/reader_page.dart';
@@ -7,6 +14,8 @@ import 'package:wild/services/reader_viewport_layout.dart';
 import 'package:wild/services/reader_position.dart';
 import 'package:wild/services/reader_chapter_prefetch.dart';
 import 'package:wild/services/reading_progress.dart';
+import 'package:wild/services/epub_reader_position.dart';
+import 'package:wild/services/epub_book_flow.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/pages/novel/line_height_cubit.dart';
 import 'package:wild/sources/source_api.dart';
@@ -20,8 +29,16 @@ import 'package:wild/pages/novel/right_padding_cubit.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
 
 class ReaderCubit extends Cubit<ReaderState> {
+  EpubCssReader? _cssReader;
+  final ReaderTheme Function()? readerTheme;
+  final Future<void>? layoutReady;
+  EpubBookFlow? _bookFlow;
+  EpubFlowWindow? _bookWindow;
+  bool _warmingBook = false;
+  bool _reflowingBook = false;
   int _request = 0;
   String? _loadedContent;
+  ReaderDocument? _loadedDocument;
   String? _contentAid;
   String? _contentCid;
   ReaderPosition? _position;
@@ -38,6 +55,8 @@ class ReaderCubit extends Cubit<ReaderState> {
   final int Function(String aid) _session;
   final ReadingProgressQueue _progress;
   final ReaderChapterPrefetch? _prefetch;
+  final Future<ReaderPosition?> Function(String bookId, String chapterId)?
+  _loadPosition;
   final NovelInfo novelInfo;
   String initialAid;
   String initialCid;
@@ -64,11 +83,15 @@ class ReaderCubit extends Cubit<ReaderState> {
     required this.leftPaddingCubit,
     required this.rightPaddingCubit,
     required this.fontSettingsCubit,
+    this.readerTheme,
+    this.layoutReady,
     Future<SourceChapter> Function({required String aid, required String cid})?
     read,
     int Function(String aid)? sessionGeneration,
     ReadingProgressQueue? progress,
     ReaderPrefetchLoad? prefetch,
+    Future<ReaderPosition?> Function(String bookId, String chapterId)?
+    loadPosition,
   }) : _read =
            read == null
                ? readerChapter
@@ -79,6 +102,9 @@ class ReaderCubit extends Cubit<ReaderState> {
                }) => read(aid: aid, cid: cid)),
        _session = sessionGeneration ?? readerSessionGeneration,
        _progress = progress ?? ReadingProgressQueue.instance,
+       _loadPosition =
+           loadPosition ??
+           (read == null ? EpubReaderPositionStore.instance.read : null),
        _prefetch =
            read != null && prefetch == null
                ? null
@@ -107,11 +133,26 @@ class ReaderCubit extends Cubit<ReaderState> {
     throw Exception('Volume not found');
   }
 
-  Future<void> loadChapter({String? aid, String? cid, int? initialPage}) async {
+  Future<void> loadChapter({
+    String? aid,
+    String? cid,
+    int? initialPage,
+    int? initialTextOffset,
+  }) async {
     if (_closing || isClosed) return;
     final request = ++_request;
     final targetAid = aid ?? initialAid;
     final targetCid = cid ?? initialCid;
+    if (sourceOf(targetAid) == SourceId.localEpub) {
+      await _loadLocalBook(
+        targetAid,
+        targetCid,
+        request,
+        initialPage: initialPage,
+        initialTextOffset: initialTextOffset,
+      );
+      return;
+    }
     _prefetch?.foreground(targetAid, targetCid);
     final session = _session(targetAid);
     final revision = sourceRevision.value;
@@ -146,6 +187,7 @@ class ReaderCubit extends Cubit<ReaderState> {
       }
       final content = chapter.content;
       _loadedContent = content;
+      _loadedDocument = chapter.document;
       _contentAid = targetAid;
       _contentCid = targetCid;
       _sourceFont = chapter.fontFamily;
@@ -166,6 +208,17 @@ class ReaderCubit extends Cubit<ReaderState> {
         lineHeight,
       );
       final pages = pagination.pages;
+      final savedPosition =
+          _loadedDocument != null && initialTextOffset != null
+              ? await _loadPosition?.call(targetAid, targetCid)
+              : null;
+      if (_closing ||
+          isClosed ||
+          request != _request ||
+          !sourceMatches() ||
+          _session(targetAid) != session) {
+        return;
+      }
 
       // 验证并设置初始页码
       int pageIndex = 0;
@@ -174,10 +227,26 @@ class ReaderCubit extends Cubit<ReaderState> {
           pageIndex = initialPage;
         }
       }
+      if (savedPosition != null) {
+        pageIndex = savedPosition.pageIn(pages);
+      } else if (_loadedDocument != null &&
+          initialTextOffset != null &&
+          initialTextOffset >= 0) {
+        final priorImage =
+            initialPage != null &&
+            initialPage >= 0 &&
+            initialPage < pages.length &&
+            pages[initialPage].isImage &&
+            pages[initialPage].textStart == initialTextOffset;
+        pageIndex =
+            priorImage
+                ? initialPage
+                : ReaderPosition(initialTextOffset, 0, false).pageIn(pages);
+      }
 
       // 计算从第一页到当前页的累计字数
       _offsets = ReaderPageOffsets(pages);
-      _position = _offsets!.at(pageIndex);
+      _position = savedPosition ?? _offsets!.at(pageIndex);
 
       if (isClosed || request != _request || !sourceMatches()) return;
       emit(
@@ -212,7 +281,11 @@ class ReaderCubit extends Cubit<ReaderState> {
       final sessionMatches = _session(targetAid) == session;
       emit(
         ReaderError(
-          sessionMatches ? e.toString() : '账号已变化，请重新打开章节。',
+          sessionMatches
+              ? (sourceOf(targetAid) == SourceId.wenku8
+                  ? wenku8ReadErrorMessage(e)
+                  : e.toString())
+              : '账号已变化，请重新打开章节。',
           cause: sessionMatches ? e : null,
         ),
       );
@@ -221,6 +294,19 @@ class ReaderCubit extends Cubit<ReaderState> {
 
   Future reloadCurrentPage() async {
     if (_closing || state is! ReaderLoaded) return;
+    if (_bookFlow != null && _bookWindow != null) {
+      final loaded = state as ReaderLoaded;
+      final request = ++_request;
+      await _loadLocalBook(
+        loaded.aid,
+        loaded.cid,
+        request,
+        position: _position,
+        preserveControls: loaded.showControls,
+        showLoading: false,
+      );
+      return;
+    }
     final request = ++_request;
     final targetAid = initialAid;
     final targetCid = initialCid;
@@ -237,23 +323,41 @@ class ReaderCubit extends Cubit<ReaderState> {
       }
 
       final chapterTitle = _findChapterTitle(targetAid, targetCid);
-      final content =
-          _contentAid == targetAid &&
-                  _contentCid == targetCid &&
-                  _loadedContent != null
-              ? _loadedContent!
-              : (await _read(
-                aid: targetAid,
-                cid: targetCid,
-                isCurrent:
-                    () =>
-                        !_closing &&
-                        !isClosed &&
-                        request == _request &&
-                        sourceMatches() &&
-                        _session(targetAid) == session,
-              )).content;
-      if (isClosed || request != _request || !sourceMatches()) return;
+      var content = _loadedContent;
+      if (_contentAid != targetAid ||
+          _contentCid != targetCid ||
+          content == null) {
+        final chapter = await _read(
+          aid: targetAid,
+          cid: targetCid,
+          isCurrent:
+              () =>
+                  !_closing &&
+                  !isClosed &&
+                  request == _request &&
+                  sourceMatches() &&
+                  _session(targetAid) == session,
+        );
+        if (_closing ||
+            isClosed ||
+            request != _request ||
+            !sourceMatches() ||
+            _session(targetAid) != session) {
+          return;
+        }
+        content = chapter.content;
+        _loadedContent = content;
+        _loadedDocument = chapter.document;
+        _sourceFont = chapter.fontFamily;
+        _contentAid = targetAid;
+        _contentCid = targetCid;
+      }
+      if (isClosed ||
+          request != _request ||
+          !sourceMatches() ||
+          _session(targetAid) != session) {
+        return;
+      }
 
       // Paging remains available while the content request is pending. Read
       // the latest position now, not the one at the start of that request.
@@ -303,7 +407,11 @@ class ReaderCubit extends Cubit<ReaderState> {
       final sessionMatches = _session(targetAid) == session;
       emit(
         ReaderError(
-          sessionMatches ? e.toString() : '账号已变化，请重新打开章节。',
+          sessionMatches
+              ? (sourceOf(targetAid) == SourceId.wenku8
+                  ? wenku8ReadErrorMessage(e)
+                  : e.toString())
+              : '账号已变化，请重新打开章节。',
           cause: sessionMatches ? e : null,
         ),
       );
@@ -314,6 +422,17 @@ class ReaderCubit extends Cubit<ReaderState> {
     if (state is ReaderLoaded) {
       final currentState = state as ReaderLoaded;
       if (index < 0 || index >= currentState.pages.length) return;
+      final window = _bookWindow;
+      if (window != null) {
+        _publishBook(
+          EpubFlowWindow(window.refs, index, window.token, window.chapterCount),
+          currentState.layout,
+          currentState.fontFamily,
+          currentState.showControls,
+        );
+        _warmLocalBook();
+        return;
+      }
       _position = (_offsets ??= ReaderPageOffsets(currentState.pages)).at(
         index,
       );
@@ -324,9 +443,17 @@ class ReaderCubit extends Cubit<ReaderState> {
   }
 
   void _savePageHistory(ReaderLoaded currentState) {
-    final index = currentState.currentPageIndex;
-    final characterCount = (_offsets ??= ReaderPageOffsets(currentState.pages))
-        .charactersThrough(index);
+    final ref = _bookWindow?.refs[currentState.currentPageIndex];
+    final index = ref?.localIndex ?? currentState.currentPageIndex;
+    final chapterPages = ref?.owner.pages ?? currentState.pages;
+    final richPosition =
+        _loadedDocument == null
+            ? null
+            : _position ??
+                (_offsets ??= ReaderPageOffsets(chapterPages)).at(index);
+    final characterCount =
+        richPosition?.textOffset ??
+        (_offsets ??= ReaderPageOffsets(chapterPages)).charactersThrough(index);
     final session = _contentSession;
     final sessionFor = _session;
     final bookId = currentState.aid;
@@ -344,6 +471,7 @@ class ReaderCubit extends Cubit<ReaderState> {
         page: index,
         cover: novelInfo.imgUrl,
         author: novelInfo.author,
+        position: richPosition,
       ),
       isValid: () => sessionFor(bookId) == session,
     );
@@ -449,8 +577,9 @@ class ReaderCubit extends Cubit<ReaderState> {
     String content,
     double fontSize,
     double paragraphSpacing,
-    double lineHeight,
-  ) {
+    double lineHeight, {
+    SourceChapter? chapter,
+  }) {
     final metrics = MediaQueryData.fromView(
       WidgetsBinding.instance.platformDispatcher.views.first,
     );
@@ -464,13 +593,16 @@ class ReaderCubit extends Cubit<ReaderState> {
       textScaler: metrics.textScaler,
       boldText: metrics.boldText,
     );
-    final fontFamily = fontSettingsCubit.state.resolveReaderFamily(_sourceFont);
+    final fontFamily = fontSettingsCubit.state.resolveReaderFamily(
+      chapter == null ? _sourceFont : chapter.fontFamily,
+    );
     final pages = ReaderPaginationCache.instance.paginate(
       sourceId: sourceOf(aid).name,
       bookId: aid,
       chapterId: cid,
       sessionGeneration: _contentSession ?? _session(aid),
       content: content,
+      document: chapter == null ? _loadedDocument : chapter.document,
       canvasWidth: layout.contentWidth,
       canvasHeight: layout.contentHeight,
       fontSize: fontSize,
@@ -483,6 +615,335 @@ class ReaderCubit extends Cubit<ReaderState> {
     return (pages: pages, layout: layout, fontFamily: fontFamily);
   }
 
+  Future<void> _loadLocalBook(
+    String aid,
+    String cid,
+    int request, {
+    int? initialPage,
+    int? initialTextOffset,
+    ReaderPosition? position,
+    bool? preserveControls,
+    bool showLoading = true,
+  }) async {
+    final controls = preserveControls ?? state.showControls;
+    final session = _session(aid);
+    bool current() =>
+        !_closing &&
+        !isClosed &&
+        request == _request &&
+        _session(aid) == session;
+    final previousWindow = _bookWindow;
+    final previousData = <String, SourceChapter>{
+      if (!showLoading && previousWindow != null)
+        for (final ref in previousWindow.refs)
+          ref.owner.chapter.cid: ref.owner.data,
+    };
+    _bookFlow?.close();
+    final oldCssReader = _cssReader;
+    final useCss =
+        Platform.isAndroid &&
+        LocalEpubLibrary.instance.book(aid)?.hasPublication == true;
+    final cssReader = useCss ? EpubCssReader() : null;
+    _cssReader = cssReader;
+    if (showLoading) _bookWindow = null;
+    _reflowingBook = !showLoading;
+    _warmingBook = false;
+    _prefetch?.cancel();
+    initialAid = aid;
+    initialCid = cid;
+    if (showLoading) emit(ReaderLoading(controls));
+    ({List<ReaderPage> pages, ReaderViewportLayout layout, String fontFamily})?
+    firstPagination;
+    Future<Uint8List?>? cssFont;
+    final flow = EpubBookFlow(
+      maxPages: useCss ? 32 : 64,
+      maxNeighbourChapters: useCss ? 1 : 2,
+      deferAhead: useCss,
+      pageStride: useCss && _localCssLayout().isSpread ? 2 : 1,
+      chapters: [
+        for (final v in initialVolumes)
+          ...v.chapters.where((c) => c.aid == aid),
+      ],
+      isCurrent: current,
+      read:
+          (c) async =>
+              previousData[c.cid] ??
+              await _read(aid: aid, cid: c.cid, isCurrent: current),
+      paginate: (c, data) async {
+        if (cssReader != null) {
+          final metrics = MediaQueryData.fromView(
+            WidgetsBinding.instance.platformDispatcher.views.first,
+          );
+          final layout = _localCssLayout(metrics);
+          final theme = readerTheme?.call() ?? ReaderTheme.defaultTheme();
+          final dark =
+              theme.themeMode == ReaderThemeMode.dark ||
+              theme.themeMode == ReaderThemeMode.auto &&
+                  metrics.platformBrightness == Brightness.dark;
+          String color(Color c) =>
+              '#${(c.toARGB32() & 0xffffff).toRadixString(16).padLeft(6, '0')}';
+          final font = await (cssFont ??= fontSettingsCubit.readerBytes());
+          if (!current()) throw StateError('阅读器已更新');
+          final pages = await cssReader.paginate(
+            book: aid,
+            chapter: c.cid,
+            content: data.content,
+            userFont: font,
+            options: {
+              'width': layout.leafWidth,
+              'height': layout.viewportSize.height,
+              'pixelRatio': metrics.devicePixelRatio,
+              'boldText': metrics.boldText,
+              'left': layout.insets.left,
+              'top': layout.insets.top + layout.headerHeight,
+              'contentWidth': layout.contentWidth,
+              'contentHeight': layout.contentHeight,
+              'fontSize': layout.textScaler.scale(fontSizeCubit.state),
+              'lineHeight': lineHeightCubit.state,
+              'paragraphGap': paragraphSpacingCubit.state,
+              'paper': color(
+                dark ? theme.darkBackgroundColor : theme.lightBackgroundColor,
+              ),
+              'ink': color(dark ? theme.darkTextColor : theme.lightTextColor),
+              'userFont': font != null,
+              'fontKey': fontSettingsCubit.state.readerFamily,
+            },
+          );
+          firstPagination ??= (
+            pages: pages,
+            layout: layout,
+            fontFamily: fontSettingsCubit.state.readerFamily,
+          );
+          return pages;
+        }
+        final p = _paginateContent(
+          aid,
+          c.cid,
+          c.title,
+          data.content,
+          fontSizeCubit.state,
+          paragraphSpacingCubit.state,
+          lineHeightCubit.state,
+          chapter: data,
+        );
+        firstPagination ??= p;
+        return p.pages;
+      },
+    );
+    _bookFlow = flow;
+    try {
+      if (useCss && layoutReady != null) {
+        await layoutReady;
+        if (!current()) return;
+      }
+      if (position == null && initialTextOffset != null) {
+        position =
+            await _loadPosition?.call(aid, cid) ??
+            ReaderPosition(initialTextOffset, 0, false);
+      }
+      if (!current()) return;
+      var window = await flow.open(
+        cid,
+        position: position,
+        initialPage: initialPage ?? 0,
+      );
+      if (!current() || !identical(_bookFlow, flow)) return;
+      // The old paper remains interactive during font/viewport reflow. Resolve
+      // the latest chapter-local anchor after asynchronous neighbour reads.
+      // Reuse an already shaped page whenever it is inside this new window.
+      while (!showLoading && current()) {
+        final latest = state;
+        if (latest is! ReaderLoaded || latest.aid != aid) return;
+        final anchor = _position;
+        final candidate =
+            window.refs
+                .where((r) => r.owner.chapter.cid == latest.cid)
+                .firstOrNull;
+        final localIndex =
+            candidate == null ? null : anchor?.pageIn(candidate.owner.pages);
+        final index =
+            candidate == null || localIndex == null
+                ? -1
+                : window.refs.indexWhere(
+                  (r) =>
+                      r.owner.chapter.cid == latest.cid &&
+                      r.localIndex == localIndex,
+                );
+        if (index >= 0) {
+          window = EpubFlowWindow(
+            window.refs,
+            index,
+            window.token,
+            window.chapterCount,
+          );
+          position = anchor;
+          break;
+        }
+        window = await flow.open(latest.cid, position: anchor);
+        if (!current() || !identical(_bookFlow, flow)) return;
+      }
+      _contentSession = session;
+      if (cssReader != null) {
+        await EpubCssReader.warm(
+          window.pages,
+          firstPagination!.layout.firstPage(
+            firstPagination!.layout.viewIndex(window.index),
+          ),
+          count: firstPagination!.layout.isSpread ? 2 : 1,
+          strict: true,
+        );
+        if (!current()) return;
+      }
+      _reflowingBook = false;
+      _publishBook(
+        window,
+        firstPagination!.layout,
+        firstPagination!.fontFamily,
+        !showLoading ? state.showControls : controls,
+        position: position,
+      );
+      _warmLocalBook();
+    } catch (error) {
+      if (!current()) return;
+      _reflowingBook = false;
+      emit(ReaderError(error.toString(), cause: error));
+    } finally {
+      oldCssReader?.close();
+      if (!identical(_cssReader, cssReader)) cssReader?.close();
+    }
+  }
+
+  ReaderViewportLayout _localCssLayout([MediaQueryData? metrics]) {
+    final view =
+        metrics ??
+        MediaQueryData.fromView(
+          WidgetsBinding.instance.platformDispatcher.views.first,
+        );
+    return ReaderViewportLayout(
+      size: view.size,
+      systemPadding: view.padding,
+      leftPadding: leftPaddingCubit.state,
+      rightPadding: rightPaddingCubit.state,
+      topBarHeight: topBarHeightCubit.state,
+      bottomBarHeight: bottomBarHeightCubit.state,
+      textScaler: view.textScaler,
+      boldText: view.boldText,
+    );
+  }
+
+  void _publishBook(
+    EpubFlowWindow window,
+    ReaderViewportLayout layout,
+    String fontFamily,
+    bool controls, {
+    ReaderPosition? position,
+  }) {
+    _bookWindow = window;
+    final ref = window.refs[window.index];
+    final data = ref.owner.data;
+    initialCid = ref.owner.chapter.cid;
+    _contentCid = initialCid;
+    _contentAid = initialAid;
+    _loadedContent = data.content;
+    _loadedDocument = data.document;
+    _sourceFont = data.fontFamily;
+    _offsets = ReaderPageOffsets(ref.owner.pages);
+    _position = position ?? ref.position;
+    emit(
+      ReaderLoaded(
+        aid: initialAid,
+        cid: initialCid,
+        title: ref.owner.chapter.title,
+        volumes: initialVolumes,
+        pages: window.pages,
+        layout: layout,
+        fontFamily: fontFamily,
+        currentPageIndex: window.index,
+        showControls: controls,
+        presentationKey: window.token,
+      ),
+    );
+    _savePageHistory(state as ReaderLoaded);
+    if (_cssReader != null) {
+      unawaited(EpubCssReader.warm(window.pages, window.index));
+    }
+  }
+
+  void _warmLocalBook() {
+    final flow = _bookFlow, window = _bookWindow;
+    if (flow == null ||
+        window == null ||
+        _reflowingBook ||
+        _warmingBook ||
+        state is! ReaderLoaded) {
+      return;
+    }
+    _warmingBook = true;
+    () async {
+      try {
+        final extended = await flow.warm(window, window.index);
+        if (extended == null || !flow.current || !identical(_bookFlow, flow)) {
+          return;
+        }
+        final latestWindow = _bookWindow;
+        final latest = state;
+        if (latestWindow == null ||
+            latest is! ReaderLoaded ||
+            !identical(latestWindow.refs, window.refs)) {
+          return;
+        }
+        final currentRef = latestWindow.refs[latest.currentPageIndex];
+        final index = extended.refs.indexWhere(
+          (r) =>
+              r.owner.chapter.cid == currentRef.owner.chapter.cid &&
+              r.localIndex == currentRef.localIndex,
+        );
+        if (index < 0) return;
+        _publishBook(
+          EpubFlowWindow(
+            extended.refs,
+            index,
+            extended.token,
+            extended.chapterCount,
+          ),
+          latest.layout,
+          latest.fontFamily,
+          latest.showControls,
+          position: _position,
+        );
+      } catch (_) {
+        // A damaged neighbour must not replace a readable local page. A user
+        // boundary action can retry it; no automatic retry loop is started.
+      } finally {
+        if (identical(_bookFlow, flow)) _warmingBook = false;
+      }
+    }();
+  }
+
+  Future<void> turnBookBoundary(int direction) async {
+    final flow = _bookFlow, window = _bookWindow;
+    final loaded = state;
+    if (flow == null ||
+        window == null ||
+        _reflowingBook ||
+        loaded is! ReaderLoaded) {
+      return;
+    }
+    try {
+      final next = await flow.across(window, direction);
+      if (next == null ||
+          !flow.current ||
+          !identical(_bookFlow, flow) ||
+          !identical(_bookWindow?.refs, window.refs)) {
+        return;
+      }
+      _publishBook(next, loaded.layout, loaded.fontFamily, loaded.showControls);
+      _warmLocalBook();
+    } catch (_) {
+      // Retain the current page. The same gesture retries a failed local read.
+    }
+  }
+
   void toggleControls() {
     if (state is ReaderLoaded) {
       final currentState = state as ReaderLoaded;
@@ -493,6 +954,8 @@ class ReaderCubit extends Cubit<ReaderState> {
   @override
   Future<void> close() async {
     _closing = true;
+    _bookFlow?.close();
+    _cssReader?.close();
     _prefetch?.cancel();
     _request++;
     await super.close();
@@ -527,6 +990,7 @@ class ReaderError extends ReaderState {
 }
 
 class ReaderLoaded extends ReaderState {
+  final Object? presentationKey;
   final String aid;
   final String cid;
   final String title;
@@ -548,6 +1012,7 @@ class ReaderLoaded extends ReaderState {
     required this.fontFamily,
     required this.currentPageIndex,
     required this.showControls,
+    this.presentationKey,
   });
 
   ReaderLoaded copyWith({
@@ -569,6 +1034,7 @@ class ReaderLoaded extends ReaderState {
       fontFamily: fontFamily,
       currentPageIndex: currentPageIndex ?? this.currentPageIndex,
       showControls: showControls ?? this.showControls,
+      presentationKey: presentationKey,
     );
   }
 }

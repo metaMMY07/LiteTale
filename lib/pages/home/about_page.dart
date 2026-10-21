@@ -139,6 +139,11 @@ class AboutPage extends StatelessWidget {
                           'Wild 衍生代码采用 GNU GPL v3；应用图标来自 Novella，并按 GNU AGPL v3 许可使用。',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
+                        TextButton.icon(
+                          onPressed: () => showLicensePage(context: context),
+                          icon: const Icon(Icons.description_outlined),
+                          label: const Text('查看开源许可'),
+                        ),
                       ],
                     ),
                   ),

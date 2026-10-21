@@ -6,9 +6,12 @@ import 'package:crypto/crypto.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../models/reader_document.dart';
 import '../read_result_cache.dart';
 import 'epub_models.dart';
 import 'epub_parser.dart';
+import 'epub_artwork_renderer.dart';
+import 'epub_publication_document.dart';
 
 typedef EpubBookParser =
     ParsedEpubBook Function(Uint8List bytes, {String fallbackTitle});
@@ -17,40 +20,51 @@ const _manifestName = 'book.json';
 const _removedName = 'removed';
 const _maxManifestBytes = 8 * 1024 * 1024;
 const _maxChapterBytes = 8 * 1024 * 1024;
+const _maxChapterJsonBytes = 32 * 1024 * 1024;
 const _maxTextBytes = 128 * 1024 * 1024;
+const _maxChapterStorageBytes = 256 * 1024 * 1024;
 const _maxAssetBytes = 20 * 1024 * 1024;
 const _maxTotalAssetBytes = 128 * 1024 * 1024;
 final _assetNamePattern = RegExp(
   r'^[a-f0-9]{64}\.(?:png|jpg|gif|webp|bmp|avif)$',
 );
 
-/// Private, normalized EPUB files. Startup reads manifests only; import converts
-/// once in an isolate, so reading never decompresses a ZIP or depends on the
-/// original document provider's URI remaining available.
+/// Private, normalized EPUB files plus an owned original for CSS pagination.
+/// Startup reads manifests only; chapter rendering never depends on the
+/// document provider's URI remaining available.
 class LocalEpubLibrary extends ChangeNotifier {
   LocalEpubLibrary({
     EpubBookParser? parser,
     bool useIsolates = true,
     Future<Uint8List> Function(File file)? readFileBytes,
+    Future<void> Function(Directory from, String to)? renameDirectory,
     DateTime Function()? now,
+    EpubArtworkRasterizer? rasterizeArtwork,
   }) : _parser = parser ?? parseEpubBook,
        _useIsolates = useIsolates,
        _readFileBytes = readFileBytes ?? _readBytes,
-       _now = now ?? DateTime.now;
+       _renameDirectory = renameDirectory ?? _rename,
+       _now = now ?? DateTime.now,
+       _renderLegacyArtwork = rasterizeArtwork != null || !Platform.isAndroid,
+       _rasterizeArtwork = rasterizeArtwork ?? rasterizeEpubArtwork;
 
   static final instance = LocalEpubLibrary();
 
   final EpubBookParser _parser;
   final bool _useIsolates;
   final Future<Uint8List> Function(File file) _readFileBytes;
+  final Future<void> Function(Directory from, String to) _renameDirectory;
   final DateTime Function() _now;
+  final EpubArtworkRasterizer _rasterizeArtwork;
+  final bool _renderLegacyArtwork;
   final _records = <String, _StoredBook>{};
   final _revisions = <String, int>{};
-  final _chapterCache = ReadResultCache<String, String>(
+  final _chapterCache = ReadResultCache<String, _LoadedChapter>(
     maxEntries: 12,
     maxWeight: 4 * 1024 * 1024,
     ttl: const Duration(minutes: 30),
-    weightOf: (value) => value.length * 2,
+    weightOf:
+        (value) => value.encodedLength * 4 + value.data.content.length * 2,
   );
   final _assetCache = ReadResultCache<String, Uint8List>(
     maxEntries: 6,
@@ -58,7 +72,23 @@ class LocalEpubLibrary extends ChangeNotifier {
     ttl: const Duration(minutes: 10),
     weightOf: (value) => value.length,
   );
+  final _publicationCache = ReadResultCache<String, Uint8List>(
+    maxEntries: 1,
+    maxWeight: maxEpubInputBytes,
+    ttl: const Duration(minutes: 10),
+    weightOf: (value) => value.length,
+  );
+  final _documentCache = ReadResultCache<String, EpubPublicationDocument>(
+    maxEntries: 6,
+    maxWeight: 24 * 1024 * 1024,
+    ttl: const Duration(minutes: 10),
+    weightOf:
+        (doc) =>
+            doc.html.length * 2 +
+            doc.resources.values.fold<int>(0, (n, bytes) => n + bytes.length),
+  );
   Future<void> _mutationTail = Future<void>.value();
+  Completer<void>? _publication;
   String? _base;
   String? _lastRoot;
   String? _initializationError;
@@ -107,6 +137,8 @@ class LocalEpubLibrary extends ChangeNotifier {
         ..addAll(snapshot.records);
       _chapterCache.clear();
       _assetCache.clear();
+      _publicationCache.clear();
+      _documentCache.clear();
       _loadWarnings = snapshot.warnings;
       _initializationError = null;
       notifyListeners();
@@ -137,49 +169,147 @@ class LocalEpubLibrary extends ChangeNotifier {
     }
     final digest = await _background(_hashInput, bytes);
     final existing = _records['epub:$digest'];
-    if (existing != null) {
+    if (existing != null && !existing.book.needsStyleUpgrade) {
       return EpubImportResult(existing.book, alreadyImported: true);
     }
 
-    final fileName = _displayFileName(input.name);
-    final importedAtMs = _now().millisecondsSinceEpoch;
+    final fileName = existing?.book.fileName ?? _displayFileName(input.name);
+    final importedAtMs =
+        existing?.book.importedAtMs ?? _now().millisecondsSinceEpoch;
     final stage = _join(base, '.import_${digest}_${_nextUnique()}');
     final parser = _parser;
+    final parsed = await _background(_parseBookJob, (bytes, fileName, parser));
+    if (parsed.digest != digest) {
+      throw const EpubImportException('EPUB 文件校验失败');
+    }
+    final rendered =
+        _renderLegacyArtwork
+            ? await renderEpubArtwork(parsed, _rasterizeArtwork)
+            : parsed;
     final prepared = await _background(_prepareBookJob, (
       base,
       stage,
-      bytes,
+      rendered,
       digest,
       fileName,
       importedAtMs,
-      parser,
+      existing?.book,
+      bytes,
     ));
+    final target = _join(base, digest);
+    String? backup;
+    File? journal;
+    final publication = Completer<void>();
+    _publication = publication;
     try {
       _checkOwnedDirectory(base, stage);
-      final target = _join(base, digest);
       final type = await FileSystemEntity.type(target, followLinks: false);
       if (type == FileSystemEntityType.directory) {
         // A tombstoned or corrupt former import must never be overwritten. Move
         // it aside intact, allowing this identical book to be imported again.
         _checkOwnedDirectory(base, target);
-        await Directory(
-          target,
-        ).rename(_join(base, '.orphan_${digest}_${_nextUnique()}'));
+        backup = _join(base, '.orphan_${digest}_${_nextUnique()}');
+        if (existing != null) {
+          journal = await _writeUpgradeJournal(base, digest, backup, stage);
+        }
+        await _renameDirectory(Directory(target), backup);
+        existing?.directoryOverride = backup;
       } else if (type != FileSystemEntityType.notFound) {
         throw const EpubImportException('同名本地书籍目录不可用，未覆盖现有文件');
       }
-      await Directory(stage).rename(target);
+      await _renameDirectory(Directory(stage), target);
       _records[prepared.book.id] = prepared;
       _revisions[prepared.book.id] = revisionFor(prepared.book.id) + 1;
+      _chapterCache.clear();
+      _assetCache.clear();
+      _publicationCache.clear();
+      _documentCache.clear();
+      _deleteJournal(journal);
       notifyListeners();
-      return EpubImportResult(prepared.book, alreadyImported: false);
+      return EpubImportResult(
+        prepared.book,
+        alreadyImported: false,
+        upgraded: existing != null,
+      );
     } catch (_) {
+      if (existing != null && backup != null) {
+        try {
+          if (await FileSystemEntity.type(target, followLinks: false) ==
+                  FileSystemEntityType.notFound &&
+              await FileSystemEntity.type(backup, followLinks: false) ==
+                  FileSystemEntityType.directory) {
+            _checkOwnedDirectory(base, backup);
+            await _renameDirectory(Directory(backup), target);
+            existing.directoryOverride = null;
+          }
+          if (existing.directoryOverride == null) _deleteJournal(journal);
+        } catch (_) {
+          // Keep the valid old copy and journal for startup recovery. Reads in
+          // this process use its retained backing path if restore failed.
+        }
+      }
       await _background(_removeKnownFilesJob, (base, stage, prepared));
       rethrow;
+    } finally {
+      if (identical(_publication, publication)) _publication = null;
+      publication.complete();
     }
   });
 
-  Future<String> chapter(String bookId, String chapterId) async {
+  Future<String> chapter(String bookId, String chapterId) async =>
+      (await chapterData(bookId, chapterId)).content;
+
+  Future<EpubPublicationDocument> publication(
+    String bookId,
+    String chapterId,
+  ) async {
+    final record = _record(bookId), revision = revisionFor(bookId);
+    final index = record.book.chapters.indexWhere(
+      (c) =>
+          epubChapterId(
+            record.book.digest,
+            c.stableIndex ?? record.book.chapters.indexOf(c),
+          ) ==
+          chapterId,
+    );
+    if (index < 0 || record.publication == null) {
+      throw const EpubImportException('请重新导入原 EPUB 以启用完整 CSS');
+    }
+    final result = await _documentCache.getOrLoad(
+      '$bookId:$revision:$chapterId',
+      () async {
+        final entry = record.publication!;
+        final bytes = await _publicationCache.getOrLoad(
+          '$bookId:$revision',
+          () async {
+            final bytes = await _readOwned(record, entry.file, entry.length);
+            await _background(_verifyAssetJob, (
+              bytes,
+              entry.length,
+              entry.digest,
+            ));
+            _assertCurrent(record, revision);
+            return bytes;
+          },
+        );
+        final chapter = record.book.chapters[index];
+        final document = await _background(_publicationJob, (
+          bytes,
+          chapter.href,
+          chapter.fixedLayout,
+          index + 1 < record.book.chapters.length
+              ? record.book.chapters[index + 1].href
+              : '',
+        ));
+        _assertCurrent(record, revision);
+        return document;
+      },
+    );
+    _assertCurrent(record, revision);
+    return result;
+  }
+
+  Future<EpubChapterData> chapterData(String bookId, String chapterId) async {
     final record = _record(bookId);
     final prefix = 'epub:${record.book.digest}:c';
     if (!chapterId.startsWith(prefix)) {
@@ -189,13 +319,14 @@ class LocalEpubLibrary extends ChangeNotifier {
     if (!RegExp(r'^(?:0|[1-9][0-9]{0,5})$').hasMatch(suffix)) {
       throw const EpubImportException('本地章节编号无效');
     }
-    final index = int.parse(suffix);
-    if (index >= record.chapters.length) {
+    final stableIndex = int.parse(suffix);
+    final index = record.positionFor(stableIndex);
+    if (index == null) {
       throw const EpubImportException('本地章节不存在');
     }
     final revision = revisionFor(bookId);
     final result = await _chapterCache.getOrLoad(
-      '$bookId:$revision:$index',
+      '$bookId:$revision:$stableIndex',
       () async {
         final entry = record.chapters[index];
         final bytes = await _readOwned(record, entry.file, entry.length);
@@ -203,13 +334,18 @@ class LocalEpubLibrary extends ChangeNotifier {
           bytes,
           entry.length,
           entry.digest,
+          record.book.formatVersion,
+          record.book.chapters[index].title,
+          record.book.chapters[index].href,
+          record.book.digest,
+          record.book.assetNames,
         ));
         _assertCurrent(record, revision);
         return content;
       },
     );
     _assertCurrent(record, revision);
-    return result;
+    return result.data;
   }
 
   Future<Uint8List> readAsset(String url) async {
@@ -235,7 +371,7 @@ class LocalEpubLibrary extends ChangeNotifier {
     final record = _records[bookId];
     if (record == null) return;
     final base = _requireBase();
-    var directory = _join(base, record.book.digest);
+    var directory = record.directoryOverride ?? _join(base, record.book.digest);
     final type = await FileSystemEntity.type(directory, followLinks: false);
     if (type == FileSystemEntityType.directory) {
       _checkOwnedDirectory(base, directory);
@@ -256,6 +392,8 @@ class LocalEpubLibrary extends ChangeNotifier {
     _revisions[bookId] = revisionFor(bookId) + 1;
     _chapterCache.clear();
     _assetCache.clear();
+    _publicationCache.clear();
+    _documentCache.clear();
     notifyListeners();
     if (type != FileSystemEntityType.directory) return;
 
@@ -285,20 +423,32 @@ class LocalEpubLibrary extends ChangeNotifier {
     int expectedLength,
   ) async {
     final base = _requireBase();
-    final directory = _join(base, record.book.digest);
+    await _awaitPublication(record);
+    final directory =
+        record.directoryOverride ?? _join(base, record.book.digest);
     try {
       _checkOwnedDirectory(base, directory);
       final file = _checkedFile(directory, name);
       if (await file.length() != expectedLength) {
         throw const EpubImportException('本地书籍文件损坏，请移除后重新导入');
       }
+      await _awaitPublication(record);
       final bytes = await _readFileBytes(file);
+      await _awaitPublication(record);
       if (bytes.length != expectedLength) {
         throw const EpubImportException('本地书籍文件损坏，请移除后重新导入');
       }
       return bytes;
     } on FileSystemException {
       throw const EpubImportException('本地书籍文件缺失，请移除后重新导入');
+    }
+  }
+
+  Future<void> _awaitPublication(_StoredBook record) async {
+    final publication = _publication;
+    if (publication != null) await publication.future;
+    if (!identical(_records[record.book.id], record)) {
+      throw const EpubImportException('这本本地书籍已更新，请重新打开');
     }
   }
 
@@ -345,13 +495,80 @@ class LocalEpubLibrary extends ChangeNotifier {
 }
 
 Future<Uint8List> _readBytes(File file) => file.readAsBytes();
+Future<void> _rename(Directory from, String to) async {
+  await from.rename(to);
+}
+
 String _hashInput(Uint8List bytes) => sha256.convert(bytes).toString();
 
 // Only top-level callbacks and explicit data cross isolate boundaries. A closure
 // created in an async library method can implicitly capture this and its queue.
-String _decodeChapterJob((Uint8List, int, String) data) {
+_LoadedChapter _decodeChapterJob(
+  (Uint8List, int, String, int, String, String, String, List<String>) data,
+) {
   _verifyBytes(data.$1, data.$2, data.$3);
-  return utf8.decode(data.$1);
+  try {
+    final text = utf8.decode(data.$1);
+    if (data.$4 == 1) {
+      return _LoadedChapter(
+        EpubChapterData(title: data.$5, href: data.$6, content: text),
+        data.$1.length,
+      );
+    }
+    final payload = jsonDecode(text);
+    if (payload is! Map ||
+        payload['schema'] != 1 ||
+        payload['content'] is! String) {
+      throw const FormatException('invalid chapter payload');
+    }
+    final content = payload['content'] as String;
+    if (utf8.encode(content).length > _maxChapterBytes) {
+      throw const FormatException('oversized plain chapter');
+    }
+    final document =
+        payload['document'] == null
+            ? null
+            : ReaderDocument.fromJson(payload['document']);
+    if (document != null) {
+      if (document.content != content) {
+        throw const FormatException('plain and styled text differ');
+      }
+      var runs = 0;
+      final ownedAssets = data.$8.toSet();
+      for (final block in document.blocks) {
+        runs += block.runs.length;
+        if (runs > 200000) throw const FormatException('too many reader runs');
+        for (final image in [block.imageUrl, block.artworkUrl]) {
+          if (image != null) {
+            final prefix = 'epub-asset:${data.$7}/';
+            if (!image.startsWith(prefix) ||
+                !ownedAssets.contains(image.substring(prefix.length))) {
+              throw const FormatException('nonowned reader image');
+            }
+          }
+        }
+      }
+    }
+    return _LoadedChapter(
+      EpubChapterData(
+        title: data.$5,
+        href: data.$6,
+        content: content,
+        document: document,
+      ),
+      data.$1.length,
+    );
+  } on EpubImportException {
+    rethrow;
+  } catch (_) {
+    throw const EpubImportException('本地章节排版数据损坏，请移除后重新导入');
+  }
+}
+
+class _LoadedChapter {
+  const _LoadedChapter(this.data, this.encodedLength);
+  final EpubChapterData data;
+  final int encodedLength;
 }
 
 bool _verifyAssetJob((Uint8List, int, String) data) {
@@ -360,15 +577,46 @@ bool _verifyAssetJob((Uint8List, int, String) data) {
 }
 
 _StoredBook _prepareBookJob(
-  (String, String, Uint8List, String, String, int, EpubBookParser) data,
-) =>
-    _prepareBook(data.$1, data.$2, data.$3, data.$4, data.$5, data.$6, data.$7);
+  (
+    String,
+    String,
+    ParsedEpubBook,
+    String,
+    String,
+    int,
+    LocalEpubBook?,
+    Uint8List,
+  )
+  data,
+) => _prepareBook(
+  data.$1,
+  data.$2,
+  data.$3,
+  data.$4,
+  data.$5,
+  data.$6,
+  data.$7,
+  data.$8,
+);
+
+EpubPublicationDocument _publicationJob(
+  (Uint8List, String, bool, String) data,
+) => readEpubPublication(
+  data.$1,
+  data.$2,
+  fixedLayout: data.$3,
+  endHref: data.$4,
+);
+
+ParsedEpubBook _parseBookJob((Uint8List, String, EpubBookParser) data) =>
+    data.$3(data.$1, fallbackTitle: data.$2);
 
 bool _removeKnownFilesJob((String, String, _StoredBook) data) =>
     _removeKnownFiles(data.$1, data.$2, data.$3);
 
 String _join(String base, String name) => '$base${Platform.pathSeparator}$name';
-String _chapterFile(int index) => 'chapter_$index.txt';
+String _chapterFile(int index, [int formatVersion = 2]) =>
+    'chapter_$index.${formatVersion == 1 ? 'txt' : 'json'}';
 
 String _displayFileName(String value) {
   final name = value.replaceAll('\\', '/').split('/').last;
@@ -421,12 +669,20 @@ class _OwnedEntry {
 }
 
 class _StoredBook {
-  const _StoredBook(this.book, this.chapters, this.assets);
+  _StoredBook(this.book, this.chapters, this.assets, [this.publication]);
   final LocalEpubBook book;
   final List<_OwnedEntry> chapters;
   final Map<String, _OwnedEntry> assets;
+  final _OwnedEntry? publication;
+  String? directoryOverride;
+  late final Map<int, int> _positions = {
+    for (var i = 0; i < book.chapters.length; i++)
+      book.chapters[i].stableIndex ?? i: i,
+  };
+  int? positionFor(int stableIndex) => _positions[stableIndex];
   Map<String, Object?> toJson() => {
-    'schema': 1,
+    'schema': book.formatVersion,
+    'styleRevision': book.styleRevision,
     'digest': book.digest,
     'title': book.title,
     'author': book.author,
@@ -437,12 +693,17 @@ class _StoredBook {
     'importedAtMs': book.importedAtMs,
     'coverAssetName': book.coverAssetName,
     'warnings': book.warnings,
+    if (publication != null) 'publication': publication!.toJson(),
     'chapters': [
       for (var i = 0; i < chapters.length; i++)
         {
           ...chapters[i].toJson(),
           'title': book.chapters[i].title,
           'href': book.chapters[i].href,
+          if (book.formatVersion >= 3)
+            'fixedLayout': book.chapters[i].fixedLayout,
+          if (book.formatVersion >= 2)
+            'stableIndex': book.chapters[i].stableIndex ?? i,
         },
     ],
     'assets': [for (final entry in assets.values) entry.toJson()],
@@ -455,9 +716,115 @@ class _LibrarySnapshot {
   final List<String> warnings;
 }
 
+Future<File> _writeUpgradeJournal(
+  String base,
+  String digest,
+  String backup,
+  String stage,
+) async {
+  final file = File(_join(base, '.upgrade_$digest.json'));
+  final type = await FileSystemEntity.type(file.path, followLinks: false);
+  if (Directory(base).resolveSymbolicLinksSync() != base ||
+      (type != FileSystemEntityType.notFound &&
+          type != FileSystemEntityType.file)) {
+    throw const EpubImportException('本地书籍升级记录不可用，原书已保留');
+  }
+  await file.writeAsString(
+    jsonEncode({
+      'schema': 1,
+      'digest': digest,
+      'backup':
+          Directory(
+            backup,
+          ).uri.pathSegments.where((part) => part.isNotEmpty).last,
+      'stage':
+          Directory(
+            stage,
+          ).uri.pathSegments.where((part) => part.isNotEmpty).last,
+    }),
+    flush: true,
+  );
+  return file;
+}
+
+void _deleteJournal(File? file) {
+  if (file == null) return;
+  try {
+    if (FileSystemEntity.typeSync(file.path, followLinks: false) ==
+            FileSystemEntityType.file &&
+        file.resolveSymbolicLinksSync() == file.path) {
+      file.deleteSync();
+    }
+  } on FileSystemException {
+    // A leftover journal is harmless: startup validates the active manifest.
+  }
+}
+
+List<String> _recoverUpgrades(String base) {
+  final warnings = <String>[];
+  for (final child in Directory(base).listSync(followLinks: false)) {
+    final name = child.uri.pathSegments.where((part) => part.isNotEmpty).last;
+    final match = RegExp(r'^\.upgrade_([a-f0-9]{64})\.json$').firstMatch(name);
+    if (match == null || child is! File) continue;
+    try {
+      final file = _checkedFile(base, name);
+      if (file.lengthSync() > 2048) {
+        throw const FormatException('large upgrade journal');
+      }
+      final value = jsonDecode(file.readAsStringSync());
+      final digest = match[1]!;
+      if (value is! Map || value['schema'] != 1 || value['digest'] != digest) {
+        throw const FormatException('invalid upgrade journal');
+      }
+      final backupName = value['backup'];
+      final stageName = value['stage'];
+      if (backupName is! String ||
+          stageName is! String ||
+          !RegExp(
+            '^\\.orphan_${digest}_[0-9]+_[0-9]+\$',
+          ).hasMatch(backupName) ||
+          !RegExp('^\\.import_${digest}_[0-9]+_[0-9]+\$').hasMatch(stageName)) {
+        throw const FormatException('invalid recovery paths');
+      }
+      final target = _join(base, digest);
+      final targetType = FileSystemEntity.typeSync(target, followLinks: false);
+      if (targetType == FileSystemEntityType.notFound) {
+        final backup = _join(base, backupName);
+        _readValidatedBookDirectory(base, backup, digest);
+        Directory(backup).renameSync(target);
+      }
+      _readValidatedBookDirectory(base, target, digest);
+      _deleteJournal(file);
+    } catch (_) {
+      warnings.add('一本本地书籍的升级未完成，原文件已保留，请重试导入');
+    }
+  }
+  return warnings;
+}
+
+_StoredBook _readValidatedBookDirectory(
+  String base,
+  String directory,
+  String digest,
+) {
+  _checkOwnedDirectory(base, directory);
+  if (FileSystemEntity.typeSync(
+        _join(directory, _removedName),
+        followLinks: false,
+      ) !=
+      FileSystemEntityType.notFound) {
+    throw const FormatException('book removed');
+  }
+  final manifest = _checkedFile(directory, _manifestName);
+  if (manifest.lengthSync() > _maxManifestBytes) {
+    throw const FormatException('manifest too large');
+  }
+  return _readManifest(jsonDecode(manifest.readAsStringSync()), digest);
+}
+
 _LibrarySnapshot _loadSnapshot(String base) {
   final books = <String, _StoredBook>{};
-  final warnings = <String>[];
+  final warnings = _recoverUpgrades(base);
   for (final child in Directory(base).listSync(followLinks: false)) {
     final digest = child.uri.pathSegments.where((part) => part.isNotEmpty).last;
     if (child is! Directory || !isEpubDigest(digest)) continue;
@@ -485,10 +852,11 @@ _LibrarySnapshot _loadSnapshot(String base) {
 
 _StoredBook _readManifest(Object? value, String expectedDigest) {
   if (value is! Map<String, dynamic> ||
-      value['schema'] != 1 ||
+      !const [1, 2, 3].contains(value['schema']) ||
       value['digest'] != expectedDigest) {
     throw const FormatException('invalid manifest');
   }
+  final formatVersion = value['schema'] as int;
   String text(String key, {int max = 4096}) {
     final item = value[key];
     if (item is! String || item.length > max) {
@@ -527,11 +895,15 @@ _StoredBook _readManifest(Object? value, String expectedDigest) {
   }
   final chapterEntries = <_OwnedEntry>[];
   final chapters = <LocalEpubChapter>[];
+  final stableIndices = <int>{};
   var totalText = 0;
   for (var i = 0; i < chapterList.length; i++) {
     final item = chapterList[i];
-    final entry = _readEntry(item, _maxChapterBytes);
-    if (entry.file != _chapterFile(i) ||
+    final entry = _readEntry(
+      item,
+      formatVersion == 1 ? _maxChapterBytes : _maxChapterJsonBytes,
+    );
+    if (entry.file != _chapterFile(i, formatVersion) ||
         item is! Map ||
         item['title'] is! String ||
         (item['title'] as String).length > 4096 ||
@@ -539,9 +911,26 @@ _StoredBook _readManifest(Object? value, String expectedDigest) {
         (item['href'] as String).length > 4096) {
       throw const FormatException('invalid chapter');
     }
+    final stableIndex = formatVersion == 1 ? i : item['stableIndex'];
+    if (stableIndex is! int ||
+        stableIndex < 0 ||
+        stableIndex > 999999 ||
+        !stableIndices.add(stableIndex)) {
+      throw const FormatException('invalid stable chapter id');
+    }
+    if (formatVersion >= 3 && item['fixedLayout'] is! bool) {
+      throw const FormatException('invalid chapter layout');
+    }
     totalText += entry.length;
     chapterEntries.add(entry);
-    chapters.add(LocalEpubChapter(title: item['title'], href: item['href']));
+    chapters.add(
+      LocalEpubChapter(
+        title: item['title'],
+        href: item['href'],
+        stableIndex: stableIndex,
+        fixedLayout: formatVersion >= 3 && item['fixedLayout'] == true,
+      ),
+    );
   }
   final assets = <String, _OwnedEntry>{};
   var totalAssets = 0;
@@ -555,10 +944,15 @@ _StoredBook _readManifest(Object? value, String expectedDigest) {
     totalAssets += entry.length;
     assets[entry.file] = entry;
   }
-  if (totalText > _maxTextBytes ||
+  if (totalText >
+          (formatVersion == 1 ? _maxTextBytes : _maxChapterStorageBytes) ||
       totalAssets > _maxTotalAssetBytes ||
       (cover != null && !assets.containsKey(cover))) {
     throw const FormatException('invalid manifest totals or cover');
+  }
+  final styleRevision = value['styleRevision'] ?? 1;
+  if (styleRevision is! int || styleRevision < 1 || styleRevision > 100000) {
+    throw const FormatException('invalid style revision');
   }
   final book = LocalEpubBook(
     digest: expectedDigest,
@@ -573,8 +967,24 @@ _StoredBook _readManifest(Object? value, String expectedDigest) {
     assetNames: List.unmodifiable(assets.keys),
     coverAssetName: cover as String?,
     warnings: strings('warnings'),
+    formatVersion: formatVersion,
+    styleRevision: styleRevision,
   );
-  return _StoredBook(book, List.unmodifiable(chapterEntries), assets);
+  final publication =
+      formatVersion < 3
+          ? null
+          : _readEntry(value['publication'], maxEpubInputBytes);
+  if (publication != null &&
+      (publication.file != 'publication.epub' ||
+          publication.digest != expectedDigest)) {
+    throw const FormatException('invalid publication');
+  }
+  return _StoredBook(
+    book,
+    List.unmodifiable(chapterEntries),
+    assets,
+    publication,
+  );
 }
 
 _OwnedEntry _readEntry(Object? value, int maxBytes) {
@@ -593,29 +1003,53 @@ _OwnedEntry _readEntry(Object? value, int maxBytes) {
 _StoredBook _prepareBook(
   String base,
   String stage,
-  Uint8List bytes,
+  ParsedEpubBook parsed,
   String digest,
   String fileName,
   int importedAtMs,
-  EpubBookParser parser,
+  LocalEpubBook? previous,
+  Uint8List publication,
 ) {
-  final parsed = parser(bytes, fallbackTitle: fileName);
   if (parsed.digest != digest) {
     throw const EpubImportException('EPUB 文件校验失败');
   }
   final chapterEntries = <_OwnedEntry>[];
   final assets = <String, _OwnedEntry>{};
   final chapterBytes = <Uint8List>[];
+  final stableIndices = _stableChapterIndices(parsed.chapters, previous);
+  var totalPlainBytes = 0;
   for (var i = 0; i < parsed.chapters.length; i++) {
-    final data = Uint8List.fromList(utf8.encode(parsed.chapters[i].content));
-    chapterBytes.add(data);
-    chapterEntries.add(
-      _OwnedEntry(
-        _chapterFile(i),
-        data.length,
-        sha256.convert(data).toString(),
+    final chapter = parsed.chapters[i];
+    final plainLength = utf8.encode(chapter.content).length;
+    totalPlainBytes += plainLength;
+    if (plainLength > _maxChapterBytes || totalPlainBytes > _maxTextBytes) {
+      throw const EpubImportException('EPUB 正文过大，暂不支持导入');
+    }
+    final data = Uint8List.fromList(
+      utf8.encode(
+        jsonEncode({
+          'schema': 1,
+          'content': chapter.content,
+          'document': chapter.document?.toJson(),
+        }),
       ),
     );
+    if (data.length > _maxChapterJsonBytes) {
+      throw const EpubImportException('EPUB 章节排版数据过大，暂不支持导入');
+    }
+    final checksum = sha256.convert(data).toString();
+    _decodeChapterJob((
+      data,
+      data.length,
+      checksum,
+      2,
+      chapter.title,
+      chapter.href,
+      digest,
+      parsed.assets.keys.toList(),
+    ));
+    chapterBytes.add(data);
+    chapterEntries.add(_OwnedEntry(_chapterFile(i), data.length, checksum));
   }
   for (final asset in parsed.assets.entries) {
     if (!_assetNamePattern.hasMatch(asset.key) ||
@@ -639,15 +1073,26 @@ _StoredBook _prepareBook(
       fileName: fileName,
       importedAtMs: importedAtMs,
       chapters: [
-        for (final chapter in parsed.chapters)
-          LocalEpubChapter(title: chapter.title, href: chapter.href),
+        for (var i = 0; i < parsed.chapters.length; i++)
+          LocalEpubChapter(
+            title: parsed.chapters[i].title,
+            href: parsed.chapters[i].href,
+            stableIndex: stableIndices[i],
+            fixedLayout: parsed.chapters[i].fixedLayout,
+          ),
       ],
       assetNames: assets.keys.toList(),
       coverAssetName: parsed.coverAssetName,
       warnings: parsed.warnings,
+      formatVersion: 3,
+      styleRevision:
+          parsed.artworkNeedsRetry
+              ? currentEpubStyleRevision - 1
+              : currentEpubStyleRevision,
     ),
     chapterEntries,
     assets,
+    _OwnedEntry('publication.epub', publication.length, digest),
   );
   // The same strict schema is used for imports and persisted metadata.
   final record = _readManifest(proposed.toJson(), digest);
@@ -663,6 +1108,9 @@ _StoredBook _prepareBook(
   }
   Directory(stage).createSync();
   try {
+    File(
+      _join(stage, 'publication.epub'),
+    ).writeAsBytesSync(publication, flush: true);
     for (var i = 0; i < chapterBytes.length; i++) {
       File(_join(stage, _chapterFile(i))).writeAsBytesSync(chapterBytes[i]);
     }
@@ -677,6 +1125,37 @@ _StoredBook _prepareBook(
   }
 }
 
+List<int> _stableChapterIndices(
+  List<EpubChapterData> chapters,
+  LocalEpubBook? previous,
+) {
+  if (previous == null) return List.generate(chapters.length, (index) => index);
+  final oldIds = <String, int>{};
+  for (var i = 0; i < previous.chapters.length; i++) {
+    final chapter = previous.chapters[i];
+    if (chapter.href.isEmpty || oldIds.containsKey(chapter.href)) {
+      throw const EpubImportException('原书章节地址存在歧义，无法安全升级；原书与阅读记录已保留');
+    }
+    oldIds[chapter.href] = chapter.stableIndex ?? i;
+  }
+  final newCounts = <String, int>{};
+  for (final chapter in chapters) {
+    newCounts.update(chapter.href, (count) => count + 1, ifAbsent: () => 1);
+  }
+  if (oldIds.keys.any((href) => newCounts[href] != 1)) {
+    throw const EpubImportException('新版解析的章节结构有变化，无法保留原阅读位置；升级已取消，原书与阅读记录已保留');
+  }
+  var next =
+      oldIds.values.fold(-1, (maximum, id) => id > maximum ? id : maximum) + 1;
+  final indices = <int>[];
+  for (final chapter in chapters) {
+    final index = oldIds[chapter.href] ?? next++;
+    if (index > 999999) throw const EpubImportException('章节数量过多，无法安全升级；原书已保留');
+    indices.add(index);
+  }
+  return indices;
+}
+
 /// Deliberately nonrecursive: unknown files and links are retained. A removed
 /// digest directory keeps its tombstone until an empty directory can be deleted.
 bool _removeKnownFiles(String base, String directory, _StoredBook record) {
@@ -685,6 +1164,7 @@ bool _removeKnownFiles(String base, String directory, _StoredBook record) {
     for (final name in [
       ...record.chapters.map((entry) => entry.file),
       ...record.assets.keys,
+      if (record.publication != null) record.publication!.file,
       _manifestName,
     ]) {
       final path = _join(directory, name);

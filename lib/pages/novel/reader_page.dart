@@ -13,8 +13,9 @@ import 'package:wild/services/reader_typography.dart';
 import 'package:wild/widgets/reader_system_ui_scope.dart';
 import 'package:wild/widgets/reader_paper_view.dart';
 import 'package:wild/cubits/screen_keep_on.dart';
-import 'package:wild/cubits/volume_control_cubit.dart';
 import 'package:wild/utils/controller_event.dart';
+import 'package:wild/widgets/reader_volume_turn_scope.dart';
+import 'package:wild/widgets/reader_volume_turn_setting.dart';
 import 'dart:io';
 
 import '../../src/rust/wenku8/models.dart';
@@ -40,6 +41,7 @@ class ReaderPage extends StatelessWidget {
   final List<Volume> volumes;
   final NovelInfo novelInfo;
   final int? initialPage;
+  final int? initialTextOffset;
 
   const ReaderPage({
     super.key,
@@ -49,6 +51,7 @@ class ReaderPage extends StatelessWidget {
     required this.volumes,
     required this.novelInfo,
     this.initialPage,
+    this.initialTextOffset,
   });
 
   @override
@@ -88,7 +91,12 @@ class ReaderPage extends StatelessWidget {
                   leftPaddingCubit: leftPaddingCubit,
                   rightPaddingCubit: rightPaddingCubit,
                   fontSettingsCubit: context.read<FontSettingsCubit>(),
-                )..loadChapter(initialPage: initialPage),
+                  readerTheme: () => context.read<ThemeCubit>().state,
+                  layoutReady: ReaderSystemUiScope.layoutReadyOf(context),
+                )..loadChapter(
+                  initialPage: initialPage,
+                  initialTextOffset: initialTextOffset,
+                ),
           ),
         ],
         child: BlocListener<FontSettingsCubit, FontSettingsState>(
@@ -143,7 +151,7 @@ class ReaderPage extends StatelessWidget {
                   title: novelInfo.title,
                   active: !state.showControls,
                   child: _ReaderView(
-                    key: ObjectKey(state.pages),
+                    key: ObjectKey(state.presentationKey ?? state.pages),
                     state: state,
                     title: state.title,
                   ),
@@ -177,6 +185,8 @@ class _ReaderViewState extends State<_ReaderView> {
   TextScaler? _lastTextScaler;
   bool? _lastBoldText;
   String? _lastHanVariant;
+  Color? _lastPaperColor, _lastTextColor;
+  double _boundaryOverscroll = 0;
   var preTime = 0;
 
   int get _viewIndex =>
@@ -193,6 +203,7 @@ class _ReaderViewState extends State<_ReaderView> {
   SourceId get _bookSource => sourceOf(context.read<ReaderCubit>().initialAid);
 
   bool get _curlEnabled =>
+      _bookSource != SourceId.localEpub &&
       context.read<ReaderCurlCubit>().state &&
       !MediaQuery.of(context).disableAnimations;
 
@@ -206,15 +217,6 @@ class _ReaderViewState extends State<_ReaderView> {
     super.initState();
     _pageController = ReaderPageController(initialPage: _viewIndex);
     setKeepScreenUpOnReading(true);
-
-    // 监听音量键事件
-    if (Platform.isAndroid || Platform.isIOS) {
-      final volumeControlCubit = context.read<VolumeControlCubit>();
-      if (volumeControlCubit.isEnabled) {
-        addVolumeListen();
-        readerControllerEvent.subscribe(_onController);
-      }
-    }
   }
 
   @override
@@ -222,12 +224,6 @@ class _ReaderViewState extends State<_ReaderView> {
     _pageController.dispose();
     setKeepScreenUpOnReading(false);
     setKeepScreenUpOnScroll(false);
-
-    // 取消音量键事件监听
-    if (Platform.isAndroid || Platform.isIOS) {
-      delVolumeListen();
-      readerControllerEvent.unsubscribe(_onController);
-    }
 
     super.dispose();
   }
@@ -273,6 +269,10 @@ class _ReaderViewState extends State<_ReaderView> {
   }
 
   void _handleBoundaryTurn(int direction) {
+    if (_bookSource == SourceId.localEpub) {
+      context.read<ReaderCubit>().turnBookBoundary(direction);
+      return;
+    }
     if (!settingsPreferencesOf(context, listen: false).boundaryChapters) return;
     if (direction < 0) {
       if (_viewIndex != 0) return;
@@ -308,6 +308,27 @@ class _ReaderViewState extends State<_ReaderView> {
         currentVolumeIndex < widget.state.volumes.length - 1) {
       context.read<ReaderCubit>().goToNextChapter();
     }
+  }
+
+  bool _onPageScroll(ScrollNotification notification) {
+    if (_bookSource != SourceId.localEpub || notification.depth != 0) {
+      return false;
+    }
+    if (notification is ScrollStartNotification) _boundaryOverscroll = 0;
+    if (notification is OverscrollNotification &&
+        notification.dragDetails != null) {
+      _boundaryOverscroll += notification.overscroll;
+    }
+    if (notification is ScrollEndNotification) {
+      final distance = _boundaryOverscroll;
+      _boundaryOverscroll = 0;
+      if (distance.abs() > 36) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _handleBoundaryTurn(distance.isNegative ? -1 : 1);
+        });
+      }
+    }
+    return false;
   }
 
   void _showChapterList() {
@@ -358,9 +379,13 @@ class _ReaderViewState extends State<_ReaderView> {
   }
 
   void _onController(ReaderControllerEventArgs args) {
-    ReadingSessionScope.recordActivity(context);
     if (!mounted || _isTurning) return;
+    ReadingSessionScope.recordActivity(context);
     if (args.key == "UP") {
+      if (_bookSource == SourceId.localEpub && _viewIndex == 0) {
+        context.read<ReaderCubit>().turnBookBoundary(-1);
+        return;
+      }
       // 音量上键 - 上一页
       if (_viewIndex > 0) {
         _turnPage(-1);
@@ -376,6 +401,10 @@ class _ReaderViewState extends State<_ReaderView> {
         }
       }
     } else if (args.key == "DOWN") {
+      if (_bookSource == SourceId.localEpub && _viewIndex == _viewCount - 1) {
+        context.read<ReaderCubit>().turnBookBoundary(1);
+        return;
+      }
       // 音量下键 - 下一页
       if (_viewIndex < _viewCount - 1) {
         _turnPage(1);
@@ -386,6 +415,7 @@ class _ReaderViewState extends State<_ReaderView> {
         }
         final currentVolumeIndex = _findCurrentVolumeIndex();
         final currentChapterIndex = _findCurrentChapterIndex();
+        if (currentVolumeIndex < 0) return;
         final volume = widget.state.volumes[currentVolumeIndex];
         if (currentChapterIndex < volume.chapters.length - 1 ||
             currentVolumeIndex < widget.state.volumes.length - 1) {
@@ -472,6 +502,15 @@ class _ReaderViewState extends State<_ReaderView> {
         isDarkMode
             ? themeCubit.state.darkTextColor
             : themeCubit.state.lightTextColor;
+    if (widget.state.pages.first.cssPage != null &&
+        _lastPaperColor != null &&
+        (_lastPaperColor != backgroundColor || _lastTextColor != textColor)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.read<ReaderCubit>().reloadCurrentPage();
+      });
+    }
+    _lastPaperColor = backgroundColor;
+    _lastTextColor = textColor;
 
     // Never squeeze pages laid out for the previous orientation into half a
     // leaf. Repagination creates a fresh view and cancels any active curl.
@@ -529,10 +568,13 @@ class _ReaderViewState extends State<_ReaderView> {
                     child: BlocBuilder<ReaderCurlCubit, bool>(
                       builder: (context, enabled) {
                         final curlEnabled =
-                            enabled && !mediaQuery.disableAnimations;
+                            _bookSource != SourceId.localEpub &&
+                            enabled &&
+                            !mediaQuery.disableAnimations;
                         _syncCurlMode(curlEnabled);
                         if (curlEnabled) {
                           final curl = PageCurlView(
+                            leafCount: widget.state.pages.length,
                             key: _curlKey,
                             pageCount: _viewCount,
                             index: _viewIndex,
@@ -557,13 +599,19 @@ class _ReaderViewState extends State<_ReaderView> {
                         }
                         return GestureDetector(
                           onTapUp: _handleTap,
-                          child: PageView.builder(
-                            controller: _pageController,
-                            itemCount: _viewCount,
-                            onPageChanged: _onViewChanged,
-                            itemBuilder:
-                                (context, index) =>
-                                    _buildReaderPage(context, index, textColor),
+                          child: NotificationListener<ScrollNotification>(
+                            onNotification: _onPageScroll,
+                            child: PageView.builder(
+                              controller: _pageController,
+                              itemCount: _viewCount,
+                              onPageChanged: _onViewChanged,
+                              itemBuilder:
+                                  (context, index) => _buildReaderPage(
+                                    context,
+                                    index,
+                                    textColor,
+                                  ),
+                            ),
                           ),
                         );
                       },
@@ -628,14 +676,17 @@ class _ReaderViewState extends State<_ReaderView> {
         );
       },
     );
-    return PopScope(
-      canPop: !preferences.preventBack || widget.state.showControls,
-      onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && !widget.state.showControls) {
-          context.read<ReaderCubit>().toggleControls();
-        }
-      },
-      child: viewer,
+    return ReaderVolumeTurnScope(
+      onTurn: _onController,
+      child: PopScope(
+        canPop: !preferences.preventBack || widget.state.showControls,
+        onPopInvokedWithResult: (didPop, result) {
+          if (!didPop && !widget.state.showControls) {
+            context.read<ReaderCubit>().toggleControls();
+          }
+        },
+        child: viewer,
+      ),
     );
   }
 
@@ -968,7 +1019,16 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                 ],
               ),
               const Divider(),
-              const ReaderCurlSetting(),
+              if (sourceOf(widget.readerCubit.initialAid) != SourceId.localEpub)
+                const ReaderCurlSetting()
+              else
+                const ListTile(
+                  leading: Icon(Icons.menu_book_outlined),
+                  title: Text('普通翻页'),
+                  subtitle: Text('本地 EPUB 保留原书排版，支持滑动、点击和音量键翻页'),
+                ),
+              const Divider(),
+              const ReaderVolumeTurnSetting(),
               const Divider(),
               // 字体大小设置
               BlocBuilder<FontSizeCubit, double>(

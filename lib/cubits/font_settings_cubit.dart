@@ -4,6 +4,8 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/services/imported_fonts.dart';
+import 'package:wild/services/epub/epub_browser_font.dart';
+import 'package:wild/services/read_result_cache.dart';
 import 'package:wild/src/rust/api/database.dart';
 import 'package:wild/theme/app_fonts.dart';
 
@@ -67,8 +69,26 @@ class FontSettingsCubit extends Cubit<FontSettingsState> {
   final Future<String> Function() _read;
   final Future<void> Function(String) _write;
   int _revision = 0;
+  final _readerBytes = ReadResultCache<String, Uint8List>(
+    maxEntries: 1,
+    maxWeight: 64 * 1024 * 1024,
+    ttl: const Duration(minutes: 10),
+    weightOf: (bytes) => bytes.length,
+  );
+
+  Future<Uint8List?> readerBytes() async {
+    final font = state.reader;
+    return font == null
+        ? null
+        : _readerBytes.getOrLoad(
+          font.digest,
+          () async =>
+              compute(epubBrowserFontBytes, await _store.bytesFor(font)),
+        );
+  }
 
   Future<void> initialize(String root) async {
+    _readerBytes.clear();
     _store.initialize(root);
     final revision = _revision;
     ImportedFont? app;
@@ -107,6 +127,7 @@ class FontSettingsCubit extends Cubit<FontSettingsState> {
   Future<bool> importFont(FontScope scope) async {
     if (state.busy != null) return false;
     _revision++;
+    if (scope == FontScope.reader) _readerBytes.clear();
     emit(state.withBusy(scope));
     try {
       final input = await _pick();
@@ -129,6 +150,7 @@ class FontSettingsCubit extends Cubit<FontSettingsState> {
   Future<bool> reset(FontScope scope) async {
     if (state.busy != null) return false;
     _revision++;
+    if (scope == FontScope.reader) _readerBytes.clear();
     emit(state.withBusy(scope));
     try {
       final next = state.withFont(scope, null);
@@ -140,5 +162,11 @@ class FontSettingsCubit extends Cubit<FontSettingsState> {
     } finally {
       if (!isClosed) emit(state.withBusy(null));
     }
+  }
+
+  @override
+  Future<void> close() {
+    _readerBytes.clear();
+    return super.close();
   }
 }

@@ -1,6 +1,9 @@
 import 'dart:typed_data';
 
+import '../../models/reader_document.dart';
+
 const maxEpubInputBytes = 128 * 1024 * 1024;
+const currentEpubStyleRevision = 8;
 
 class EpubImportException implements Exception {
   const EpubImportException(this.message);
@@ -28,10 +31,24 @@ class EpubChapterData {
     required this.title,
     required this.href,
     required this.content,
+    this.document,
+    this.artwork,
+    this.fixedLayout = false,
   });
   final String title;
   final String href;
   final String content;
+  final ReaderDocument? document;
+  final bool fixedLayout;
+
+  /// Import-only, sanitized and self-contained. Never persisted or loaded in
+  /// the reader; a supported platform converts it to an owned PNG first.
+  final EpubArtworkPage? artwork;
+}
+
+class EpubArtworkPage {
+  const EpubArtworkPage(this.html);
+  final String html;
 }
 
 class ParsedEpubBook {
@@ -46,6 +63,7 @@ class ParsedEpubBook {
     required this.assets,
     this.coverAssetName,
     this.warnings = const [],
+    this.artworkNeedsRetry = false,
   });
   final String digest, title, author, description, language;
   final List<String> subjects;
@@ -55,11 +73,19 @@ class ParsedEpubBook {
   final Map<String, Uint8List> assets;
   final String? coverAssetName;
   final List<String> warnings;
+  final bool artworkNeedsRetry;
 }
 
 class LocalEpubChapter {
-  const LocalEpubChapter({required this.title, required this.href});
+  const LocalEpubChapter({
+    required this.title,
+    required this.href,
+    this.stableIndex,
+    this.fixedLayout = false,
+  });
   final String title, href;
+  final int? stableIndex;
+  final bool fixedLayout;
 }
 
 class LocalEpubBook {
@@ -76,9 +102,16 @@ class LocalEpubBook {
     required this.assetNames,
     this.coverAssetName,
     this.warnings = const [],
+    this.formatVersion = 1,
+    this.styleRevision = 1,
   });
   final String digest, title, author, description, language, fileName;
   final int importedAtMs;
+  final int formatVersion;
+  final int styleRevision;
+  bool get needsStyleUpgrade =>
+      formatVersion < 3 || styleRevision < currentEpubStyleRevision;
+  bool get hasPublication => formatVersion >= 3;
   final List<String> subjects;
   final List<LocalEpubChapter> chapters;
   final List<String> assetNames;
@@ -87,11 +120,17 @@ class LocalEpubBook {
   String get id => 'epub:$digest';
   String get coverUrl =>
       coverAssetName == null ? '' : epubAssetUrl(digest, coverAssetName!);
-  String chapterId(int index) => epubChapterId(digest, index);
+  String chapterId(int index) =>
+      epubChapterId(digest, chapters[index].stableIndex ?? index);
 }
 
 class EpubImportResult {
-  const EpubImportResult(this.book, {required this.alreadyImported});
+  const EpubImportResult(
+    this.book, {
+    required this.alreadyImported,
+    this.upgraded = false,
+  });
   final LocalEpubBook book;
   final bool alreadyImported;
+  final bool upgraded;
 }

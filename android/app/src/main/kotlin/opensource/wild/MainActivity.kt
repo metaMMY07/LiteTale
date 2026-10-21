@@ -26,6 +26,8 @@ class MainActivity : FlutterFragmentActivity() {
 
     private val scope = CoroutineScope(EmptyCoroutineContext)
     private val uiThreadHandler = Handler(Looper.getMainLooper())
+    private var epubArtwork: EpubArtworkChannel? = null
+    private var epubPages: EpubPageChannel? = null
     
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -42,6 +44,8 @@ class MainActivity : FlutterFragmentActivity() {
         )
         LauncherIconChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         SettingsDocumentChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        epubArtwork = EpubArtworkChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        epubPages = EpubPageChannel(this, flutterEngine.dartExecutor.binaryMessenger)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "litetale/web_session")
             .setMethodCallHandler { call, result ->
@@ -80,6 +84,14 @@ class MainActivity : FlutterFragmentActivity() {
 
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, "volume_button")
             .setStreamHandler(volumeStreamHandler)
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        epubArtwork?.dispose()
+        epubArtwork = null
+        epubPages?.dispose()
+        epubPages = null
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 
     private fun MethodChannel.Result.withCoroutine(exec: () -> Any?) {
@@ -134,6 +146,7 @@ class MainActivity : FlutterFragmentActivity() {
 // volume_buttons
 
     private var volumeEvents: EventChannel.EventSink? = null
+    private val capturedVolumeKeys = mutableSetOf<Int>()
 
     private val volumeStreamHandler = object : EventChannel.StreamHandler {
 
@@ -146,22 +159,34 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        volumeEvents?.let {
-            if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                uiThreadHandler.post {
-                    it.success("DOWN")
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val keyCode = event.keyCode
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            when (event.action) {
+                KeyEvent.ACTION_DOWN -> {
+                    if (event.repeatCount == 0) {
+                        capturedVolumeKeys.remove(keyCode)
+                        volumeEvents?.let { sink ->
+                            capturedVolumeKeys.add(keyCode)
+                            sink.success(if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) "DOWN" else "UP")
+                            return true
+                        }
+                    } else if (keyCode in capturedVolumeKeys) {
+                        // One physical press turns one page. Android repeats a
+                        // held key; do not skip several pages while it is held.
+                        return true
+                    }
                 }
-                return true
-            }
-            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                uiThreadHandler.post {
-                    it.success("UP")
+                KeyEvent.ACTION_UP -> {
+                    // Pair the consumed down/up even if a modal or preference
+                    // change cancelled the stream while the key was held.
+                    if (capturedVolumeKeys.remove(keyCode)) return true
                 }
-                return true
             }
         }
-        return super.onKeyDown(keyCode, event)
+        // No active reader subscription: preserve the system volume behavior,
+        // including events dispatched to a focused native curl view.
+        return super.dispatchKeyEvent(event)
     }
 
 }

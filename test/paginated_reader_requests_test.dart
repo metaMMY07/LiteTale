@@ -10,6 +10,7 @@ import 'package:wild/pages/novel/bottom_bar_height_cubit.dart';
 import 'package:wild/pages/novel/left_padding_cubit.dart';
 import 'package:wild/pages/novel/right_padding_cubit.dart';
 import 'package:wild/services/reading_progress.dart';
+import 'package:wild/services/reader_position.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 
@@ -41,11 +42,14 @@ ReaderCubit reader(
   read,
   ReadingProgressQueue queue, {
   int Function(String)? session,
+  Future<ReaderPosition?> Function(String, String)? loadPosition,
+  String bookId = 'lns:1',
+  List<Volume> chapterVolumes = volumes,
 }) => ReaderCubit(
   novelInfo: info,
-  initialAid: 'lns:1',
+  initialAid: bookId,
   initialCid: 'a',
-  initialVolumes: volumes,
+  initialVolumes: chapterVolumes,
   fontSizeCubit: FontSizeCubit(),
   paragraphSpacingCubit: ParagraphSpacingCubit(),
   lineHeightCubit: LineHeightCubit(),
@@ -57,6 +61,7 @@ ReaderCubit reader(
   read: read,
   progress: queue,
   sessionGeneration: session ?? (_) => 0,
+  loadPosition: loadPosition,
 );
 
 void main() {

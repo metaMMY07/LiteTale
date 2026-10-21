@@ -251,6 +251,8 @@ class _HistoryItem extends StatelessWidget {
                               'volumes': volumes,
                               'novelInfo': novelInfo,
                               'initialPage': history.progressPage,
+                              if (history.novelId.startsWith('epub:'))
+                                'initialTextOffset': history.progress,
                             },
                           );
                           // 返回后更新历史记录

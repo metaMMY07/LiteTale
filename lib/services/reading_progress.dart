@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:wild/services/epub_reader_position.dart';
+import 'package:wild/services/reader_position.dart';
 import 'package:wild/src/rust/api/wenku8.dart' as storage;
 
 /// An accepted position, independent of mutable reader state and pagination.
@@ -15,24 +17,45 @@ class ReadingProgress {
     required this.page,
     required this.cover,
     required this.author,
+    this.position,
   });
 
   final String bookId, title, volumeId, volumeTitle, chapterId, chapterTitle;
   final int characters, page;
   final String cover, author;
+  final ReaderPosition? position;
 
-  Future<void> persist() => storage.updateHistory(
-    novelId: bookId,
-    novelName: title,
-    volumeId: volumeId,
-    volumeName: volumeTitle,
-    chapterId: chapterId,
-    chapterTitle: chapterTitle,
-    progress: characters,
-    progressPage: page,
-    cover: cover,
-    author: author,
-  );
+  Future<void> persist({
+    ProgressWriter? writeHistory,
+    EpubReaderPositionStore? positionStore,
+  }) async {
+    if (writeHistory == null) {
+      await storage.updateHistory(
+        novelId: bookId,
+        novelName: title,
+        volumeId: volumeId,
+        volumeName: volumeTitle,
+        chapterId: chapterId,
+        chapterTitle: chapterTitle,
+        progress: characters,
+        progressPage: page,
+        cover: cover,
+        author: author,
+      );
+    } else {
+      await writeHistory(this);
+    }
+    final anchor = position;
+    if (anchor != null && EpubReaderPositionStore.isLocalBook(bookId)) {
+      // Stay inside ReadingProgressQueue's existing write order. A separate
+      // unawaited property write could overwrite a newer chapter after exit.
+      await (positionStore ?? EpubReaderPositionStore.instance).write(
+        bookId,
+        chapterId,
+        anchor,
+      );
+    }
+  }
 }
 
 typedef ProgressWriter = Future<void> Function(ReadingProgress progress);

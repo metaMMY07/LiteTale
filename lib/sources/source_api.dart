@@ -18,6 +18,7 @@ import 'package:wild/services/epub/local_epub_library.dart';
 import 'package:wild/services/reading_progress.dart';
 import 'package:wild/services/wenku8_read_repository.dart';
 import 'package:wild/services/reader_pagination_cache.dart';
+import 'package:wild/services/epub_reader_position.dart';
 
 export 'package:wild/src/rust/api/wenku8.dart'
     hide
@@ -51,6 +52,7 @@ int _wenkuSessionGeneration = 0;
 
 void invalidateWenku8ReadingCache() {
   _wenkuSessionGeneration++;
+  _wenkuBrowser.invalidateBookshelfSnapshot();
   final source = bookSources[SourceId.wenku8];
   if (source is Wenku8Source) source._reads.clear();
   _detailCache.removeWhere((key, _) => sourceOf(key) == SourceId.wenku8);
@@ -568,7 +570,10 @@ Future<void> _serial(Future<void> Function() work) {
 
 Future<List<Bookcase>> bookcaseList() async =>
     activeSource.value == SourceId.wenku8
-        ? w8.bookcaseList()
+        ? _wenkuBrowser.nativeOrBrowser(
+          w8.bookcaseList,
+          _wenkuBrowser.bookcaseList,
+        )
         : [
           Bookcase(
             id: _caseId(activeSource.value),
@@ -583,7 +588,12 @@ Future<BookcaseDto> bookInCase({required String caseId}) async {
   if (source == null && caseId.startsWith('rule:')) {
     throw StateError('此书源已移除，请重新导入相同书源。');
   }
-  if (source == null) return w8.bookInCase(caseId: caseId);
+  if (source == null) {
+    return _wenkuBrowser.nativeOrBrowser(
+      () => w8.bookInCase(caseId: caseId),
+      () => _wenkuBrowser.bookInCase(caseId),
+    );
+  }
   final entries = await _jsonList(_shelfKeyFor(source));
   for (final book in entries) {
     _shelfCovers[book['id'] as String] = book['cover'] as String? ?? '';
@@ -669,10 +679,19 @@ Future<void> removeLocalEpub(String bookId) async {
   await ReadingProgressQueue.instance.discard(bookId);
   try {
     await w8.deleteHistoryByNovelId(novelId: bookId);
+    await EpubReaderPositionStore.instance.clear(bookId);
   } finally {
     _detailCache.remove(bookId);
     _chapterFonts.removeWhere((key, _) => key.startsWith('$bookId/'));
     _shelfCovers.remove(bookId);
     ReaderPaginationCache.instance.evictBook(bookId);
   }
+}
+
+void invalidateLocalEpubPresentation(String bookId) {
+  if (sourceOf(bookId) != SourceId.localEpub) return;
+  _detailCache.remove(bookId);
+  _chapterFonts.removeWhere((key, _) => key.startsWith('$bookId/'));
+  _shelfCovers.remove(bookId);
+  ReaderPaginationCache.instance.evictBook(bookId);
 }

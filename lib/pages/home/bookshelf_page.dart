@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' show coverForBook;
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/widgets/cf_action_loader.dart';
-import 'package:wild/widgets/cf_bookshelf_loader.dart';
 import 'package:wild/widgets/novel_card.dart';
 import 'package:wild/widgets/expressive_loading_indicator.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
@@ -21,9 +20,6 @@ class BookshelfPage extends StatefulWidget {
 }
 
 class _BookshelfPageState extends State<BookshelfPage> {
-  final _cfKey = GlobalKey<CfBookshelfLoaderState>();
-  bool _cfActive = false;
-
   Widget _localLibraryButton(BuildContext context) => TextButton.icon(
     icon: const Icon(Icons.folder_open_rounded),
     label: const Text('本地书籍'),
@@ -37,61 +33,14 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   @override
   Widget build(BuildContext context) {
-    final apiHost = context.read<ApiHostCubit>().state;
-    final effectiveHost = apiHost.isEmpty ? 'https://www.wenku8.net' : apiHost;
-
-    return BlocConsumer<BookshelfCubit, BookshelfState>(
-      listenWhen:
-          (prev, curr) =>
-              prev.status != curr.status &&
-              curr.status == BookshelfStatus.cloudflareChallenge,
-      listener: (context, state) {
-        // 觸發背景 WebView 開始載入書架
-        _cfKey.currentState?.reload();
-        setState(() => _cfActive = true);
-      },
-      builder: (context, state) {
-        return Stack(
-          children: [
-            _buildMainScaffold(context, state),
-
-            // WebView 永久在背景存活（1×1px），CF clearance 只需取得一次
-            Positioned(
-              left: -1100,
-              top: 0,
-              width: 1024,
-              height: 768,
-              child: CfBookshelfLoader(
-                key: _cfKey,
-                apiHost: effectiveHost,
-                onPartialData: (bookcases, contents) {
-                  context.read<BookshelfCubit>().loadFromWebViewData(
-                    bookcases,
-                    contents,
-                  );
-                },
-                onSuccess: (bookcases, contents) {
-                  context.read<BookshelfCubit>().loadFromWebViewData(
-                    bookcases,
-                    contents,
-                  );
-                  setState(() => _cfActive = false);
-                },
-                onError: (err) {
-                  context.read<BookshelfCubit>().setError(err);
-                  setState(() => _cfActive = false);
-                },
-              ),
-            ),
-          ],
-        );
-      },
+    return BlocBuilder<BookshelfCubit, BookshelfState>(
+      builder: _buildMainScaffold,
     );
   }
 
   Widget _buildMainScaffold(BuildContext context, BookshelfState state) {
     // 仍在 CF 驗證且還沒有任何書架資料時顯示純 loading
-    final isCfLoading = _cfActive;
+    final isCfLoading = state.isRefreshing;
     final hasData = state.bookcases.isNotEmpty;
 
     if (state.status == BookshelfStatus.loading || (isCfLoading && !hasData)) {
@@ -104,7 +53,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
       );
     }
 
-    if (state.status == BookshelfStatus.error && !isCfLoading) {
+    if (state.status == BookshelfStatus.error && !isCfLoading && !hasData) {
       return Scaffold(
         appBar: AppBar(
           title: const Text('我的书架'),
@@ -113,6 +62,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
         body: RefreshIndicator(
           onRefresh: () => context.read<BookshelfCubit>().loadBookcases(),
           child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.all(16),
             children: [
               Column(
@@ -227,25 +177,58 @@ class _BookshelfPageState extends State<BookshelfPage> {
           ),
         ),
       ),
-      body:
-          state.getCurrentBooks()?.isEmpty ?? true
-              ? const Center(child: Text('书架为空'))
-              : RefreshIndicator(
-                onRefresh: () => context.read<BookshelfCubit>().loadBookcases(),
-                child: GridView.builder(
-                  padding: const EdgeInsets.all(8),
-                  gridDelegate: const BookGridDelegate(
-                    childAspectRatio: 0.7,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
-                  ),
-                  itemCount: state.getCurrentBooks()?.length ?? 0,
-                  itemBuilder: (context, index) {
-                    final item = state.getCurrentBooks()![index];
-                    return _BookCard(item: item);
-                  },
+      body: Column(
+        children: [
+          if (state.errorMessage != null)
+            MaterialBanner(
+              content: Text(state.errorMessage!),
+              actions: [
+                TextButton(
+                  onPressed:
+                      state.isRefreshing
+                          ? null
+                          : () =>
+                              context.read<BookshelfCubit>().loadBookcases(),
+                  child: const Text('重试'),
                 ),
-              ),
+              ],
+            ),
+          Expanded(
+            child:
+                state.isRefreshing && state.getCurrentBooks() == null
+                    ? const CenteredLoadingIndicator()
+                    : RefreshIndicator(
+                      onRefresh:
+                          () => context.read<BookshelfCubit>().loadBookcases(),
+                      child:
+                          state.getCurrentBooks()?.isEmpty ?? true
+                              ? ListView(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                children: const [
+                                  Padding(
+                                    padding: EdgeInsets.all(32),
+                                    child: Center(child: Text('书架为空')),
+                                  ),
+                                ],
+                              )
+                              : GridView.builder(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                padding: const EdgeInsets.all(8),
+                                gridDelegate: const BookGridDelegate(
+                                  childAspectRatio: 0.7,
+                                  crossAxisSpacing: 8,
+                                  mainAxisSpacing: 8,
+                                ),
+                                itemCount: state.getCurrentBooks()?.length ?? 0,
+                                itemBuilder: (context, index) {
+                                  final item = state.getCurrentBooks()![index];
+                                  return _BookCard(item: item);
+                                },
+                              ),
+                    ),
+          ),
+        ],
+      ),
     );
   }
 

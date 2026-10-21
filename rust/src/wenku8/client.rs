@@ -106,15 +106,15 @@ fn index_error_response_category(status: u16, content_type: &str, body: &[u8]) -
 /// Retry idempotent GET requests when Wenku8 closes a TLS connection early.
 /// The site intermittently drops keep-alive connections without a TLS
 /// `close_notify`; a fresh request normally succeeds immediately.
-async fn send_idempotent_get(request: RequestBuilder) -> reqwest::Result<Response> {
+async fn send_idempotent_get(request: RequestBuilder) -> Result<Response> {
     send_idempotent_get_with_policy(request, RequestPolicy::READ).await
 }
 
 async fn send_idempotent_get_with_policy(
     request: RequestBuilder,
     policy: RequestPolicy,
-) -> reqwest::Result<Response> {
-    request_policy::send_idempotent_get(request, policy).await
+) -> Result<Response> {
+    super::request_gate::send(request, policy).await
 }
 
 async fn send_download_get(request: RequestBuilder) -> reqwest::Result<Response> {
@@ -1155,7 +1155,7 @@ impl Wenku8Client {
         );
         let ua = self.load_user_agent().await;
         let headers = Self::default_headers_sync(&ua, &self.load_api_host().await);
-        let response = request_policy::send_idempotent_get(
+        let response = send_idempotent_get_with_policy(
             self.client.get(&url).headers(headers),
             policy,
         )
@@ -1541,8 +1541,8 @@ impl Wenku8Client {
     }
 
     async fn bookcase_list_inner(&self) -> Result<Vec<Bookcase>> {
-        // 先訪問首頁，確保 session cookie 已建立（避免 CF 403）
-        let _ = self.init_session().await;
+        // The established cookie jar already accompanies this read. Visiting
+        // home and login on every refresh triples traffic and can trigger 429.
         let api_host = self.load_api_host().await;
         // bookcase.php 不支持 charset；附加该参数会直接触发 Cloudflare 403。
         let url = format!("{}/modules/article/bookcase.php?classid=0", api_host);
@@ -1602,14 +1602,11 @@ impl Wenku8Client {
             .await
             .context("Failed to read bookcase response")?;
         if !status.is_success() {
-            let text = String::from_utf8_lossy(&body);
-            if text.contains("Attention Required")
-                || text.contains("cf_chl")
-                || text.contains("Just a moment")
-            {
+            let category = index_error_response_category(status.as_u16(), "text/html", &body);
+            if category == "Cloudflare challenge/block HTML" {
                 return Err(anyhow!("Cloudflare 封鎖了書架請求，請嘗試重新登入後再試"));
             }
-            return Err(anyhow!("Failed to get book in case: {}", text));
+            return Err(anyhow!("書架請求失敗 [HTTP {}] ({})", status, category));
         }
 
         let text = decode_gbk(bytes::Bytes::from(body.to_vec()))?;

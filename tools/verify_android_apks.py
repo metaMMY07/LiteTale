@@ -9,8 +9,9 @@ import subprocess
 import zipfile
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--version', default='0.1.25')
-parser.add_argument('--build-number', type=int, default=67)
+parser.add_argument('--version', default='1.0.0')
+parser.add_argument('--build-number', type=int, default=73)
+parser.add_argument('--report', type=Path, help='Optional release-specific JSON report path')
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
 sdk = Path(os.environ.get('ANDROID_HOME', 'D:/Codex-Migrated/Android/Sdk'))
@@ -61,7 +62,8 @@ for abi, code, machine in [('arm64-v8a', 2000, 183), ('x86_64', 4000, 62)]:
                     'certificate': next(line for line in signature.splitlines()
                                         if 'certificate SHA-256 digest' in line)})
 
-output = root / f'build/reader-curl/{args.version}-apk-verification.json'
+output = (root / args.report if args.report else
+          root / f'build/reader-curl/{args.version}-apk-verification.json')
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(json.dumps(reports, indent=2), encoding='utf-8')
 print(json.dumps(reports, indent=2))

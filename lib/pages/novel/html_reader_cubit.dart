@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:wild/utils/wenku8_network_error.dart';
+import 'package:wild/models/reader_document.dart';
 import 'package:wild/services/reader_chapter_prefetch.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
@@ -52,6 +54,19 @@ class ParsedImage extends ParsedContent {
 
   @override
   List<Object?> get props => [imageUrl];
+}
+
+class ParsedStyledText extends ParsedContent {
+  const ParsedStyledText(
+    this.block, {
+    this.previousStyle,
+    this.endOfTextRun = false,
+  });
+  final ReaderBlock block;
+  final ReaderBlockStyle? previousStyle;
+  final bool endOfTextRun;
+  @override
+  List<Object?> get props => [block, previousStyle, endOfTextRun];
 }
 
 // 加载完成状态
@@ -179,7 +194,37 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
     );
   }
 
-  List<ParsedContent> _parseContent(String content) {
+  List<ParsedContent> _parseContent(
+    String content, {
+    ReaderDocument? document,
+  }) {
+    if (document != null) {
+      final result = <ParsedContent>[];
+      ReaderBlockStyle? previous;
+      final visible =
+          document.blocks
+              .where((block) => block.imageUrl != null || block.text.isNotEmpty)
+              .toList();
+      for (var index = 0; index < visible.length; index++) {
+        final block = visible[index];
+        if (block.imageUrl != null || block.artworkUrl != null) {
+          result.add(ParsedImage(block.artworkUrl ?? block.imageUrl!));
+          previous = null;
+        } else if (block.text.isNotEmpty) {
+          result.add(
+            ParsedStyledText(
+              block,
+              previousStyle: previous,
+              endOfTextRun:
+                  index == visible.length - 1 ||
+                  visible[index + 1].imageUrl != null,
+            ),
+          );
+          previous = block.style;
+        }
+      }
+      return result;
+    }
     final parsedContent = <ParsedContent>[];
     final paragraphs = content.split('\n');
 
@@ -281,7 +326,10 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
       );
       if (!current()) return;
       final rawContent = chapter.content;
-      final parsedContent = _parseContent(rawContent);
+      final parsedContent = _parseContent(
+        rawContent,
+        document: chapter.document,
+      );
 
       // 更新阅读历史
       if (!current()) return;
@@ -313,7 +361,14 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
       );
     } catch (e) {
       if (!current()) return;
-      emit(HtmlReaderError(e.toString(), cause: e));
+      emit(
+        HtmlReaderError(
+          sourceOf(targetAid) == SourceId.wenku8
+              ? wenku8ReadErrorMessage(e)
+              : e.toString(),
+          cause: e,
+        ),
+      );
     }
   }
 

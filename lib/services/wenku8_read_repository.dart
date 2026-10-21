@@ -23,6 +23,7 @@ class Wenku8ReadRepository {
     required Future<SourceBookDetail> Function(String) detail,
     required Future<SourceChapter> Function(String, String) chapter,
     required Wenku8PrefetchLoad prefetch,
+    this.requestTimeout = const Duration(seconds: 40),
     DateTime Function()? now,
   }) : _host = host,
        _session = session,
@@ -51,19 +52,20 @@ class Wenku8ReadRepository {
   final Future<SourceBookDetail> Function(String) _detail;
   final Future<SourceChapter> Function(String, String) _chapter;
   final Wenku8PrefetchLoad _prefetch;
+  final Duration requestTimeout;
   final ReadResultCache<(String, int, String), SourceBookDetail> _details;
   final ReadResultCache<(String, int, String, String), SourceChapter> _chapters;
 
   Future<(String, int)> _scope() async {
     final session = _session();
-    final host = await _host();
+    final host = await _host().timeout(const Duration(seconds: 5));
     if (_session() != session) throw StateError('书源或账号已变化，请重试。');
     return (host, session);
   }
 
   Future<void> _check((String, int) scope) async {
     if (_session() != scope.$2 ||
-        await _host() != scope.$1 ||
+        await _host().timeout(const Duration(seconds: 5)) != scope.$1 ||
         _session() != scope.$2) {
       throw StateError('书源或账号已变化，请重试。');
     }
@@ -74,7 +76,7 @@ class Wenku8ReadRepository {
     final value = await _details.getOrLoad(
       (scope.$1, scope.$2, book),
       () async {
-        final value = await _detail(book);
+        final value = await _detail(book).timeout(requestTimeout);
         await _check(scope);
         return value;
       },
@@ -92,7 +94,7 @@ class Wenku8ReadRepository {
     final key = (scope.$1, scope.$2, book, chapter);
     Future<SourceChapter> load() async {
       if (isCurrent?.call() == false) throw const Wenku8PrefetchDeferred();
-      final value = await _chapter(book, chapter);
+      final value = await _chapter(book, chapter).timeout(requestTimeout);
       await _check(scope);
       return value;
     }

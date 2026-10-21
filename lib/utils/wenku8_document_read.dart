@@ -33,7 +33,16 @@ String wenku8DocumentReadScript({
       var response = await fetch(target, {method:'GET', mode:'same-origin',
         credentials:'same-origin', redirect:'error', signal:controller.signal});
       if (response.url !== target) { state.error='navigation'; return; }
-      if (!response.ok) {state.status=response.status; return;}
+      if (!response.ok) {
+        state.status=response.status;
+        if(response.status===429) {
+          var retry=response.headers.get('retry-after') || '';
+          var seconds=/^\\d+\$/.test(retry.trim()) ? Number(retry) :
+            Math.ceil((Date.parse(retry)-Date.now())/1000);
+          state.retryAfterSeconds=Number.isFinite(seconds) ? Math.max(1,Math.min(604800,seconds)) : 30;
+        }
+        return;
+      }
       if (!/text\\/html/i.test(response.headers.get('content-type') || '')) {
         state.error='document'; return;
       }
@@ -89,7 +98,8 @@ const wenku8DocumentReadStateScript = '''
   var state=window.__liteTaleDocumentRead;
   if (!state) return JSON.stringify({error:'navigation'});
   return JSON.stringify({pending:state.pending,error:state.error,
-    status:state.status,url:state.url,payload:state.payload});
+    status:state.status,retryAfterSeconds:state.retryAfterSeconds,
+    url:state.url,payload:state.payload});
 })()
 ''';
 

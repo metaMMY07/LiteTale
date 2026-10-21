@@ -48,6 +48,9 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
       if (file == null || !mounted) return;
       setState(() => _busy = true);
       final result = await _library.importFile(file);
+      if (result.upgraded) {
+        api.invalidateLocalEpubPresentation(result.book.id);
+      }
       if (!mounted) return;
       _search.clear();
       setState(() => _query = '');
@@ -56,6 +59,8 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
           content: Text(
             result.alreadyImported
                 ? '《${result.book.title}》已在本地书籍中'
+                : result.upgraded
+                ? '已更新《${result.book.title}》的原书样式，阅读记录已保留'
                 : '已导入《${result.book.title}》',
           ),
           action: SnackBarAction(
@@ -269,6 +274,11 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
                   '部分本地书籍暂不可用，可重新导入原文件。',
                   style: TextStyle(color: colors.onSurfaceVariant),
                 ),
+              ),
+            if (_library.books.any((book) => book.needsStyleUpgrade))
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Text('旧版导入的书籍可再次选择原 EPUB 来更新原书样式，阅读记录会保留。'),
               ),
             Expanded(
               child:

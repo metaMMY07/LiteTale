@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:wild/widgets/bili_browser_host.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:dynamic_color/dynamic_color.dart';
@@ -67,6 +69,11 @@ final darkTheme = ThemeData(
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks([
+      'foliate-js',
+    ], await rootBundle.loadString('lib/assets/epub_foliate_LICENSE.txt'));
+  });
   await AppInfo.init();
   await RustLib.init();
   runApp(const MyApp());
@@ -277,6 +284,8 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                                       (args['volumes'] as List).cast<Volume>(),
                                   novelInfo: args['novelInfo'] as NovelInfo,
                                   initialPage: args['initialPage'] as int?,
+                                  initialTextOffset:
+                                      args['initialTextOffset'] as int?,
                                 ),
                               );
                             }

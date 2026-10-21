@@ -5,6 +5,8 @@ import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/cached_image.dart';
 import 'package:wild/widgets/reader_raster_readiness.dart';
+import 'package:wild/widgets/reader_styled_paragraph.dart';
+import 'package:wild/services/epub/epub_css_reader.dart';
 
 /// A real spread contains two independently paginated leaves. Text continues
 /// from the left leaf to the right, rather than being laid out across the seam.
@@ -35,7 +37,12 @@ class ReaderPaperView extends StatelessWidget {
     key: ValueKey('reader-leaf-$index'),
     page: index < pages.length ? pages[index] : null,
     layout: layout,
-    chapterTitle: showTitle ? chapterTitle : '',
+    chapterTitle:
+        showTitle
+            ? (index < pages.length
+                ? pages[index].chapterTitle ?? chapterTitle
+                : '')
+            : '',
     source: source,
     textStyle: textStyle,
     paragraphSpacing: paragraphSpacing,
@@ -52,7 +59,14 @@ class ReaderPaperView extends StatelessWidget {
         Row(
           children: [
             Expanded(child: _leaf(first, showTitle: true)),
-            Expanded(child: _leaf(first + 1, showTitle: false)),
+            Expanded(
+              child: _leaf(
+                first + 1,
+                showTitle:
+                    first + 1 < pages.length &&
+                    pages[first + 1].chapterId != pages[first].chapterId,
+              ),
+            ),
           ],
         ),
         Center(
@@ -100,6 +114,55 @@ class ReaderPaperLeaf extends StatelessWidget {
   Widget build(BuildContext context) {
     // An odd chapter ends with a blank right-hand leaf, never duplicated text.
     if (page == null) return const SizedBox.expand();
+    if (page!.cssPage != null) {
+      return Semantics(
+        label:
+            page!.cssPage!.semanticText.isEmpty
+                ? '插图'
+                : page!.cssPage!.semanticText,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ReaderRasterImage(
+              image: EpubCssImageProvider(page!.cssPage!),
+              errorChild: Center(
+                child: Text('页面加载失败，请重新打开本章', style: textStyle),
+              ),
+            ),
+            if (chapterTitle.isNotEmpty &&
+                layout.headerHeight > 0 &&
+                !page!.cssPage!.fixedLayout)
+              Positioned(
+                left: layout.insets.left,
+                right: layout.insets.right,
+                top: layout.insets.top,
+                child: Text(
+                  chapterTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: textStyle.copyWith(
+                    fontFamily: titleFontFamily,
+                    fontSize: 12,
+                    color: textStyle.color?.withValues(alpha: .6),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+    if (page!.artworkText != null) {
+      return Semantics(
+        label: page!.artworkText,
+        child: ColoredBox(
+          color: Colors.white,
+          child: ReaderRasterImage(
+            image: CachedImageProvider(page!.content, source: source),
+            errorChild: Center(child: Text('特殊页面加载失败', style: textStyle)),
+          ),
+        ),
+      );
+    }
     final content = page!.content;
     final paragraphs = (content.endsWith('\n')
             ? content.substring(0, content.length - 1)
@@ -143,6 +206,18 @@ class ReaderPaperLeaf extends StatelessWidget {
                           style: textStyle.copyWith(fontSize: 14),
                         ),
                       ),
+                    )
+                    : page!.fragments != null
+                    ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (final fragment in page!.fragments!)
+                          ReaderStyledParagraph(
+                            fragment: fragment,
+                            style: textStyle,
+                            textScaler: layout.textScaler,
+                          ),
+                      ],
                     )
                     : Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,

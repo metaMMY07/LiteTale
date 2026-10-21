@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wild/models/reader_document.dart';
 import 'package:wild/services/epub/epub_models.dart';
 import 'package:wild/services/epub/local_epub_library.dart';
 
@@ -45,13 +46,18 @@ void main() {
     );
   }
 
-  LocalEpubLibrary library({Future<Uint8List> Function(File)? readFileBytes}) =>
-      LocalEpubLibrary(
-        parser: parse,
-        useIsolates: false,
-        readFileBytes: readFileBytes,
-        now: () => DateTime.utc(2026, 10, 18),
-      );
+  LocalEpubLibrary library({
+    Future<Uint8List> Function(File)? readFileBytes,
+    EpubBookParser? parser,
+    Future<void> Function(Directory from, String to)? renameDirectory,
+    DateTime Function()? now,
+  }) => LocalEpubLibrary(
+    parser: parser ?? parse,
+    useIsolates: false,
+    readFileBytes: readFileBytes,
+    renameDirectory: renameDirectory,
+    now: now ?? () => DateTime.utc(2026, 10, 18),
+  );
 
   XFile input([List<int> bytes = const [1, 2, 3], String name = '小说.epub']) =>
       XFile.fromData(Uint8List.fromList(bytes), path: name);
@@ -60,6 +66,65 @@ void main() {
     '${root.path}${Platform.pathSeparator}local_epub'
     '${Platform.pathSeparator}${book.digest}${Platform.pathSeparator}$name',
   );
+
+  Future<void> downgradeToLegacy(LocalEpubBook book) async {
+    final file = stored(book, 'book.json');
+    final manifest = jsonDecode(await file.readAsString()) as Map;
+    manifest['schema'] = 1;
+    final chapters = manifest['chapters'] as List;
+    for (var i = 0; i < chapters.length; i++) {
+      final entry = chapters[i] as Map;
+      final jsonFile = stored(book, entry['file'] as String);
+      final payload = jsonDecode(await jsonFile.readAsString()) as Map;
+      final plain = Uint8List.fromList(
+        utf8.encode(payload['content'] as String),
+      );
+      await stored(book, 'chapter_$i.txt').writeAsBytes(plain);
+      entry['file'] = 'chapter_$i.txt';
+      entry['length'] = plain.length;
+      entry['sha256'] = sha256.convert(plain).toString();
+      entry.remove('stableIndex');
+      await jsonFile.delete();
+    }
+    await file.writeAsString(jsonEncode(manifest));
+  }
+
+  EpubChapterData styledChapter(String title, String href, String text) {
+    final document = ReaderDocument([
+      ReaderBlock(
+        runs: [ReaderRun(text, style: const ReaderInlineStyle(bold: true))],
+        style: const ReaderBlockStyle(align: 'center'),
+      ),
+    ]);
+    return EpubChapterData(
+      title: title,
+      href: href,
+      content: document.content,
+      document: document,
+    );
+  }
+
+  ParsedEpubBook withChapters(
+    Uint8List bytes,
+    List<EpubChapterData> chapters,
+  ) => ParsedEpubBook(
+    digest: sha256.convert(bytes).toString(),
+    title: '结构化小说',
+    author: '作者',
+    description: '正文含段落样式',
+    language: 'zh',
+    subjects: const ['轻小说'],
+    chapters: chapters,
+    assets: const {},
+  );
+
+  Future<LocalEpubBook> legacyBook() async {
+    final original = library();
+    await original.initialize(root.path);
+    final book = (await original.importFile(input())).book;
+    await downgradeToLegacy(book);
+    return book;
+  }
 
   setUp(() async {
     root = await Directory.systemTemp.createTemp('litetale_epub_store_');
@@ -240,7 +305,7 @@ void main() {
       var chapterReads = 0;
       final store = library(
         readFileBytes: (file) async {
-          if (file.path.endsWith('chapter_0.txt')) chapterReads++;
+          if (file.path.endsWith('chapter_0.json')) chapterReads++;
           return file.readAsBytes();
         },
       );
@@ -254,7 +319,7 @@ void main() {
       expect(chapterReads, 1);
       await store.chapter(book.id, book.chapterId(0));
       expect(chapterReads, 1);
-      await stored(book, 'chapter_1.txt').writeAsString('坏');
+      await stored(book, 'chapter_1.json').writeAsString('坏');
       await expectLater(
         store.chapter(book.id, book.chapterId(1)),
         isImportError,
@@ -293,7 +358,7 @@ void main() {
         'file:///private/chapter.txt',
         'epub:${book.digest}:c-1',
         'epub:${book.digest}:c01',
-        book.chapterId(2),
+        epubChapterId(book.digest, 2),
         'epub:${'f' * 64}:c0',
       ]) {
         await expectLater(store.chapter(book.id, chapter), isImportError);
@@ -332,7 +397,7 @@ void main() {
       var delayFirst = true;
       final store = library(
         readFileBytes: (file) async {
-          if (file.path.endsWith('chapter_0.txt') && delayFirst) {
+          if (file.path.endsWith('chapter_0.json') && delayFirst) {
             delayFirst = false;
             started.complete();
             return pending.future;
@@ -408,6 +473,451 @@ void main() {
   );
 
   test(
+    'structured chapter data and plain compatibility survive restart',
+    () async {
+      final store = library(
+        parser:
+            (bytes, {fallbackTitle = ''}) => withChapters(bytes, [
+              styledChapter('居中标题', '正文/a.xhtml', '居中加粗正文'),
+            ]),
+      );
+      await store.initialize(root.path);
+      final imported = await store.importFile(input());
+      final book = imported.book;
+      expect(book.formatVersion, 3);
+      expect(imported.upgraded, isFalse);
+      final data = await store.chapterData(book.id, book.chapterId(0));
+      expect(data.content, '居中加粗正文');
+      expect(data.document!.blocks.single.style.align, 'center');
+      expect(data.document!.blocks.single.runs.single.style.bold, isTrue);
+      expect(await store.chapter(book.id, book.chapterId(0)), data.content);
+      expect(
+        identical(await store.chapterData(book.id, book.chapterId(0)), data),
+        isTrue,
+      );
+      final restarted = library();
+      await restarted.initialize(root.path);
+      final restored = await restarted.chapterData(book.id, book.chapterId(0));
+      expect(restored.document!.cacheIdentity, data.document!.cacheIdentity);
+      expect(restored.content, data.content);
+    },
+  );
+
+  test(
+    'old rich style revision upgrades with the same book and chapter IDs',
+    () async {
+      final store = library();
+      await store.initialize(root.path);
+      final original = (await store.importFile(input())).book;
+      final manifestFile = stored(original, 'book.json');
+      final manifest = jsonDecode(await manifestFile.readAsString()) as Map;
+      manifest.remove(
+        'styleRevision',
+      ); // 1.0.0 rich schema2, before the new boxes.
+      await manifestFile.writeAsString(jsonEncode(manifest));
+      final reopened = library();
+      await reopened.initialize(root.path);
+      expect(reopened.books.single.formatVersion, 3);
+      expect(reopened.books.single.needsStyleUpgrade, isTrue);
+      final result = await reopened.importFile(input());
+      expect(result.upgraded, isTrue);
+      expect(result.book.id, original.id);
+      expect(result.book.chapterId(0), original.chapterId(0));
+      expect(result.book.importedAtMs, original.importedAtMs);
+      expect(result.book.needsStyleUpgrade, isFalse);
+      expect(result.book.styleRevision, currentEpubStyleRevision);
+    },
+  );
+
+  test(
+    'schema1 books remain readable without importing the original again',
+    () async {
+      final original = await legacyBook();
+      final store = library();
+      await store.initialize(root.path);
+      final book = store.books.single;
+      expect(book.id, original.id);
+      expect(book.formatVersion, 1);
+      final chapter = await store.chapterData(book.id, book.chapterId(0));
+      expect(chapter.document, isNull);
+      expect(chapter.content, '第一章\n中文与 Emoji 🌱');
+      expect(chapter.title, '第一章');
+    },
+  );
+
+  test(
+    'legacy upgrade preserves IDs and date across reordered and added chapters',
+    () async {
+      final original = await legacyBook();
+      var conversions = 0;
+      final store = library(
+        now: () => DateTime.utc(2026, 10, 21),
+        parser: (bytes, {fallbackTitle = ''}) {
+          conversions++;
+          return withChapters(bytes, [
+            styledChapter('新增序章', '正文/序章.xhtml', '新序章'),
+            styledChapter('第二章', '正文/第二章.xhtml', '新版第二章'),
+            styledChapter('第一章', '正文/第一章.xhtml', '新版第一章'),
+          ]);
+        },
+      );
+      await store.initialize(root.path);
+      final previousRevision = store.revisionFor(original.id);
+      final result = await store.importFile(input());
+      final book = result.book;
+      expect(result.upgraded, isTrue);
+      expect(result.alreadyImported, isFalse);
+      expect(book.id, original.id);
+      expect(book.importedAtMs, original.importedAtMs);
+      expect(book.formatVersion, 3);
+      expect(book.chapterId(0), epubChapterId(book.digest, 2));
+      expect(book.chapterId(1), epubChapterId(book.digest, 1));
+      expect(book.chapterId(2), epubChapterId(book.digest, 0));
+      expect(
+        await store.chapter(book.id, epubChapterId(book.digest, 0)),
+        '新版第一章',
+      );
+      expect(
+        await store.chapter(book.id, epubChapterId(book.digest, 1)),
+        '新版第二章',
+      );
+      expect(store.revisionFor(book.id), greaterThan(previousRevision));
+      final base = Directory('${root.path}${Platform.pathSeparator}local_epub');
+      final backup = base.listSync().whereType<Directory>().singleWhere(
+        (directory) => directory.path.contains('.orphan_'),
+      );
+      expect(
+        await File(
+          '${backup.path}${Platform.pathSeparator}chapter_0.txt',
+        ).readAsString(),
+        '第一章\n中文与 Emoji 🌱',
+      );
+      final duplicate = await store.importFile(input());
+      expect(duplicate.alreadyImported, isTrue);
+      expect(duplicate.upgraded, isFalse);
+      expect(conversions, 1);
+      final restarted = library();
+      await restarted.initialize(root.path);
+      expect(
+        restarted.books.single.chapterId(2),
+        epubChapterId(book.digest, 0),
+      );
+      expect(
+        (await restarted.chapterData(
+          book.id,
+          epubChapterId(book.digest, 0),
+        )).document,
+        isNotNull,
+      );
+    },
+  );
+
+  test(
+    'missing legacy href cancels upgrade without replacing any old chapter',
+    () async {
+      final original = await legacyBook();
+      final store = library(
+        parser:
+            (bytes, {fallbackTitle = ''}) => withChapters(bytes, [
+              styledChapter('第一章', '正文/第一章.xhtml', '新正文'),
+            ]),
+      );
+      await store.initialize(root.path);
+      final revision = store.revisionFor(original.id);
+      await expectLater(
+        store.importFile(input()),
+        throwsA(
+          isA<EpubImportException>().having(
+            (error) => error.message,
+            'message',
+            contains('原书'),
+          ),
+        ),
+      );
+      expect(store.book(original.id)!.formatVersion, 1);
+      expect(store.revisionFor(original.id), revision);
+      expect(
+        await store.chapter(original.id, epubChapterId(original.digest, 1)),
+        '第二章\n下一页',
+      );
+      final base = Directory('${root.path}${Platform.pathSeparator}local_epub');
+      expect(base.listSync(), hasLength(1));
+    },
+  );
+
+  test('ambiguous legacy href mapping refuses upgrade', () async {
+    final original = await legacyBook();
+    final store = library(
+      parser:
+          (bytes, {fallbackTitle = ''}) => withChapters(bytes, [
+            styledChapter('重复第一章', '正文/第一章.xhtml', '新正文一'),
+            styledChapter('重复第一章', '正文/第一章.xhtml', '新正文二'),
+            styledChapter('第二章', '正文/第二章.xhtml', '新正文三'),
+          ]),
+    );
+    await store.initialize(root.path);
+    await expectLater(store.importFile(input()), isImportError);
+    expect(store.book(original.id)!.formatVersion, 1);
+    expect(
+      await store.chapter(original.id, epubChapterId(original.digest, 0)),
+      '第一章\n中文与 Emoji 🌱',
+    );
+  });
+
+  test(
+    'publication failure restores the exact old readable directory',
+    () async {
+      final original = await legacyBook();
+      final store = library(
+        renameDirectory: (from, to) async {
+          if (from.path.contains('.import_')) {
+            throw FileSystemException('simulated publish failure');
+          }
+          await from.rename(to);
+        },
+      );
+      await store.initialize(root.path);
+      final revision = store.revisionFor(original.id);
+      await expectLater(
+        store.importFile(input()),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(store.book(original.id)!.formatVersion, 1);
+      expect(store.revisionFor(original.id), revision);
+      expect(
+        await store.chapter(original.id, epubChapterId(original.digest, 0)),
+        '第一章\n中文与 Emoji 🌱',
+      );
+      expect(await stored(original, 'chapter_0.txt').exists(), isTrue);
+      final restarted = library();
+      await restarted.initialize(root.path);
+      expect(restarted.books.single.formatVersion, 1);
+      expect(restarted.loadWarnings, isEmpty);
+    },
+  );
+
+  test(
+    'interrupted rollback uses retained old copy and recovers at startup',
+    () async {
+      final original = await legacyBook();
+      final store = library(
+        renameDirectory: (from, to) async {
+          if (from.path.contains('.import_') ||
+              from.path.contains('.orphan_')) {
+            throw FileSystemException(
+              'simulated publication and restore failure',
+            );
+          }
+          await from.rename(to);
+        },
+      );
+      await store.initialize(root.path);
+      await expectLater(
+        store.importFile(input()),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(
+        await store.chapter(original.id, epubChapterId(original.digest, 1)),
+        '第二章\n下一页',
+      );
+      final restarted = library();
+      await restarted.initialize(root.path);
+      expect(restarted.books.single.formatVersion, 1);
+      expect(restarted.loadWarnings, isEmpty);
+      expect(await stored(original, 'chapter_0.txt').exists(), isTrue);
+      expect(
+        await restarted.chapter(original.id, epubChapterId(original.digest, 0)),
+        '第一章\n中文与 Emoji 🌱',
+      );
+    },
+  );
+
+  test(
+    'old in-flight read cannot populate cache after a successful upgrade',
+    () async {
+      final original = await legacyBook();
+      final pending = Completer<Uint8List>();
+      final started = Completer<void>();
+      final store = library(
+        readFileBytes: (file) async {
+          if (file.path.endsWith('chapter_0.txt')) {
+            started.complete();
+            return pending.future;
+          }
+          return file.readAsBytes();
+        },
+      );
+      await store.initialize(root.path);
+      final old = store.chapter(original.id, epubChapterId(original.digest, 0));
+      final checkOld = expectLater(old, isImportError);
+      await started.future;
+      final result = await store.importFile(input());
+      expect(result.upgraded, isTrue);
+      pending.complete(Uint8List.fromList(utf8.encode('第一章\n中文与 Emoji 🌱')));
+      await checkOld;
+      final fresh = await store.chapterData(
+        original.id,
+        epubChapterId(original.digest, 0),
+      );
+      expect(fresh.content, '第一章\n中文与 Emoji 🌱');
+      expect(result.book.formatVersion, 3);
+    },
+  );
+
+  test(
+    'invalid structured data cannot be read even with a matching file hash',
+    () async {
+      final store = library(
+        parser:
+            (bytes, {fallbackTitle = ''}) =>
+                withChapters(bytes, [styledChapter('第一章', 'one.xhtml', '正文')]),
+      );
+      await store.initialize(root.path);
+      final book = (await store.importFile(input())).book;
+      final file = stored(book, 'chapter_0.json');
+      final payload = jsonDecode(await file.readAsString()) as Map;
+      payload['content'] = '与结构化文本不同';
+      final badBytes = utf8.encode(jsonEncode(payload));
+      await file.writeAsBytes(badBytes);
+      final manifest =
+          jsonDecode(await stored(book, 'book.json').readAsString()) as Map;
+      manifest['chapters'][0]['length'] = badBytes.length;
+      manifest['chapters'][0]['sha256'] = sha256.convert(badBytes).toString();
+      await stored(book, 'book.json').writeAsString(jsonEncode(manifest));
+      final restarted = library();
+      await restarted.initialize(root.path);
+      await expectLater(
+        restarted.chapterData(book.id, book.chapterId(0)),
+        isImportError,
+      );
+    },
+  );
+
+  test(
+    'foreign structured image references cannot publish an imported book',
+    () async {
+      final document = ReaderDocument([
+        ReaderBlock(imageUrl: 'epub-asset:${'f' * 64}/${'a' * 64}.png'),
+      ]);
+      final store = library(
+        parser:
+            (bytes, {fallbackTitle = ''}) => withChapters(bytes, [
+              EpubChapterData(
+                title: '插图',
+                href: 'one.xhtml',
+                content: document.content,
+                document: document,
+              ),
+            ]),
+      );
+      await store.initialize(root.path);
+      await expectLater(store.importFile(input()), isImportError);
+      expect(store.books, isEmpty);
+    },
+  );
+
+  test(
+    'invalid structured style bounds are rejected despite valid file hash',
+    () async {
+      final store = library(
+        parser:
+            (bytes, {fallbackTitle = ''}) =>
+                withChapters(bytes, [styledChapter('第一章', 'one.xhtml', '正文')]),
+      );
+      await store.initialize(root.path);
+      final book = (await store.importFile(input())).book;
+      final file = stored(book, 'chapter_0.json');
+      final payload = jsonDecode(await file.readAsString()) as Map;
+      payload['document']['blocks'][0]['runs'][0]['style']['scale'] = 100000;
+      final badBytes = utf8.encode(jsonEncode(payload));
+      await file.writeAsBytes(badBytes);
+      final manifest =
+          jsonDecode(await stored(book, 'book.json').readAsString()) as Map;
+      manifest['chapters'][0]['length'] = badBytes.length;
+      manifest['chapters'][0]['sha256'] = sha256.convert(badBytes).toString();
+      await stored(book, 'book.json').writeAsString(jsonEncode(manifest));
+      final restarted = library();
+      await restarted.initialize(root.path);
+      await expectLater(
+        restarted.chapterData(book.id, book.chapterId(0)),
+        isImportError,
+      );
+    },
+  );
+
+  test(
+    'duplicated persisted stable IDs cannot redirect chapter history',
+    () async {
+      final store = library();
+      await store.initialize(root.path);
+      final book = (await store.importFile(input())).book;
+      final file = stored(book, 'book.json');
+      final metadata = jsonDecode(await file.readAsString()) as Map;
+      metadata['chapters'][1]['stableIndex'] =
+          metadata['chapters'][0]['stableIndex'];
+      await file.writeAsString(jsonEncode(metadata));
+      final restarted = library();
+      await restarted.initialize(root.path);
+      expect(restarted.books, isEmpty);
+      expect(restarted.loadWarnings, isNotEmpty);
+    },
+  );
+
+  test(
+    'real isolate upgrade preserves original chapter IDs after restart',
+    () async {
+      final bytes = buildEpubFixture();
+      final store = LocalEpubLibrary();
+      await store.initialize(root.path);
+      final original =
+          (await store.importFile(XFile.fromData(bytes, path: '原书.epub'))).book;
+      await downgradeToLegacy(original);
+      await store.initialize(root.path);
+      expect(store.books.single.formatVersion, 1);
+      final upgraded = await store.importFile(
+        XFile.fromData(bytes, path: '重新选原书.epub'),
+      );
+      expect(upgraded.upgraded, isTrue);
+      expect(upgraded.book.importedAtMs, original.importedAtMs);
+      expect(upgraded.book.chapterId(0), original.chapterId(0));
+      final reopened = LocalEpubLibrary();
+      await reopened.initialize(root.path);
+      expect(reopened.books.single.formatVersion, 3);
+      expect(
+        await reopened.chapter(original.id, original.chapterId(0)),
+        contains('这是自行编写的测试正文。'),
+      );
+    },
+  );
+
+  test(
+    'styled documents cross background isolates during import and upgrade',
+    () async {
+      final store = LocalEpubLibrary(parser: _parseStyledIsolateFixture);
+      await store.initialize(root.path);
+      final original = (await store.importFile(input())).book;
+      final first = await store.chapterData(original.id, original.chapterId(0));
+      expect(first.document!.blocks.single.runs.single.style.italic, isTrue);
+      await downgradeToLegacy(original);
+      await store.initialize(root.path);
+      final upgraded = await store.importFile(input());
+      expect(upgraded.upgraded, isTrue);
+      final restarted = LocalEpubLibrary(parser: _parseStyledIsolateFixture);
+      await restarted.initialize(root.path);
+      final chapter = await restarted.chapterData(
+        original.id,
+        original.chapterId(0),
+      );
+      expect(chapter.document!.blocks.single.style.align, 'right');
+      expect(chapter.document!.blocks.single.runs.single.style.italic, isTrue);
+      expect(
+        await restarted.chapter(original.id, original.chapterId(0)),
+        '后台结构化正文',
+      );
+    },
+  );
+
+  test(
     'initialization error is exposed and a later retry can recover',
     () async {
       final collision = File('${root.path}${Platform.pathSeparator}local_epub');
@@ -425,6 +935,37 @@ void main() {
 }
 
 final isImportError = throwsA(isA<EpubImportException>());
+
+ParsedEpubBook _parseStyledIsolateFixture(
+  Uint8List bytes, {
+  String fallbackTitle = '',
+}) {
+  final document = ReaderDocument([
+    ReaderBlock(
+      runs: const [
+        ReaderRun('后台结构化正文', style: ReaderInlineStyle(italic: true)),
+      ],
+      style: const ReaderBlockStyle(align: 'right'),
+    ),
+  ]);
+  return ParsedEpubBook(
+    digest: sha256.convert(bytes).toString(),
+    title: '后台测试',
+    author: '测试作者',
+    description: '',
+    language: 'zh',
+    subjects: const [],
+    chapters: [
+      EpubChapterData(
+        title: '测试章',
+        href: 'one.xhtml',
+        content: document.content,
+        document: document,
+      ),
+    ],
+    assets: const {},
+  );
+}
 
 class _DeferredXFile extends XFile {
   _DeferredXFile(this.bytes) : super.fromData(Uint8List(3), path: '稍后导入.epub');

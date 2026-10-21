@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:wild/utils/wenku8_network_error.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/sources/shelf_session.dart';
@@ -39,12 +41,14 @@ class NovelInfoCubit extends Cubit<NovelInfoState> {
   final Future<List<Volume>> Function({required String aid}) _loadVolumes;
   final Future<w8.ReadingHistory?> Function({required String novelId})
   _loadHistory;
+  final Duration loadTimeout;
 
   NovelInfoCubit(
     this.novelId, {
     Future<NovelInfo> Function({required String aid})? loadInfo,
     Future<List<Volume>> Function({required String aid})? loadVolumes,
     Future<w8.ReadingHistory?> Function({required String novelId})? loadHistory,
+    this.loadTimeout = const Duration(seconds: 45),
   }) : _loadInfo = loadInfo ?? w8.novelInfo,
        _loadVolumes = loadVolumes ?? w8.novelReader,
        _loadHistory = loadHistory ?? w8.novelHistoryById,
@@ -63,12 +67,29 @@ class NovelInfoCubit extends Cubit<NovelInfoState> {
             (activeSource.value == SourceId.bili &&
                 sourceRevision.value == revision));
     emit(NovelInfoLoading());
+    var accepting = true;
     try {
-      final novelInfo = await _loadInfo(aid: novelId);
+      // Local progress is optional. A busy database must not keep a complete
+      // network book behind the loading screen, nor fail its detail page.
+      Future<w8.ReadingHistory?> optionalHistory() async {
+        try {
+          return await _loadHistory(
+            novelId: novelId,
+          ).timeout(const Duration(seconds: 2));
+        } catch (_) {
+          return null;
+        }
+      }
+
+      final history =
+          sourceOf(novelId) == SourceId.wenku8 ? optionalHistory() : null;
+      final (novelInfo, volumes) = await (() async {
+        final info = await _loadInfo(aid: novelId);
+        if (!accepting || !current()) throw StateError('书源已变化或请求已过期');
+        return (info, await _loadVolumes(aid: novelId));
+      })().timeout(loadTimeout);
       if (!current()) return;
-      final volumes = await _loadVolumes(aid: novelId);
-      if (!current()) return;
-      final readingHistory = await _loadHistory(novelId: novelId);
+      final readingHistory = await (history ?? optionalHistory());
       if (!current()) return;
       _volumes = volumes;
       emit(
@@ -79,14 +100,19 @@ class NovelInfoCubit extends Cubit<NovelInfoState> {
         ),
       );
     } catch (e) {
+      accepting = false;
       if (!current()) return;
       emit(
         NovelInfoError(
-          e.toString(),
+          sourceOf(novelId) == SourceId.wenku8
+              ? wenku8ReadErrorMessage(e)
+              : e.toString(),
           loginRequired: e is ShelfSignInRequired,
           cause: e,
         ),
       );
+    } finally {
+      accepting = false;
     }
   }
 

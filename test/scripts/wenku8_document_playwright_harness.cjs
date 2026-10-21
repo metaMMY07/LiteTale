@@ -24,6 +24,15 @@ async function main() {
         return;
       }
       if (url.origin !== scripts.host) { foreign++; await route.abort(); return; }
+      if (url.pathname==='/modules/article/bookcase.php') {
+        gets++;
+        await route.fulfill({contentType:'text/html; charset=utf-8', body:
+          '<div>qaPrivateAccountShouldNotLeavePage</div><select name="classlist"><option value="0">全部</option><option value="1">分组</option></select>'+
+          '<table><tr><td class="odd"><input type="checkbox" value="20"></td><td><a href="/modules/article/readbookcase.php?aid=101&bid=20">fixture</a></td>'+
+          '<td><a href="/modules/article/search.php?author=x">作者</a></td><td><a href="/modules/article/reader.php?aid=101&cid=19">章节</a></td></tr></table>'+
+          '<img src="/unexpected-cover.png"><script>window.qaUnexpectedExecution=true</script>'});
+        return;
+      }
       if (url.pathname === '/') {
         const fetched = request.resourceType() === 'fetch';
         if (fetched) gets++;
@@ -36,6 +45,8 @@ async function main() {
       gets++; assert.equal(request.method(), 'GET');
       hasSession &&= (await request.allHeaders()).cookie?.includes('qaWenku8Session=local-fixture');
       if (mode === 'denied') { await route.fulfill({ status: 403, contentType: 'text/html', body: '<title>Just a moment</title>' }); return; }
+      if (mode === 'limited') { await route.fulfill({ status:429, headers:{'Retry-After':'60'}, contentType:'text/html', body:'<title>Too many requests</title>' }); return; }
+      if (mode === 'limited-date') { await route.fulfill({ status:429, headers:{'Retry-After':new Date(Date.now()+61000).toUTCString()}, contentType:'text/html', body:'' }); return; }
       if (mode === 'redirect') { await route.fulfill({ status: 302, headers: { location: 'https://foreign.invalid/login' } }); return; }
       if (mode === 'timeout') { await new Promise(resolve => setTimeout(resolve, 250)); await route.abort().catch(() => {}); return; }
       if (mode === 'large') { await route.fulfill({ contentType: 'text/html', body: 'x'.repeat(1024 * 1024 + 1) }); return; }
@@ -59,10 +70,18 @@ async function main() {
     assert.equal(await page.evaluate(() => window.qaUnexpectedExecution), undefined);
     assert.equal(await page.evaluate(() => document.querySelector('#content')), null);
     assert.equal(await page.evaluate(() => document.querySelector('input[name=qaToken]').value), 'preserved');
+    result = await read(scripts.bookshelfRead);
+    const shelf=JSON.parse(result.payload);
+    assert.equal(shelf.groups.length,2); assert.equal(shelf.items[0].aid,'101');
+    assert.equal(shelf.items[0].bid,'20'); assert.equal(shelf.items[0].cid,'19');
+    assert.equal(result.payload.includes('qaPrivateAccountShouldNotLeavePage'),false);
+    assert.equal(await page.evaluate(() => window.qaUnexpectedExecution),undefined);
     await page.evaluate(scripts.park); // The inert page can be reused repeatedly.
     mode = 'utf8'; result = await read();
     assert.equal(JSON.parse(result.payload).data.content, 'UTF8 正文');
     mode = 'denied'; result = await read(); assert.equal(result.status, 403);
+    mode = 'limited'; result = await read(); assert.equal(result.status,429); assert.equal(result.retryAfterSeconds,60);
+    mode = 'limited-date'; result = await read(); assert.equal(result.status,429); assert.ok(result.retryAfterSeconds>=59 && result.retryAfterSeconds<=61);
     mode = 'redirect'; result = await read(); assert.equal(result.error, 'navigation');
     mode = 'large'; result = await read(); assert.equal(result.error, 'size');
     mode = 'timeout'; result = await read(scripts.shortRead); assert.equal(result.error, 'timeout');
@@ -85,6 +104,10 @@ async function main() {
     assert.equal(early.domReady, false, 'Result readiness must not depend on unrelated tail scripts');
     releaseTail();
     await page.waitForLoadState('domcontentloaded');
+    await page.evaluate(() => {document.title='第429章';document.body.insertAdjacentHTML('afterbegin','<h1>第429章</h1>');});
+    assert.equal(JSON.parse(await page.evaluate(scripts.pageState)).rateLimited,false,'A chapter number is not a response status');
+    await page.evaluate(() => {document.title='429 Too Many Requests';});
+    assert.equal(JSON.parse(await page.evaluate(scripts.pageState)).rateLimited,true);
     process.stdout.write(JSON.stringify({ passed: true, reads: gets, assetRequests: assets, foreignRequests: foreign, gbk: true, utf8: true, sessionPreserved: hasSession }));
   } finally { await browser.close(); }
 }

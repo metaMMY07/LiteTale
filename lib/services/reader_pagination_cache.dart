@@ -2,11 +2,12 @@ import 'dart:collection';
 
 import 'package:flutter/widgets.dart';
 import 'package:wild/models/reader_page.dart';
+import 'package:wild/models/reader_document.dart';
 import 'package:wild/services/reader_paginator.dart';
 import 'package:wild/settings/settings_preferences.dart' show readerHanLocale;
 
 /// Increment when pagination behavior changes in a way that affects page cuts.
-const int readerPaginationAlgorithmVersion = 1;
+const int readerPaginationAlgorithmVersion = 2;
 
 /// Inputs needed to run the existing paginator. [hanLocale] is captured from
 /// the same preference read by reader typography immediately before compute.
@@ -27,6 +28,7 @@ class ReaderPaginationInput {
     required this.boldText,
     required this.hanLocale,
     required this.algorithmVersion,
+    this.document,
   });
 
   final String sourceId;
@@ -44,6 +46,7 @@ class ReaderPaginationInput {
   final bool boldText;
   final Locale? hanLocale;
   final int algorithmVersion;
+  final ReaderDocument? document;
 }
 
 typedef ReaderPaginationCompute =
@@ -104,6 +107,7 @@ class ReaderPaginationCache {
     TextScaler textScaler = TextScaler.noScaling,
     bool boldText = false,
     int algorithmVersion = readerPaginationAlgorithmVersion,
+    ReaderDocument? document,
   }) {
     // The paginator's TextStyle reads this same setting through
     // reader_typography.dart. Capture it synchronously before compute.
@@ -124,6 +128,7 @@ class ReaderPaginationCache {
       boldText: boldText,
       hanLocale: hanLocale,
       algorithmVersion: algorithmVersion,
+      documentIdentity: document?.cacheIdentity,
     );
 
     final hit = _entries.remove(key);
@@ -148,13 +153,17 @@ class ReaderPaginationCache {
       boldText: boldText,
       hanLocale: hanLocale,
       algorithmVersion: algorithmVersion,
+      document: document,
     );
     final pages = List<ReaderPage>.unmodifiable(_compute(input));
     final outputCodeUnits = pages.fold<int>(
       0,
       (total, page) => total + page.content.length,
     );
-    final entryCodeUnits = content.length + outputCodeUnits;
+    final entryCodeUnits =
+        content.length +
+        outputCodeUnits +
+        (document?.cacheIdentity.length ?? 0);
 
     // A large chapter is still paginated normally, but is not retained.
     if (entryCodeUnits > _maxRetainedCodeUnits) return pages;
@@ -193,6 +202,7 @@ class ReaderPaginationCache {
         fontFamily: input.fontFamily,
         textScaler: input.textScaler,
         boldText: input.boldText,
+        document: input.document,
       );
 }
 
@@ -220,6 +230,7 @@ class _ReaderPaginationKey {
     required this.boldText,
     required this.hanLocale,
     required this.algorithmVersion,
+    this.documentIdentity,
   });
 
   final String sourceId;
@@ -237,6 +248,7 @@ class _ReaderPaginationKey {
   final bool boldText;
   final Locale? hanLocale;
   final int algorithmVersion;
+  final String? documentIdentity;
 
   @override
   bool operator ==(Object other) =>
@@ -246,6 +258,7 @@ class _ReaderPaginationKey {
       chapterId == other.chapterId &&
       sessionGeneration == other.sessionGeneration &&
       content == other.content &&
+      documentIdentity == other.documentIdentity &&
       canvasWidth == other.canvasWidth &&
       canvasHeight == other.canvasHeight &&
       fontSize == other.fontSize &&
@@ -265,6 +278,7 @@ class _ReaderPaginationKey {
     chapterId,
     sessionGeneration,
     content,
+    documentIdentity,
     canvasWidth,
     canvasHeight,
     fontSize,

@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/services/wenku8_browser.dart';
+import 'package:wild/services/wenku8_rate_limit.dart';
 import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
 import 'package:wild/src/rust/wenku8/models.dart' as models;
 
@@ -43,12 +44,15 @@ class _Harness {
     bool supportDocuments = false,
     bool supportColdDocuments = false,
     Duration pageTimeout = const Duration(milliseconds: 500),
+    Duration operationTimeout = const Duration(seconds: 30),
   }) : properties = Map<String, String>.from(properties) {
     session = Wenku8BrowserSession(
       readHost: () async => host,
       readProperty: (key) async => this.properties[key] ?? '',
       writeProperty: (key, value) async => this.properties[key] = value,
       pageTimeout: pageTimeout,
+      operationTimeout: operationTimeout,
+      requestInterval: Duration.zero,
       pollInterval: const Duration(milliseconds: 1),
     );
     port = _FakeBrowserPort(
@@ -231,6 +235,125 @@ class _FakeBrowserPort implements Wenku8BrowserPort, Wenku8DocumentContextPort {
 }
 
 void main() {
+  test('shelf list and first group share one browser response', () async {
+    final h = _Harness(supportDocuments: true, supportColdDocuments: true);
+    const target = '$_host/modules/article/bookcase.php?classid=0';
+    h.port.readResults[target] = {
+      'url': target,
+      'caseId': '0',
+      'groups': [
+        {'id': '0', 'title': '全部'},
+        {'id': '1', 'title': '一'},
+      ],
+      'tip': '',
+      'items': [
+        {
+          'aid': '101',
+          'bid': '20',
+          'title': 'fixture',
+          'author': '',
+          'cid': '19',
+          'chapterName': '',
+        },
+      ],
+    };
+    expect((await h.session.bookcaseList()).length, 2);
+    expect((await h.session.bookInCase('0')).items.single.aid, '101');
+    expect(h.port.documentReads, [target]);
+    expect(h.port.targetLoads, isEmpty);
+    await h.session
+        .bookcaseList(); // An unconsumed response belongs to account A.
+    h.session.invalidateBookshelfSnapshot();
+    final changed = Map<String, Object?>.from(
+      h.port.readResults[target]! as Map,
+    );
+    changed['items'] = [
+      {
+        'aid': '102',
+        'bid': '21',
+        'title': 'account B fixture',
+        'author': '',
+        'cid': '20',
+        'chapterName': '',
+      },
+    ];
+    h.port.readResults[target] = changed;
+    expect((await h.session.bookInCase('0')).items.single.aid, '102');
+    expect(h.port.documentReads, [target, target, target]);
+    h.session.dispose();
+  });
+  test(
+    'native 429 preserves login and never invokes the browser fallback',
+    () async {
+      final h = _Harness(
+        properties: {'litetale.wenku8.browser_login_host': _host},
+      );
+      var calls = 0, browser = 0;
+      Future<String> read() => h.session.nativeOrBrowser(
+        () async {
+          calls++;
+          throw Exception('HTTP 429 retry_after_seconds=60 Cloudflare');
+        },
+        () async {
+          browser++;
+          return 'unexpected';
+        },
+      );
+      await expectLater(read(), throwsA(isA<Wenku8RateLimited>()));
+      await expectLater(read(), throwsA(isA<Wenku8RateLimited>()));
+      expect(calls, 1);
+      expect(browser, 0);
+      expect(await h.session.hasSavedLogin(), isTrue);
+      h.session.dispose();
+    },
+  );
+  test(
+    'inert document 429 stops before navigation and rejects queued/preload reads',
+    () async {
+      final h = _Harness(supportDocuments: true, supportColdDocuments: true);
+      h.port.documentState = {'status': 429, 'retryAfterSeconds': 60};
+      final target = Uri.parse('$_host/book/101.htm');
+      await expectLater(
+        h.session.read('detail', target, aid: '101'),
+        throwsA(isA<Wenku8RateLimited>()),
+      );
+      await expectLater(
+        h.session.read('detail', target, aid: '101'),
+        throwsA(isA<Wenku8RateLimited>()),
+      );
+      expect(h.port.documentReads, [target.toString()]);
+      expect(h.port.targetLoads, isEmpty);
+      expect(
+        await h.session.prefetchChapter(
+          Uri.parse('$_host/novel/0/101/19.htm'),
+          aid: '101',
+          isCurrent: () => true,
+        ),
+        isNull,
+      );
+      expect(h.port.documentReads.length, 1);
+      h.session.dispose();
+    },
+  );
+  test(
+    'an expired queued request never navigates after the blocked owner',
+    () async {
+      final h = _Harness(operationTimeout: const Duration(milliseconds: 50));
+      h.port.stallExtraction = true;
+      final first = expectLater(
+        h.session.read('detail', Uri.parse('$_host/book/101.htm'), aid: '101'),
+        throwsA(isA<Wenku8BrowserException>()),
+      );
+      final second = expectLater(
+        h.session.read('detail', Uri.parse('$_host/book/102.htm'), aid: '102'),
+        throwsA(isA<Wenku8BrowserException>()),
+      );
+      await Future.wait([first, second]);
+      await Future<void>.delayed(const Duration(milliseconds: 65));
+      expect(h.port.targetLoads, ['$_host/book/101.htm']);
+      h.session.dispose();
+    },
+  );
   group('Wenku8BrowserSession', () {
     test(
       'visible session adoption synchronously changes reading cache identity',

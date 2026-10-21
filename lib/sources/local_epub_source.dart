@@ -63,6 +63,8 @@ class LocalEpubSource implements BookSource {
   }
 
   @override
-  Future<SourceChapter> chapter(String bookId, String chapterId) async =>
-      SourceChapter(await library.chapter(bookId, chapterId));
+  Future<SourceChapter> chapter(String bookId, String chapterId) async {
+    final data = await library.chapterData(bookId, chapterId);
+    return SourceChapter(data.content, document: data.document);
+  }
 }

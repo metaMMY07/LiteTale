@@ -6,6 +6,7 @@ import 'package:wild/services/wenku8_browser.dart';
 import 'package:wild/utils/wenku8_document_read.dart';
 import 'package:wild/utils/wenku8_read_dom.dart';
 import 'package:wild/utils/wenku8_home_dom.dart';
+import 'package:wild/utils/wenku8_bookshelf_dom.dart';
 
 void main() {
   final module = Platform.environment['PLAYWRIGHT_MODULE_PATH'];
@@ -43,6 +44,12 @@ void main() {
           'state': wenku8DocumentReadStateScript,
           'emptyContext': wenku8EmptyReadContextHtml,
           'pageState': Wenku8BrowserSession.pageStateScript,
+          'bookshelfRead': wenku8DocumentReadScript(
+            host: host,
+            target: Uri.parse('$host/modules/article/bookcase.php?classid=0'),
+            extraction: wenku8BookshelfScript(host, '0'),
+            timeoutMs: 2000,
+          ),
           'homeHtml':
               File('test/fixtures/wenku8_home_modern.html').readAsStringSync(),
           'homeRead': wenku8DocumentReadScript(

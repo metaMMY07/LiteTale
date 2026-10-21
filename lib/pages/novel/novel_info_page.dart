@@ -284,6 +284,8 @@ class _NovelInfoContent extends StatelessWidget {
         'volumes': volumes,
         'novelInfo': novelInfo,
         'initialPage': initialPage,
+        if (novelId.startsWith('epub:') && currentState.readingHistory?.chapterId == chapterId)
+          'initialTextOffset': currentState.readingHistory!.progress,
       },
     );
     // 返回后更新历史记录

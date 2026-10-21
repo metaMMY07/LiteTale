@@ -28,6 +28,7 @@ class PageCurlView extends StatefulWidget {
     this.tapToTurn = true,
     this.onCenterTap,
     this.onBoundaryTurn,
+    this.leafCount,
   }) : assert(pageCount > 0);
 
   final int pageCount;
@@ -40,6 +41,9 @@ class PageCurlView extends StatefulWidget {
   final bool tapToTurn;
   final VoidCallback? onCenterTap;
   final ValueChanged<int>? onBoundaryTurn;
+
+  /// Physical leaves may append into a previously half-empty last spread.
+  final int? leafCount;
 
   @override
   State<PageCurlView> createState() => PageCurlViewState();
@@ -120,7 +124,24 @@ class PageCurlViewState extends State<PageCurlView>
         widget.isSpread != oldWidget.isSpread ||
         widget.paperDecoration != oldWidget.paperDecoration ||
         widget.paperColor != oldWidget.paperColor;
-    if (paperChanged || widget.pageCount != oldWidget.pageCount) {
+    // A local EPUB appends already paginated leaves to the same window. Keep
+    // current textures/native view alive while only increasing its page count.
+    // Reflow/recentring recreates this widget via the reader presentation key.
+    final resetPages = paperChanged || widget.pageCount < oldWidget.pageCount;
+    final oldLeaves = oldWidget.leafCount;
+    final filledHalfSpread =
+        !resetPages &&
+        widget.isSpread &&
+        oldLeaves != null &&
+        oldLeaves.isOdd &&
+        (widget.leafCount ?? oldLeaves) > oldLeaves;
+    if (filledHalfSpread) {
+      final index = oldLeaves ~/ 2;
+      _nativePages.remove(index);
+      _nativeRasterReadiness.remove(index);
+      _nativeRequestedPages.add(index);
+    }
+    if (resetPages) {
       _nativeGeneration++;
       _nativePages.clear();
       _nativeRasterReadiness.clear();
@@ -135,13 +156,14 @@ class PageCurlViewState extends State<PageCurlView>
       _nativeChannel = null;
     }
     if (paperChanged ||
+        filledHalfSpread ||
         widget.pageCount != oldWidget.pageCount ||
         widget.index != oldWidget.index) {
       if (widget.index != oldWidget.index) {
         _nativeOptimisticIndex = null;
         _nativeInteractive = _nativeReadyIndex == widget.index;
       }
-      if (paperChanged || widget.pageCount != oldWidget.pageCount) {
+      if (resetPages) {
         _nativeTurning = false;
       }
       _nativeChannel?.invokeMethod('setState', _nativeState);

@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:wild/models/reader_document.dart';
 import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
 import 'package:wild/src/rust/wenku8/models.dart';
 
@@ -78,9 +79,10 @@ class SourceBookDetail {
 }
 
 class SourceChapter {
-  const SourceChapter(this.content, {this.fontFamily});
+  const SourceChapter(this.content, {this.fontFamily, this.document});
   final String content;
   final String? fontFamily;
+  final ReaderDocument? document;
 }
 
 abstract class BookSource {

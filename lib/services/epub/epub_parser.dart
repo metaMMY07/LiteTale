@@ -9,7 +9,11 @@ import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html;
 import 'package:xml/xml.dart';
 
+import '../../models/reader_document.dart';
+import 'epub_css.dart';
+import 'epub_artwork_document.dart';
 import 'epub_models.dart';
+import 'epub_publication_document.dart';
 
 const _maxEntries = 10000;
 const _maxExpandedBytes = 384 * 1024 * 1024;
@@ -35,6 +39,54 @@ ParsedEpubBook parseEpubBook(Uint8List bytes, {String fallbackTitle = '本地书
   } on Object {
     throw const EpubImportException('EPUB 文件损坏或格式不受支持，请检查文件后重试');
   }
+}
+
+/// Reuses the bounded ZIP reader and path resolver. Never extracts to a public
+/// directory or executes a publication's scripts.
+EpubPublicationDocument readEpubPublication(
+  Uint8List bytes,
+  String href, {
+  bool fixedLayout = false,
+  String endHref = '',
+}) {
+  final parser = _EpubParser(bytes, '');
+  final ref = _resolve('', href);
+  if (ref == null) throw const EpubImportException('本地章节地址无效');
+  final encrypted = <String>{};
+  if (parser.zip.entries.containsKey('META-INF/encryption.xml')) {
+    for (final element
+        in parser
+            ._xml('META-INF/encryption.xml')
+            .descendants
+            .whereType<XmlElement>()) {
+      if (element.name.local == 'CipherReference') {
+        final path = _resolve('', element.getAttribute('URI') ?? '')?.path;
+        if (path != null) encrypted.add(path);
+      }
+    }
+  }
+  final builder = EpubPublicationBuilder(
+    resolve: (base, url) => _resolve(base, url)?.path,
+    read: (path) {
+      if (encrypted.contains(path) || !parser.zip.entries.containsKey(path)) {
+        return null;
+      }
+      final data = parser.zip.read(path, maxBytes: 20 * 1024 * 1024);
+      final raster = _rasterExtension(data);
+      if (raster != null && !_reasonableImageDimensions(data, raster)) {
+        return null;
+      }
+      return data;
+    },
+  );
+  final end = _resolve('', endHref);
+  return builder.build(
+    parser._html(ref.path, _maxChapterBytes),
+    ref.path,
+    fixedLayout: fixedLayout,
+    startFragment: ref.fragment,
+    endFragment: end?.path == ref.path ? end!.fragment : '',
+  );
 }
 
 class _ZipEntry {
@@ -285,23 +337,29 @@ class _TocEntry {
 }
 
 class _SpineItem {
-  const _SpineItem(this.item, this.nonlinear);
+  const _SpineItem(this.item, this.nonlinear, this.fixedLayout);
   final _ManifestItem item;
   final bool nonlinear;
+  final bool fixedLayout;
 }
 
 class _EpubParser {
-  _EpubParser(this.bytes, this.fallbackTitle)
-    : digest = sha256.convert(bytes).toString(),
-      zip = _EpubZip(bytes);
+  _EpubParser(this.bytes, this.fallbackTitle) : zip = _EpubZip(bytes);
   final Uint8List bytes;
-  final String fallbackTitle, digest;
+  final String fallbackTitle;
+  // Import needs the book identity; projecting a chapter does not. The owned
+  // archive is verified by the library and each ZIP entry still checks CRC and
+  // bounds. Do not hash the entire book again for an unused constructor field.
+  late final String digest = sha256.convert(bytes).toString();
   final _EpubZip zip;
   final warnings = <String>[];
   final manifest = <String, _ManifestItem>{};
   final assets = <String, Uint8List>{};
   final _assetForPath = <String, String?>{};
   final _encryptedFonts = <String>{};
+  final _cssFiles = <String, String?>{};
+  final _cssSheets = EpubCssSheetCache();
+  var _cssFileWeight = 0;
   var _assetSize = 0;
   var _textSize = 0;
 
@@ -352,13 +410,11 @@ class _EpubParser {
           (element.getAttribute('property') == 'rendition:layout' ||
               element.getAttribute('name') == 'fixed-layout'),
     );
-    if (layout.any(
+    final fixedLayout = layout.any(
       (element) =>
           element.innerText.trim().toLowerCase() == 'pre-paginated' ||
           element.getAttribute('content')?.toLowerCase() == 'true',
-    )) {
-      throw const EpubImportException('这本 EPUB 使用固定版式，暂不能用当前文字阅读器打开');
-    }
+    );
     final manifestElement = _first(package, 'manifest');
     if (manifestElement == null) {
       throw const EpubImportException('EPUB 缺少资源清单');
@@ -410,11 +466,7 @@ class _EpubParser {
     final seenPaths = <String>{};
     for (final element in spineElement.childElements) {
       if (element.name.local != 'itemref') continue;
-      if (_tokens(
-        element.getAttribute('properties'),
-      ).contains('rendition:layout-pre-paginated')) {
-        throw const EpubImportException('这本 EPUB 含有固定版式页面，暂不能用当前文字阅读器打开');
-      }
+      final properties = _tokens(element.getAttribute('properties'));
       var item = manifest[element.getAttribute('idref')];
       final visited = <String>{};
       while (item != null && !_isReadable(item)) {
@@ -427,13 +479,40 @@ class _EpubParser {
         throw const EpubImportException('EPUB 的正文资源缺失，无法完整导入');
       }
       if (navPaths.contains(item.path) || !seenPaths.add(item.path)) continue;
-      spine.add(_SpineItem(item, element.getAttribute('linear') == 'no'));
+      spine.add(
+        _SpineItem(
+          item,
+          element.getAttribute('linear') == 'no',
+          properties.contains('rendition:layout-pre-paginated') ||
+              fixedLayout &&
+                  !properties.contains('rendition:layout-reflowable'),
+        ),
+      );
     }
     if (spine.isEmpty) {
       throw const EpubImportException('EPUB 没有可阅读的正文');
     }
     final cover = _cover(packagePath, metadataElements, guideReferences, spine);
     final chapters = <EpubChapterData>[];
+    final artworkBuilder = EpubArtworkBuilder(
+      resolve: (base, href) => _resolve(base, href)?.path,
+      readCss: _readCss,
+      readResource: (path) {
+        if (!zip.entries.containsKey(path) || _encryptedFonts.contains(path)) {
+          return null;
+        }
+        try {
+          final bytes = zip.read(path, maxBytes: 8 * 1024 * 1024);
+          final raster = _rasterExtension(bytes);
+          if (raster != null && !_reasonableImageDimensions(bytes, raster)) {
+            return null;
+          }
+          return bytes;
+        } on Object {
+          return null;
+        }
+      },
+    );
     // Non-linear notes and appendices remain readable, without interrupting the
     // main spine sequence. Navigation documents have already been excluded.
     final ordered = [
@@ -467,14 +546,26 @@ class _EpubParser {
         () => _TocEntry(defaultTitle, _Reference(item.path, '')),
       );
       final positions = boundaries.keys.toList()..sort();
+      // Do not collapse several independently addressable sections into art.
+      final artwork =
+          positions.length == 1
+              ? artworkBuilder.build(document, item.path)
+              : null;
       for (var i = 0; i < positions.length; i++) {
         final start = positions[i];
         final end =
             i + 1 < positions.length
                 ? positions[i + 1]
                 : rendered.content.length;
-        final content = rendered.content.substring(start, end).trim();
+        final rawSection = rendered.content.substring(start, end);
+        final content = rawSection.trim();
         if (content.isEmpty) continue;
+        final leading = rawSection.length - rawSection.trimLeft().length;
+        final trailing = rawSection.length - rawSection.trimRight().length;
+        final section = rendered.document.slice(
+          start + leading,
+          end - trailing,
+        );
         _textSize += content.length;
         if (_textSize > _maxTextCharacters || chapters.length >= 20000) {
           throw const EpubImportException('EPUB 的正文或章节数量过大，无法导入');
@@ -488,7 +579,10 @@ class _EpubParser {
                 (entry.reference.fragment.isEmpty
                     ? ''
                     : '#${Uri.encodeComponent(entry.reference.fragment)}'),
-            content: content,
+            content: section.content,
+            document: section,
+            artwork: artwork,
+            fixedLayout: spineItem.fixedLayout,
           ),
         );
       }
@@ -803,36 +897,71 @@ class _EpubParser {
   _RenderedDocument _render(dom.Document document, String path) {
     final writer = _TextWriter();
     final anchors = <String, int>{};
-    const blockTags = {
-      'p',
-      'div',
-      'section',
-      'article',
-      'blockquote',
-      'header',
-      'footer',
-      'figure',
-      'figcaption',
-      'table',
-      'tr',
-      'ul',
-      'ol',
-      'dl',
-      'dt',
-      'dd',
-      'h1',
-      'h2',
-      'h3',
-      'h4',
-      'h5',
-      'h6',
-      'hr',
-      'pre',
-      'li',
-    };
+    final css = EpubCssCascade.fromDocument(
+      document,
+      path,
+      readLocalCss: _readCss,
+      resolveLocalPath: (base, href) => _resolve(base, href)?.path,
+      onWarning: _warn,
+      sheetCache: _cssSheets,
+    );
+    final darkCss = EpubCssCascade.fromDocument(
+      document,
+      path,
+      readLocalCss: _readCss,
+      resolveLocalPath: (base, href) => _resolve(base, href)?.path,
+      onWarning: _warn,
+      sheetCache: _cssSheets,
+      dark: true,
+    );
+    ReaderInlineStyle inline(dom.Element e) =>
+        css.styleFor(e).inline.withPalette(darkCss.styleFor(e).inline);
+    ReaderBlockStyle blockStyle(dom.Element e) => _copyBlockStyle(
+      css.styleFor(e).block,
+      box: css.styleFor(e).block.box.withPalette(darkCss.styleFor(e).block.box),
+    );
+    final firstLetters = <dom.Element>{};
+    final listNumbers = <dom.Element, int>{};
     void walk(dom.Node node, {bool pre = false, int depth = 0}) {
       if (node is dom.Text) {
-        writer.text(node.data, pre: pre);
+        final parent = node.parent;
+        if (parent is dom.Element && node.data.trim().isNotEmpty) {
+          dom.Element? ancestor = parent;
+          while (ancestor != null) {
+            final initial = css.firstLetterStyleFor(ancestor);
+            if (initial != null && firstLetters.add(ancestor)) {
+              final at = node.data.indexOf(RegExp(r'\S'));
+              final first = String.fromCharCode(
+                node.data.substring(at).runes.first,
+              );
+              writer.text(node.data.substring(0, at), style: inline(parent));
+              writer.text(
+                first,
+                style: initial.withPalette(
+                  darkCss.firstLetterStyleFor(ancestor) ?? initial,
+                ),
+              );
+              writer.text(
+                node.data.substring(at + first.length),
+                style: inline(parent),
+              );
+              return;
+            }
+            if (css.styleFor(ancestor).isBlock) break;
+            ancestor =
+                ancestor.parent is dom.Element
+                    ? ancestor.parent as dom.Element
+                    : null;
+          }
+        }
+        writer.text(
+          node.data,
+          pre: pre,
+          style:
+              parent is dom.Element
+                  ? inline(parent)
+                  : const ReaderInlineStyle(),
+        );
         return;
       }
       if (node is! dom.Element) return;
@@ -855,15 +984,14 @@ class _EpubParser {
             'rp',
           }.contains(tag) ||
           node.attributes.containsKey('hidden') ||
-          node.attributes['aria-hidden'] == 'true' ||
-          RegExp(
-            r'(display\s*:\s*none|visibility\s*:\s*hidden)',
-            caseSensitive: false,
-          ).hasMatch(node.attributes['style'] ?? '')) {
+          node.attributes['aria-hidden'] == 'true') {
         return;
       }
-      final isBlock = blockTags.contains(tag);
-      if (isBlock) writer.newline();
+      final style = css.styleFor(node);
+      if (style.hidden) return;
+      final isImage = tag == 'img' || tag == 'image' || tag == 'object';
+      final isBlock = style.isBlock && !isImage;
+      if (isBlock) writer.beginBlock(blockStyle(node));
       final anchor =
           node.attributes['id'] ??
           (tag == 'a' ? node.attributes['name'] : null);
@@ -871,7 +999,8 @@ class _EpubParser {
         anchors.putIfAbsent(anchor, () => writer.length);
       }
       if (tag == 'br') {
-        writer.newline();
+        writer.lineBreak(inline(node));
+        if (isBlock) writer.endBlock();
         return;
       }
       if (tag == 'img' || tag == 'image' || tag == 'object') {
@@ -883,17 +1012,97 @@ class _EpubParser {
                 : _attribute(node, 'href');
         final image = _image(path, value ?? '');
         if (image != null) {
-          writer.image(epubAssetUrl(digest, image));
+          writer.image(epubAssetUrl(digest, image), blockStyle(node));
         } else {
           final alt = node.attributes['alt'] ?? node.attributes['aria-label'];
-          if (alt != null) writer.text('〔$alt〕');
+          if (style.isBlock) writer.beginBlock(blockStyle(node));
+          if (alt != null) writer.text('〔$alt〕', style: inline(node));
+          if (style.isBlock) writer.endBlock();
         }
+        if (isBlock) writer.endBlock();
         return;
       }
-      if (tag == 'li') writer.text('• ');
-      if (tag == 'td' || tag == 'th') writer.text(' ');
+      if (tag == 'tr') {
+        final cells =
+            node.children
+                .where((e) => e.localName == 'td' || e.localName == 'th')
+                .toList();
+        if (cells.isNotEmpty &&
+            cells.length <= 24 &&
+            !cells.any(
+              (c) =>
+                  c.attributes.containsKey('rowspan') ||
+                  c.attributes.containsKey('colspan'),
+            )) {
+          final parsed = <ReaderTableCell>[];
+          for (final cell in cells) {
+            final cellWriter = _TextWriter();
+            void cellText(dom.Node n) {
+              if (n is dom.Text) {
+                cellWriter.text(
+                  n.data,
+                  style:
+                      n.parent is dom.Element
+                          ? inline(n.parent as dom.Element)
+                          : inline(cell),
+                );
+              } else if (n is dom.Element &&
+                  !const {
+                    'script',
+                    'style',
+                    'iframe',
+                    'table',
+                  }.contains(n.localName) &&
+                  !css.styleFor(n).hidden) {
+                if (n.localName == 'br') cellWriter.lineBreak(inline(n));
+                for (final c in n.nodes) {
+                  cellText(c);
+                }
+              }
+            }
+
+            for (final child in cell.nodes) {
+              cellText(child);
+            }
+            final runs = <ReaderRun>[];
+            for (final b in cellWriter.document.blocks) {
+              if (runs.isNotEmpty) {
+                runs.add(ReaderRun(' ', style: inline(cell)));
+              }
+              runs.addAll(b.runs);
+            }
+            parsed.add(ReaderTableCell(runs: runs, style: blockStyle(cell)));
+          }
+          writer.tableRow(parsed);
+          if (isBlock) writer.endBlock();
+          return;
+        }
+        if (cells.isNotEmpty) {
+          _warn('复杂合并单元格表格已按正文顺序显示。');
+        }
+      }
+      if (tag == 'li') {
+        final parent = node.parent;
+        var marker = '• ';
+        if (parent is dom.Element && parent.localName == 'ol') {
+          if (!listNumbers.containsKey(node)) {
+            var number = (int.tryParse(parent.attributes['start'] ?? '') ?? 1)
+                .clamp(-10000, 10000);
+            for (final item in parent.children.where(
+              (e) => e.localName == 'li',
+            )) {
+              number = (int.tryParse(item.attributes['value'] ?? '') ?? number)
+                  .clamp(-10000, 10000);
+              listNumbers[item] = number++;
+            }
+          }
+          marker = '${listNumbers[node]}. ';
+        }
+        writer.text(marker, style: inline(node));
+      }
+      if (tag == 'td' || tag == 'th') writer.text(' ', style: style.inline);
       for (final child in node.nodes) {
-        walk(child, pre: pre || tag == 'pre', depth: depth + 1);
+        walk(child, pre: style.preformatted, depth: depth + 1);
       }
       if (tag == 'ruby') {
         final annotations = node
@@ -901,12 +1110,14 @@ class _EpubParser {
             .map((element) => _plain(element.text))
             .where((value) => value.isNotEmpty)
             .join(' ');
-        if (annotations.isNotEmpty) writer.text('（$annotations）');
+        if (annotations.isNotEmpty) {
+          writer.text('（$annotations）', style: inline(node));
+        }
       }
-      if (isBlock) writer.newline();
+      if (isBlock) writer.endBlock();
     }
 
-    for (final node in document.body?.nodes ?? document.nodes) {
+    for (final node in document.nodes) {
       walk(node);
     }
     var title = '';
@@ -918,36 +1129,81 @@ class _EpubParser {
         title.isEmpty
             ? _plain(document.querySelector('title')?.text ?? '')
             : title;
-    return _RenderedDocument(writer.toString(), anchors, title);
+    final renderedDocument = writer.document;
+    final length = renderedDocument.content.length;
+    return _RenderedDocument(renderedDocument, {
+      for (final entry in anchors.entries)
+        entry.key: entry.value.clamp(0, length),
+    }, title);
+  }
+
+  String? _readCss(String path) {
+    if (_cssFiles.containsKey(path)) {
+      final value = _cssFiles.remove(path);
+      _cssFiles[path] = value;
+      return value;
+    }
+    final source =
+        zip.entries.containsKey(path) ? _text(path, 512 * 1024) : null;
+    final weight = (source?.length ?? 0) * 2;
+    while (_cssFiles.isNotEmpty &&
+        (_cssFiles.length >= 32 || _cssFileWeight + weight > 2 * 1024 * 1024)) {
+      final removed = _cssFiles.remove(_cssFiles.keys.first);
+      _cssFileWeight -= (removed?.length ?? 0) * 2;
+    }
+    _cssFiles[path] = source;
+    _cssFileWeight += weight;
+    return source;
   }
 }
 
 class _RenderedDocument {
-  const _RenderedDocument(this.content, this.anchors, this.title);
-  final String content, title;
+  const _RenderedDocument(this.document, this.anchors, this.title);
+  final ReaderDocument document;
+  String get content => document.content;
+  final String title;
   final Map<String, int> anchors;
 }
 
 class _TextWriter {
   final _buffer = StringBuffer();
+  final _blocks = <ReaderBlock>[];
+  final _runs = <_PendingRun>[];
+  final _contexts = <_BlockContext>[];
+  ReaderBlockStyle? _runBlockStyle;
   bool _lineStart = true;
   bool _pendingSpace = false;
   int get length => _buffer.length;
 
-  void _append(String value) {
+  void _append(String value, {ReaderInlineStyle? style}) {
     if (_buffer.length + value.length > _maxChapterBytes * 2) {
       throw const EpubImportException('EPUB 单章转换后的正文过大');
     }
     _buffer.write(value);
+    if (style != null && value.isNotEmpty) {
+      _runBlockStyle ??= _effectiveBlockStyle();
+      if (_runs.isNotEmpty && _sameStyle(_runs.last.style, style)) {
+        _runs.last.text.write(value);
+      } else {
+        _runs.add(_PendingRun(style, value));
+      }
+    }
     if (value.isNotEmpty) _lineStart = value.endsWith('\n');
   }
 
-  void text(String value, {bool pre = false}) {
+  void text(
+    String value, {
+    bool pre = false,
+    ReaderInlineStyle style = const ReaderInlineStyle(),
+  }) {
     // Text must never be interpreted as the reader's trusted image separator.
     value = value.replaceAll(_imageMarker, '＜!--image--＞');
     if (pre) {
       _pendingSpace = false;
-      _append(value.replaceAll('\r\n', '\n').replaceAll('\r', '\n'));
+      _append(
+        value.replaceAll('\r\n', '\n').replaceAll('\r', '\n'),
+        style: style,
+      );
       return;
     }
     final normal = value.replaceAll(RegExp(r'[\t\n\f\r \u00a0]+'), ' ');
@@ -956,25 +1212,259 @@ class _TextWriter {
       if (!_lineStart && normal.isNotEmpty) _pendingSpace = true;
       return;
     }
-    if (!_lineStart && (_pendingSpace || normal.startsWith(' '))) _append(' ');
-    _append(body);
+    if (!_lineStart && (_pendingSpace || normal.startsWith(' '))) {
+      _append(' ', style: style);
+    }
+    _append(body, style: style);
     _pendingSpace = normal.endsWith(' ');
   }
 
   void newline() {
     _pendingSpace = false;
     if (!_lineStart && _buffer.isNotEmpty) _append('\n');
+    _flushRuns();
   }
 
-  void image(String url) {
+  void lineBreak(ReaderInlineStyle style) {
+    _pendingSpace = false;
+    _append('\n', style: style);
+  }
+
+  void beginBlock(ReaderBlockStyle style) {
     newline();
+    _contexts.add(_BlockContext(style));
+  }
+
+  void endBlock() {
+    newline();
+    final context = _contexts.removeLast();
+    final index = context.lastBlock;
+    if (index == null) return;
+    final block = _blocks[index];
+    _blocks[index] = ReaderBlock(
+      runs: block.runs,
+      imageUrl: block.imageUrl,
+      cells: block.cells,
+      style: _copyBlockStyle(
+        block.style,
+        marginBottom: _addLength(
+          block.style.marginBottom,
+          context.style.marginBottom,
+        ),
+        hasMargins:
+            block.style.hasMargins || !_zeroLength(context.style.marginBottom),
+        breakAfter: block.style.breakAfter || context.style.breakAfter,
+        box: _joinBoxBottom(block.style.box, context.style.box),
+      ),
+    );
+  }
+
+  void image(String url, ReaderBlockStyle style) {
+    beginBlock(style);
+    final index = _blocks.length;
+    _blocks.add(ReaderBlock(imageUrl: url, style: _effectiveBlockStyle()));
+    _markContexts(index);
     _append('$_imageMarker$url$_imageMarker\n');
     _pendingSpace = false;
+    endBlock();
   }
 
-  @override
-  String toString() => _buffer.toString();
+  void tableRow(List<ReaderTableCell> cells) {
+    newline();
+    if (_blocks.length >= 100000) {
+      throw const EpubImportException('EPUB 单章的段落数量过多');
+    }
+    final block = ReaderBlock(
+      cells: cells,
+      style: _copyBlockStyle(_effectiveBlockStyle(), hasMargins: true),
+    );
+    final index = _blocks.length;
+    _blocks.add(block);
+    _markContexts(index);
+    _append('${block.text}\n');
+  }
+
+  ReaderBlockStyle _effectiveBlockStyle() {
+    final nearest = _contexts.lastOrNull?.style ?? const ReaderBlockStyle();
+    var top = const ReaderLength();
+    var left = const ReaderLength();
+    var right = const ReaderLength();
+    var before = false;
+    var keep = false;
+    for (final context in _contexts) {
+      left = _addLength(left, context.style.marginLeft);
+      right = _addLength(right, context.style.marginRight);
+      if (!context.started) {
+        top = _addLength(top, context.style.marginTop);
+        before = before || context.style.breakBefore;
+      }
+      keep = keep || context.style.keepTogether;
+    }
+    return _copyBlockStyle(
+      nearest,
+      marginTop: top,
+      marginBottom: const ReaderLength(),
+      marginLeft: left,
+      marginRight: right,
+      hasMargins: nearest.hasMargins || !_zeroLength(top),
+      breakBefore: before,
+      breakAfter: false,
+      keepTogether: keep,
+      box: _effectiveBox(_contexts),
+    );
+  }
+
+  void _markContexts(int index) {
+    for (final context in _contexts) {
+      context.started = true;
+      context.lastBlock = index;
+    }
+  }
+
+  void _flushRuns() {
+    if (_runs.isEmpty) return;
+    final runs =
+        _runs
+            .map((run) => ReaderRun(run.text.toString(), style: run.style))
+            .toList();
+    var block = ReaderBlock(
+      runs: runs,
+      style: _runBlockStyle ?? _effectiveBlockStyle(),
+    );
+    // A preformatted terminal newline is represented by the separator between
+    // blocks. Removing just that one newline keeps all other authored spacing.
+    if (block.text.endsWith('\n')) {
+      block = block.slice(0, block.text.length - 1);
+    }
+    if (block.text.isNotEmpty) {
+      if (_blocks.length >= 100000) {
+        throw const EpubImportException('EPUB 单章的段落数量过多');
+      }
+      final index = _blocks.length;
+      _blocks.add(block);
+      _markContexts(index);
+    }
+    _runs.clear();
+    _runBlockStyle = null;
+  }
+
+  ReaderDocument get document {
+    _flushRuns();
+    return ReaderDocument(_blocks);
+  }
 }
+
+class _PendingRun {
+  _PendingRun(this.style, String value) {
+    text.write(value);
+  }
+  final ReaderInlineStyle style;
+  final text = StringBuffer();
+}
+
+class _BlockContext {
+  _BlockContext(this.style);
+  final ReaderBlockStyle style;
+  bool started = false;
+  int? lastBlock;
+}
+
+bool _sameStyle(ReaderInlineStyle a, ReaderInlineStyle b) =>
+    a.bold == b.bold &&
+    a.italic == b.italic &&
+    a.underline == b.underline &&
+    a.strike == b.strike &&
+    a.scale == b.scale &&
+    a.letterSpacing.em == b.letterSpacing.em &&
+    a.letterSpacing.px == b.letterSpacing.px &&
+    a.letterSpacing.fraction == b.letterSpacing.fraction &&
+    a.color == b.color &&
+    a.darkColor == b.darkColor &&
+    a.background == b.background &&
+    a.darkBackground == b.darkBackground;
+
+bool _zeroLength(ReaderLength value) =>
+    value.em == 0 && value.px == 0 && value.fraction == 0;
+ReaderBoxStyle _effectiveBox(List<_BlockContext> contexts) {
+  var pl = const ReaderLength(),
+      pr = const ReaderLength(),
+      pt = const ReaderLength(),
+      radius = const ReaderLength();
+  var left = const ReaderBorderStyle(),
+      right = const ReaderBorderStyle(),
+      top = const ReaderBorderStyle();
+  int? bg, darkBg;
+  for (final c in contexts) {
+    final b = c.style.box;
+    pl = _addLength(pl, b.paddingLeft);
+    pr = _addLength(pr, b.paddingRight);
+    if (!c.started) {
+      pt = _addLength(pt, b.paddingTop);
+      if (!_zeroLength(b.top.width)) top = b.top;
+    }
+    if (!_zeroLength(b.left.width)) left = b.left;
+    if (!_zeroLength(b.right.width)) right = b.right;
+    if (!_zeroLength(b.radius)) radius = b.radius;
+    bg = b.background ?? bg;
+    darkBg = b.darkBackground ?? darkBg;
+  }
+  return ReaderBoxStyle(
+    paddingTop: pt,
+    paddingLeft: pl,
+    paddingRight: pr,
+    left: left,
+    right: right,
+    top: top,
+    radius: radius,
+    background: bg,
+    darkBackground: darkBg,
+  );
+}
+
+ReaderBoxStyle _joinBoxBottom(ReaderBoxStyle b, ReaderBoxStyle parent) =>
+    ReaderBoxStyle(
+      paddingTop: b.paddingTop,
+      paddingLeft: b.paddingLeft,
+      paddingRight: b.paddingRight,
+      paddingBottom: _addLength(b.paddingBottom, parent.paddingBottom),
+      left: b.left,
+      right: b.right,
+      top: b.top,
+      bottom: _zeroLength(parent.bottom.width) ? b.bottom : parent.bottom,
+      radius: b.radius,
+      background: b.background,
+      darkBackground: b.darkBackground,
+    );
+ReaderLength _addLength(ReaderLength a, ReaderLength b) => ReaderLength(
+  em: (a.em + b.em).clamp(-16, 16).toDouble(),
+  px: (a.px + b.px).clamp(-256, 256).toDouble(),
+  fraction: (a.fraction + b.fraction).clamp(-.9, .9).toDouble(),
+);
+ReaderBlockStyle _copyBlockStyle(
+  ReaderBlockStyle source, {
+  ReaderLength? marginTop,
+  ReaderLength? marginBottom,
+  ReaderLength? marginLeft,
+  ReaderLength? marginRight,
+  bool? hasMargins,
+  bool? breakBefore,
+  bool? breakAfter,
+  bool? keepTogether,
+  ReaderBoxStyle? box,
+}) => ReaderBlockStyle(
+  align: source.align,
+  indent: source.indent,
+  marginTop: marginTop ?? source.marginTop,
+  marginBottom: marginBottom ?? source.marginBottom,
+  marginLeft: marginLeft ?? source.marginLeft,
+  marginRight: marginRight ?? source.marginRight,
+  hasMargins: hasMargins ?? source.hasMargins,
+  lineHeight: source.lineHeight,
+  breakBefore: breakBefore ?? source.breakBefore,
+  breakAfter: breakAfter ?? source.breakAfter,
+  keepTogether: keepTogether ?? source.keepTogether,
+  box: box ?? source.box,
+);
 
 Set<String> _tokens(String? value) =>
     (value ?? '')

@@ -12,6 +12,7 @@ import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/settings/settings_widgets.dart';
 import 'package:wild/settings/theme_paper_page.dart' show SettingsValueSlider;
 import 'package:wild/widgets/left_aligned_scrollable.dart';
+import 'package:wild/widgets/reader_volume_turn_setting.dart';
 
 class ReaderSettingsPage extends StatelessWidget {
   const ReaderSettingsPage({super.key});
@@ -76,7 +77,7 @@ class ReaderSettingsPage extends StatelessWidget {
             SettingsSwitch(
               icon: Icons.auto_stories_outlined,
               title: '仿真翻页',
-              description: '保留纸张曲面与手势跟随；关闭时直接翻页',
+              description: '用于在线书源的纸张曲面与手势跟随；本地 EPUB 使用普通翻页',
               value: curl.state,
               onChanged:
                   type.state == ReaderType.html
@@ -84,6 +85,7 @@ class ReaderSettingsPage extends StatelessWidget {
                       : (v) =>
                           settingsAction(context, () => curl.setEnabled(v)),
             ),
+            const ReaderVolumeTurnSetting(),
             const SettingsSectionLabel('页边距'),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),

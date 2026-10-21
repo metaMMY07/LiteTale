@@ -12,6 +12,18 @@ use std::path::Path;
 use std::pin::Pin;
 use std::time::Duration;
 use tokio::fs as async_fs;
+use once_cell::sync::Lazy;
+
+// Cover downloads must not own a detail/catalog or chapter cache lock. Use a
+// full-key hash within separate pools rather than the last digit of a book ID.
+static WEB_READ_LOCKS: Lazy<Vec<tokio::sync::Mutex<()>>> =
+    Lazy::new(|| (0..64).map(|_| tokio::sync::Mutex::new(())).collect());
+static CHAPTER_READ_LOCKS: Lazy<Vec<tokio::sync::Mutex<()>>> =
+    Lazy::new(|| (0..64).map(|_| tokio::sync::Mutex::new(())).collect());
+
+fn read_lock_index(key: &str) -> usize {
+    usize::from(md5::compute(key.as_bytes()).0[0]) % 64
+}
 
 // Database rows and download status can outlive the actual file (interrupted
 // writes, storage cleanup). Validate off the async worker before reusing it.
@@ -121,11 +133,9 @@ pub async fn get_cached_image(img_url: String) -> crate::Result<String> {
 }
 
 pub(crate) async fn get_chapter_content(aid: &str, cid: &str) -> anyhow::Result<String> {
-    // 根据MD5最后一位选择锁
-    let url_md5 = md5::compute(format!("{aid}:{cid}").as_bytes()).0;
-    let url_md5 = hex::encode(url_md5);
-    let lock_index = (url_md5.as_bytes()[url_md5.len() - 1] % 64) as usize;
-    let _guard = IMAGE_LOCKS[lock_index].lock().await;
+    let _guard = tokio::time::timeout(
+        Duration::from_secs(2), CHAPTER_READ_LOCKS[read_lock_index(&format!("{aid}:{cid}"))].lock()
+    ).await.map_err(|_| anyhow::anyhow!("Wenku8 chapter cache wait timed out"))?;
 
     // 如果章节已下载，则直接从本地文件读取
     if let Some(a) = novel_download_chapter::Entity::find_by_id(cid).await? {
@@ -202,8 +212,19 @@ pub(crate) async fn cache_first<T: for<'de> serde::Deserialize<'de> + serde::Ser
     expire: Duration,
     pin: Pin<Box<dyn Future<Output = anyhow::Result<T>> + Send>>,
 ) -> anyhow::Result<T> {
-    let lock_index = (key.as_bytes()[key.len() - 1] % 64) as usize;
-    let _guard = IMAGE_LOCKS[lock_index].lock().await;
+    crate::request_policy::with_operation_timeout(
+        cache_first_inner(key, expire, pin),
+        crate::request_policy::READ_OPERATION_TIMEOUT,
+        "Wenku8 cached read",
+    ).await
+}
+
+async fn cache_first_inner<T: for<'de> serde::Deserialize<'de> + serde::Serialize>(
+    key: String,
+    expire: Duration,
+    pin: Pin<Box<dyn Future<Output = anyhow::Result<T>> + Send>>,
+) -> anyhow::Result<T> {
+    let _guard = WEB_READ_LOCKS[read_lock_index(&key)].lock().await;
     let time = chrono::Local::now().timestamp();
     if let Some(ref model) = WebCacheEntity::get_web_cache(key.as_str()).await? {
         if time < (model.cache_time + expire.as_secs() as i64) {
@@ -219,5 +240,18 @@ pub(crate) async fn cache_first<T: for<'de> serde::Deserialize<'de> + serde::Ser
         let content = serde_json::to_string(&t)?;
         WebCacheEntity::save_web_cache(key, content).await?;
         Ok(t)
+    }
+}
+
+#[cfg(test)]
+mod read_lock_tests {
+    use super::*;
+    #[tokio::test]
+    async fn a_slow_cover_does_not_block_metadata_or_chapter_cache_admission() {
+        let key = "NOVEL_INFO$4343";
+        let index = (key.as_bytes()[key.len()-1] % 64) as usize;
+        let _cover = IMAGE_LOCKS[index].lock().await;
+        let _metadata = tokio::time::timeout(Duration::from_millis(50), WEB_READ_LOCKS[read_lock_index(key)].lock()).await.unwrap();
+        let _chapter = tokio::time::timeout(Duration::from_millis(50), CHAPTER_READ_LOCKS[read_lock_index("4343:177990")].lock()).await.unwrap();
     }
 }

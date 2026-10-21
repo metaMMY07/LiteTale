@@ -154,6 +154,7 @@ void main() {
       '段间距',
       '阅读模式',
       '仿真翻页',
+      '音量键翻页',
       '上边距',
       '下边距',
       '左边距',
@@ -161,7 +162,7 @@ void main() {
     ]) {
       expect(find.text(title), findsOneWidget);
     }
-    for (final title in ['点击翻页', '音量键翻页', '边界切换章节', '避免误触返回', '屏幕']) {
+    for (final title in ['点击翻页', '边界切换章节', '避免误触返回', '屏幕']) {
       expect(find.text(title), findsNothing);
     }
     expect(tester.takeException(), isNull);

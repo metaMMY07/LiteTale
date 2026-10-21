@@ -42,6 +42,200 @@ void main() {
     expect(book.chapters.single.title, '目录里的第一章');
   });
 
+  test('local imported/style/inline CSS becomes native blocks and styled runs', () {
+    final files = _unzip(
+      buildEpubFixture(
+        chapters: const [
+          EpubFixtureChapter(
+            path: 'Text/one.xhtml',
+            title: '原书样式',
+            body:
+                '<h1>第一章</h1><p class="center" style="text-indent:0">'
+                '普通<strong>粗体</strong><em>斜体</em><span class="under">线条</span></p>',
+          ),
+        ],
+      ),
+    );
+    _replace(
+      files,
+      'OPS/Text/one.xhtml',
+      '</head>',
+      '<link rel="stylesheet" href="../Styles/main.css"/>'
+          '<style>p {line-height:1.7} .under {text-decoration:underline line-through}</style></head>',
+    );
+    files['OPS/Styles/main.css'] = Uint8List.fromList(
+      utf8.encode(
+        '@import "base.css"; .center {text-align:center;margin:0;text-indent:2em}',
+      ),
+    );
+    files['OPS/Styles/base.css'] = Uint8List.fromList(
+      utf8.encode(
+        'h1 {font-size:150%;font-weight:normal} strong {font-weight:700}',
+      ),
+    );
+    final chapter =
+        parseEpubBook(encodeEpubFixtureEntries(files)).chapters.single;
+    final document = chapter.document!;
+    expect(chapter.content, document.content);
+    expect(document.blocks.length, 2);
+    expect(document.blocks.first.runs.single.style.scale, 1.5);
+    expect(document.blocks.first.runs.single.style.bold, isFalse);
+    final paragraph = document.blocks.last;
+    expect(paragraph.style.align, 'center');
+    expect(paragraph.style.indent.em, 0);
+    expect(paragraph.style.hasMargins, isTrue);
+    expect(paragraph.style.marginBottom.em, 0);
+    expect(paragraph.style.lineHeight, 1.7);
+    expect(
+      paragraph.runs.firstWhere((run) => run.text == '粗体').style.bold,
+      isTrue,
+    );
+    expect(
+      paragraph.runs.firstWhere((run) => run.text == '斜体').style.italic,
+      isTrue,
+    );
+    final under = paragraph.runs.firstWhere((run) => run.text == '线条').style;
+    expect(under.underline, isTrue);
+    expect(under.strike, isTrue);
+    expect(chapter.content, isNot(contains('text-align')));
+  });
+
+  test(
+    'TOC slicing uses identical UTF16 offsets for rich runs including emoji',
+    () {
+      final book = parseEpubBook(
+        buildEpubFixture(
+          chapters: const [
+            EpubFixtureChapter(
+              path: 'one.xhtml',
+              title: '锚点测试',
+              body:
+                  '<p style="text-align:center"><strong id="a">甲🙂</strong><em id="b">乙文</em></p>',
+            ),
+          ],
+          toc: const [
+            EpubFixtureToc('甲章', 'one.xhtml#a'),
+            EpubFixtureToc('乙章', 'one.xhtml#b'),
+          ],
+        ),
+      );
+      expect(book.chapters.map((chapter) => chapter.content), ['甲🙂', '乙文']);
+      expect(
+        book.chapters[0].document!.blocks.single.runs.single.style.bold,
+        isTrue,
+      );
+      expect(
+        book.chapters[1].document!.blocks.single.runs.single.style.italic,
+        isTrue,
+      );
+      for (final chapter in book.chapters) {
+        expect(chapter.content, chapter.document!.content);
+        expect(chapter.document!.blocks.single.style.align, 'center');
+      }
+    },
+  );
+
+  test(
+    'nested container margins and page breaks project onto first/last blocks',
+    () {
+      final files = _unzip(
+        buildEpubFixture(
+          chapters: const [
+            EpubFixtureChapter(
+              path: 'one.xhtml',
+              title: '容器',
+              body: '<div class="outer"><p>第一段</p><p>第二段</p></div>',
+            ),
+          ],
+        ),
+      );
+      _replace(
+        files,
+        'OPS/one.xhtml',
+        '</head>',
+        '<style>'
+            '.outer {margin:1em 2em;break-before:page;break-after:page;break-inside:avoid}'
+            'p {margin:0}</style></head>',
+      );
+      final blocks =
+          parseEpubBook(
+            encodeEpubFixtureEntries(files),
+          ).chapters.single.document!.blocks;
+      expect(blocks.length, 2);
+      expect(blocks.first.style.marginTop.em, 1);
+      expect(blocks.last.style.marginTop.em, 0);
+      expect(blocks.first.style.marginBottom.em, 0);
+      expect(blocks.last.style.marginBottom.em, 1);
+      for (final block in blocks) {
+        expect(block.style.marginLeft.em, 2);
+        expect(block.style.marginRight.em, 2);
+        expect(block.style.keepTogether, isTrue);
+      }
+      expect(blocks.first.style.breakBefore, isTrue);
+      expect(blocks.last.style.breakBefore, isFalse);
+      expect(blocks.first.style.breakAfter, isFalse);
+      expect(blocks.last.style.breakAfter, isTrue);
+    },
+  );
+
+  test(
+    'inline line breaks stay within one styled paragraph and preserve blank lines',
+    () {
+      final chapter =
+          parseEpubBook(
+            buildEpubFixture(
+              chapters: const [
+                EpubFixtureChapter(
+                  path: 'one.xhtml',
+                  title: '换行',
+                  body:
+                      '<p style="text-align:right">第一行<br/>第二行<br/><br/>第四行</p>',
+                ),
+              ],
+            ),
+          ).chapters.single;
+      expect(chapter.content, '第一行\n第二行\n\n第四行');
+      expect(chapter.document!.blocks.length, 1);
+      expect(chapter.document!.blocks.single.style.align, 'right');
+      expect(chapter.document!.content, chapter.content);
+    },
+  );
+
+  test('CSS block images do not double margins or expose CSS hidden text', () {
+    final files = _unzip(
+      buildEpubFixture(
+        chapters: const [
+          EpubFixtureChapter(
+            path: 'one.xhtml',
+            title: '插图',
+            body:
+                '<p>之前</p><img class="illustration" src="Images/image.png"/>'
+                '<p class="hidden">不应出现</p><p>之后</p>',
+          ),
+        ],
+        resources: {'Images/image.png': epubFixturePng()},
+      ),
+    );
+    _replace(
+      files,
+      'OPS/one.xhtml',
+      '</head>',
+      '<style>'
+          '.illustration {display:block;margin:1em 2em} .hidden {display:none}</style></head>',
+    );
+    final chapter =
+        parseEpubBook(encodeEpubFixtureEntries(files)).chapters.single;
+    final image = chapter.document!.blocks.firstWhere(
+      (block) => block.imageUrl != null,
+    );
+    expect(image.style.marginTop.em, 1);
+    expect(image.style.marginBottom.em, 1);
+    expect(image.style.marginLeft.em, 2);
+    expect(image.style.marginRight.em, 2);
+    expect(chapter.content, isNot(contains('不应出现')));
+    expect(chapter.document!.content, chapter.content);
+  });
+
   test('spine wins over both ZIP/manifest order and reversed nav order', () {
     final files = _unzip(
       buildEpubFixture(
@@ -458,11 +652,10 @@ void main() {
     },
   );
 
-  test('fixed-layout books produce a specific unsupported-format message', () {
-    expect(
-      () => parseEpubBook(buildEpubFixture(fixedLayout: true)),
-      throwsA(importError('固定版式')),
-    );
+  test('fixed-layout resources retain their layout for the CSS renderer', () {
+    final book = parseEpubBook(buildEpubFixture(fixedLayout: true));
+    expect(book.chapters, isNotEmpty);
+    expect(book.chapters.every((c) => c.fixedLayout), isTrue);
   });
 
   test(

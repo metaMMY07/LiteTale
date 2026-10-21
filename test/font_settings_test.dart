@@ -56,6 +56,23 @@ void main() {
   tearDown(() async => cubit.close());
 
   test(
+    'reader browser bytes share validation and reset invalidates the copy',
+    () async {
+      await cubit.importFont(FontScope.reader);
+      final copies = await Future.wait([
+        cubit.readerBytes(),
+        cubit.readerBytes(),
+      ]);
+      expect(copies[0], same(copies[1]));
+      expect(copies[0], fontBytes);
+      await cubit.reset(FontScope.reader);
+      expect(await cubit.readerBytes(), isNull);
+      await cubit.importFont(FontScope.reader);
+      expect(await cubit.readerBytes(), isNot(same(copies[0])));
+    },
+  );
+
+  test(
     'imports independent fonts, copies bytes, reloads without picker file, resets one scope',
     () async {
       expect(await cubit.importFont(FontScope.app), isTrue);

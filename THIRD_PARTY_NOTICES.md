@@ -36,7 +36,13 @@ Android 集成测试包含上述字体的少量字符 WOFF2 子集，仅用于�
 
 ## EPUB 参考与依赖
 
-本地 EPUB 的导入和解析为独立 Dart 实现。架构研究参考 [Anx Reader 1.14.0](https://github.com/Anxcye/anx-reader/releases/tag/v1.14.0)（MIT）、[Readium Kotlin Toolkit 3.4.0](https://github.com/readium/kotlin-toolkit/tree/3.4.0)（BSD-3-Clause）、[foliate-js](https://github.com/johnfactotum/foliate-js)（MIT）与 KOReader 的阅读行为（AGPL-3.0）；固定版本、发布 APK 的 REA 证据和采用范围见 [研究记录](docs/qa/epub-local-2026-10/RESEARCH.md)。运行时使用 `xml` 6.5.0（MIT）解析包元数据，以及 `archive` 3.6.1（MIT）的 CRC 工具；依赖许可可在 Flutter 许可证页查看。
+本地 EPUB 的导入和解析为独立 Dart 实现。架构研究参考 [Anx Reader 1.14.0](https://github.com/Anxcye/anx-reader/releases/tag/v1.14.0)（MIT）、[Readium Kotlin Toolkit 3.4.0](https://github.com/readium/kotlin-toolkit/tree/3.4.0)（BSD-3-Clause）、[foliate-js](https://github.com/johnfactotum/foliate-js)（MIT）与 KOReader 的阅读行为（AGPL-3.0）。运行时使用 `xml` 6.5.0（MIT）解析包元数据，以及 `archive` 3.6.1（MIT）的 CRC 工具；依赖许可可在 Flutter 许可证页查看。
+
+1.0.0 使用 `csslib` 1.0.2（BSD-3-Clause，Dart 项目贡献者）解析 CSS 语法树；选择器匹配、层叠、受限样式映射及原生富文本排版由本项目实现。没有移植 Anx 的整个 WebView 阅读器。依赖的完整版权及许可保留在包内，并可通过 Flutter 许可证页查看。
+
+## EPUB CSS 分页引擎（1.0.0+71）
+
+`lib/assets/epub_foliate_paginator.js` 为 [foliate-js](https://github.com/johnfactotum/foliate-js/blob/78914aef4466eb960965702401634c2cb348e9b1/paginator.js) 的原始分页模块，固定提交 `78914aef4466eb960965702401634c2cb348e9b1`。按 MIT 许可使用，完整版权及许可随 APK 保存于 `lib/assets/epub_foliate_LICENSE.txt`。LiteTale 自有适配层负责离线资源、安全清理、混合版式的逐资源分派、位图缓存和阅读界面接线；没有复制 Foliate 的整个应用。本地 EPUB 使用普通翻页。
 
 ## PTQBookPageView / PTQFlipper
 

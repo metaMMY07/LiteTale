@@ -1,3 +1,5 @@
+import 'package:wild/services/wenku8_rate_limit.dart';
+
 /// Returns whether a native Wenku8 request should be retried through WebView.
 ///
 /// Besides Cloudflare responses, Wenku8 occasionally closes a TLS connection
@@ -5,6 +7,7 @@
 /// while Chromium/WebView can still load the same page. Keep this detection in
 /// one place so bookshelf reads and writes behave consistently.
 bool shouldUseWenku8WebViewFallback(Object? error) {
+  if (isWenku8RateLimited(error)) return false;
   final message = error.toString().toLowerCase();
   const markers = <String>[
     '403',
@@ -45,6 +48,7 @@ bool shouldOfferWenku8SiteVerification(Object? error) {
 }
 
 String wenku8HomeErrorMessage(Object? error) {
+  if (isWenku8RateLimited(error)) return wenku8ReadErrorMessage(error);
   final message = error.toString().toLowerCase();
   if (message.contains('403') ||
       message.contains('cloudflare') ||
@@ -65,4 +69,20 @@ String wenku8HomeErrorMessage(Object? error) {
     return '文库8连接暂时中断。请检查网络后重试；仍无法打开时，可进入文库8站点查看。';
   }
   return '文库8推荐暂时无法加载，请稍后重试。';
+}
+
+/// Keep Rust backtraces, response HTML and platform details out of the reader.
+String wenku8ReadErrorMessage(Object? error) {
+  if (error is Wenku8RateLimited) return error.toString();
+  if (isWenku8RateLimited(error)) {
+    return '文库8暂时限制了请求（HTTP 429），请稍后重试。已有书架和已缓存章节仍可使用。';
+  }
+  final message = error.toString();
+  if (RegExp(r'timeout|timed out|超时', caseSensitive: false).hasMatch(message)) {
+    return '文库8加载超时，请稍后重试。';
+  }
+  if (shouldOfferWenku8SiteVerification(error)) {
+    return '文库8连接中断或需要站点验证，请重试或打开文库8验证。';
+  }
+  return '文库8暂时无法加载，请稍后重试。';
 }
