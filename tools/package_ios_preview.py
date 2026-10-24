@@ -48,10 +48,21 @@ def package(app, output):
     for relative in ("AssetManifest.bin", "lib/assets/fonts/LXGWNeoZhiSongPlus.ttf"):
         if not (assets / relative).is_file():
             raise ValueError(f"Missing Flutter resource: {relative}")
-    # FRB uses process symbols on statically linked iOS builds.
-    symbols = command("xcrun", "nm", "-gU", str(executable))
-    if "frb_" not in symbols:
-        raise ValueError("Rust bridge symbols are missing from the device executable.")
+    # CocoaPods may force-load the static Rust archive into its plugin framework
+    # rather than Runner. Both are loaded into the app process for Dart FFI.
+    bridge_binary = None
+    candidates = [executable]
+    for framework in (app / "Frameworks").glob("*.framework"):
+        binary = framework / framework.stem
+        if binary.is_file():
+            candidates.append(binary)
+    for binary in candidates:
+        symbols = command("xcrun", "nm", "-gU", str(binary))
+        if "frb_" in symbols:
+            bridge_binary = str(binary.relative_to(app))
+            break
+    if bridge_binary is None:
+        raise ValueError("Rust bridge symbols are missing from the packaged application.")
     version = str(info["CFBundleShortVersionString"])
     build = str(info["CFBundleVersion"])
     if not all(part.isdigit() for part in version.split(".")) or not build.isdigit():
@@ -70,9 +81,11 @@ def package(app, output):
         packaged = plistlib.loads(archive.read("Payload/Runner.app/Info.plist"))
         if packaged["CFBundleIdentifier"] != EXPECTED_BUNDLE:
             raise ValueError("Packaged application identity does not match.")
+    with ipa.open("rb") as file:
+        digest = hashlib.file_digest(file, "sha256").hexdigest()
     manifest = {
         "file": ipa.name,
-        "sha256": hashlib.file_digest(ipa.open("rb"), "sha256").hexdigest(),
+        "sha256": digest,
         "bytes": ipa.stat().st_size,
         "version": version,
         "ios_build": build,
@@ -80,6 +93,7 @@ def package(app, output):
         "architectures": architectures,
         "platform": "iphoneos",
         "device_families": info["UIDeviceFamily"],
+        "rust_bridge_binary": bridge_binary,
         "minimum_os_version": info.get("MinimumOSVersion"),
         "xcode": command("xcodebuild", "-version"),
         "flutter": json.loads(command("flutter", "--version", "--machine")),

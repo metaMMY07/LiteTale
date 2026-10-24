@@ -8,6 +8,12 @@ extension on String {
 }
 
 class Environment {
+  /// Optional exact CI toolchain; other builds retain the crate's channel.
+  static String? get rustToolchain {
+    final value = Platform.environment['CARGOKIT_RUST_TOOLCHAIN']?.trim();
+    return value == null || value.isEmpty ? null : value;
+  }
+
   /// Current build configuration (debug or release).
   static String get configuration =>
       _getEnv("CARGOKIT_CONFIGURATION").toLowerCase();

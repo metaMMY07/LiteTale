@@ -20,6 +20,8 @@ A new Flutter FFI plugin project.
   s.source           = { :path => '.' }
   s.source_files = 'Classes/**/*'
   s.dependency 'Flutter'
+  # The bundled WOFF2 font decoder contains C++ objects in the Rust archive.
+  s.libraries = 'c++'
   s.platform = :ios, '11.0'
 
   # Flutter.framework does not contain a i386 slice.
