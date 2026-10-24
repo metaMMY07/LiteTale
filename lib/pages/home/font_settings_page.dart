@@ -1,3 +1,5 @@
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
@@ -65,7 +67,7 @@ class FontSettingsPage extends StatelessWidget {
               ],
               for (final scope in FontScope.values) ...[
                 const SizedBox(height: 20),
-                Card.filled(
+                AppleGlassCard.filled(
                   margin: EdgeInsets.zero,
                   child: Padding(
                     padding: const EdgeInsets.all(20),
@@ -129,7 +131,7 @@ class FontSettingsPage extends StatelessWidget {
                           spacing: 12,
                           runSpacing: 8,
                           children: [
-                            FilledButton.icon(
+                            AppButton.filledIcon(
                               key: ValueKey('font-import-${scope.name}'),
                               onPressed:
                                   state.busy != null
@@ -149,7 +151,7 @@ class FontSettingsPage extends StatelessWidget {
                                 state.busy == scope ? '正在处理…' : '导入字体',
                               ),
                             ),
-                            TextButton(
+                            AppButton.text(
                               key: ValueKey('font-reset-${scope.name}'),
                               onPressed:
                                   state.busy != null ||

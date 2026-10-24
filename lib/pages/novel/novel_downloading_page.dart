@@ -1,3 +1,5 @@
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' as w8;
@@ -32,7 +34,8 @@ class _NovelDownloadingPageState extends State<NovelDownloadingPage> {
     // 如果有已下载的章节，初始化选中状态
     if (widget.existsDownload != null) {
       for (final chapter in widget.existsDownload!.novelDownloadChapter) {
-        if (chapter.downloadStatus == 0) { // DOWNLOAD_STATUS_NOT_DOWNLOAD
+        if (chapter.downloadStatus == 0) {
+          // DOWNLOAD_STATUS_NOT_DOWNLOAD
           _selectedChapters.add(chapter.id);
         }
       }
@@ -59,8 +62,10 @@ class _NovelDownloadingPageState extends State<NovelDownloadingPage> {
           for (final chapter in volume.chapters) {
             // 只选择未下载的章节
             if (widget.existsDownload == null ||
-                !widget.existsDownload!.novelDownloadChapter
-                    .any((c) => c.id == chapter.cid && c.downloadStatus != 0)) { // DOWNLOAD_STATUS_NOT_DOWNLOAD
+                !widget.existsDownload!.novelDownloadChapter.any(
+                  (c) => c.id == chapter.cid && c.downloadStatus != 0,
+                )) {
+              // DOWNLOAD_STATUS_NOT_DOWNLOAD
               _selectedChapters.add(chapter.cid);
             }
           }
@@ -72,9 +77,9 @@ class _NovelDownloadingPageState extends State<NovelDownloadingPage> {
 
   Future<void> _startDownload() async {
     if (_selectedChapters.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请选择要下载的章节')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请选择要下载的章节')));
       return;
     }
 
@@ -84,15 +89,15 @@ class _NovelDownloadingPageState extends State<NovelDownloadingPage> {
         cidList: _selectedChapters.toList(),
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('开始下载')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('开始下载')));
       Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('下载失败: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('下载失败: $e')));
     }
   }
 
@@ -102,11 +107,13 @@ class _NovelDownloadingPageState extends State<NovelDownloadingPage> {
       appBar: AppBar(
         title: const Text('选择下载章节'),
         actions: [
-          IconButton(
-            icon: Icon(_isSelectingAll ? Icons.check_box : Icons.check_box_outline_blank),
+          AppIconButton(
+            icon: Icon(
+              _isSelectingAll ? Icons.check_box : Icons.check_box_outline_blank,
+            ),
             onPressed: _toggleSelectAll,
           ),
-          IconButton(
+          AppIconButton(
             icon: const Icon(Icons.download),
             onPressed: _startDownload,
           ),
@@ -115,7 +122,7 @@ class _NovelDownloadingPageState extends State<NovelDownloadingPage> {
       body: Column(
         children: [
           // 小说信息卡片
-          Card(
+          AppleGlassCard(
             margin: const EdgeInsets.all(16),
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -153,7 +160,9 @@ class _NovelDownloadingPageState extends State<NovelDownloadingPage> {
                           const SizedBox(height: 8),
                           Text(
                             '已下载：${widget.existsDownload!.novelDownload.downloadChapterCount}/${widget.existsDownload!.novelDownload.chooseChapterCount}章',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            style: Theme.of(
+                              context,
+                            ).textTheme.bodyMedium?.copyWith(
                               color: Theme.of(context).colorScheme.primary,
                             ),
                           ),
@@ -171,8 +180,11 @@ class _NovelDownloadingPageState extends State<NovelDownloadingPage> {
               itemCount: widget.volumes.length,
               itemBuilder: (context, volumeIndex) {
                 final volume = widget.volumes[volumeIndex];
-                return Card(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                return AppleGlassCard(
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -180,26 +192,43 @@ class _NovelDownloadingPageState extends State<NovelDownloadingPage> {
                         padding: const EdgeInsets.all(16),
                         child: Text(
                           volume.title,
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                       ),
                       const Divider(height: 1),
                       ...volume.chapters.map((chapter) {
-                        final isDownloaded = widget.existsDownload?.novelDownloadChapter
-                            .any((c) => c.id == chapter.cid && c.downloadStatus != 0) ?? false; // DOWNLOAD_STATUS_NOT_DOWNLOAD
-                        final isSelected = _selectedChapters.contains(chapter.cid);
+                        final isDownloaded =
+                            widget.existsDownload?.novelDownloadChapter.any(
+                              (c) =>
+                                  c.id == chapter.cid && c.downloadStatus != 0,
+                            ) ??
+                            false; // DOWNLOAD_STATUS_NOT_DOWNLOAD
+                        final isSelected = _selectedChapters.contains(
+                          chapter.cid,
+                        );
 
                         return ListTile(
                           title: Text(chapter.title),
-                          trailing: isDownloaded
-                              ? const Icon(Icons.check_circle, color: Colors.green)
-                              : Checkbox(
-                                  value: isSelected,
-                                  onChanged: isDownloaded ? null : (_) => _toggleChapterSelection(chapter.cid),
-                                ),
-                          onTap: isDownloaded ? null : () => _toggleChapterSelection(chapter.cid),
+                          trailing:
+                              isDownloaded
+                                  ? const Icon(
+                                    Icons.check_circle,
+                                    color: Colors.green,
+                                  )
+                                  : AppCheckbox(
+                                    value: isSelected,
+                                    onChanged:
+                                        isDownloaded
+                                            ? null
+                                            : (_) => _toggleChapterSelection(
+                                              chapter.cid,
+                                            ),
+                                  ),
+                          onTap:
+                              isDownloaded
+                                  ? null
+                                  : () => _toggleChapterSelection(chapter.cid),
                         );
                       }).toList(),
                     ],

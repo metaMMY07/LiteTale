@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import 'package:wild/models/reader_page.dart' show ReaderFragment;
@@ -132,7 +133,7 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
     final readerBackgroundCubit = context.read<ReaderBackgroundCubit>();
     final autoScrollConfigCubit = context.read<AutoScrollConfigCubit>();
 
-    showModalBottomSheet(
+    showAppBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (BuildContext bottomSheetContext) {
@@ -325,7 +326,7 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                                               context,
                                               isAutoScrolling,
                                             ) {
-                                              return IconButton(
+                                              return AppIconButton(
                                                 icon: Icon(
                                                   isAutoScrolling
                                                       ? Icons.pause
@@ -338,15 +339,15 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                                               );
                                             },
                                           ),
-                                          IconButton(
+                                          AppIconButton(
                                             icon: const Icon(Icons.settings),
                                             onPressed:
                                                 () => _showSettings(context),
                                           ),
-                                          IconButton(
+                                          AppIconButton(
                                             icon: const Icon(Icons.menu),
                                             onPressed: () {
-                                              showModalBottomSheet(
+                                              showAppBottomSheet(
                                                 context: context,
                                                 builder:
                                                     (
@@ -417,7 +418,7 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                                                     ),
                                                   ),
                                                   const SizedBox(height: 16),
-                                                  ElevatedButton(
+                                                  AppButton.elevated(
                                                     onPressed: () {
                                                       context
                                                           .read<
@@ -662,14 +663,14 @@ class _ReaderContent extends StatelessWidget {
                                       mainAxisAlignment:
                                           MainAxisAlignment.spaceBetween,
                                       children: [
-                                        TextButton(
+                                        AppButton.text(
                                           onPressed: onPreviousChapter,
                                           child: Text(
                                             '上一章',
                                             style: TextStyle(color: textColor),
                                           ),
                                         ),
-                                        TextButton(
+                                        AppButton.text(
                                           onPressed: onNextChapter,
                                           child: Text(
                                             '下一章',
@@ -774,11 +775,11 @@ class _ReaderSettings extends StatelessWidget {
       Color initialColor,
       Function(Color) onColorChanged,
     ) {
-      showDialog(
+      showAdaptiveDialog(
         context: context,
         builder: (BuildContext context) {
           Color pickerColor = initialColor;
-          return AlertDialog(
+          return AlertDialog.adaptive(
             title: const Text('选择颜色'),
             content: SingleChildScrollView(
               child: ColorPicker(
@@ -793,13 +794,13 @@ class _ReaderSettings extends StatelessWidget {
               ),
             ),
             actions: <Widget>[
-              TextButton(
+              AppButton.text(
                 child: const Text('取消'),
                 onPressed: () {
                   Navigator.of(context).pop();
                 },
               ),
-              TextButton(
+              AppButton.text(
                 child: const Text('确定'),
                 onPressed: () async {
                   onColorChanged(pickerColor);
@@ -840,7 +841,7 @@ class _ReaderSettings extends StatelessWidget {
                   Expanded(
                     child: BlocBuilder<ReaderTypeCubit, ReaderType>(
                       builder: (context, type) {
-                        return SegmentedButton<ReaderType>(
+                        return AppSegmentedButton<ReaderType>(
                           segments: const [
                             ButtonSegment<ReaderType>(
                               value: ReaderType.normal,
@@ -873,7 +874,7 @@ class _ReaderSettings extends StatelessWidget {
                     children: [
                       Text('字体大小'),
                       Expanded(
-                        child: Slider(
+                        child: AppSlider(
                           value: fontSize,
                           min: 14,
                           max: 24,
@@ -896,7 +897,7 @@ class _ReaderSettings extends StatelessWidget {
                     children: [
                       Text('段落间距'),
                       Expanded(
-                        child: Slider(
+                        child: AppSlider(
                           value: spacing,
                           min: 16,
                           max: 32,
@@ -919,7 +920,7 @@ class _ReaderSettings extends StatelessWidget {
                     children: [
                       Text('行高'),
                       Expanded(
-                        child: Slider(
+                        child: AppSlider(
                           value: lineHeight,
                           min: 1.0,
                           max: 2.0,
@@ -950,7 +951,7 @@ class _ReaderSettings extends StatelessWidget {
                                     children: [
                                       Text('顶部边距'),
                                       Expanded(
-                                        child: Slider(
+                                        child: AppSlider(
                                           value: topBarHeight,
                                           min: 0,
                                           max: 100,
@@ -974,7 +975,7 @@ class _ReaderSettings extends StatelessWidget {
                                     children: [
                                       Text('底部边距'),
                                       Expanded(
-                                        child: Slider(
+                                        child: AppSlider(
                                           value: bottomBarHeight,
                                           min: 0,
                                           max: 100,
@@ -1000,7 +1001,7 @@ class _ReaderSettings extends StatelessWidget {
                                     children: [
                                       Text('左边距'),
                                       Expanded(
-                                        child: Slider(
+                                        child: AppSlider(
                                           value: leftPadding,
                                           min: 0,
                                           max: 50,
@@ -1023,7 +1024,7 @@ class _ReaderSettings extends StatelessWidget {
                                     children: [
                                       Text('右边距'),
                                       Expanded(
-                                        child: Slider(
+                                        child: AppSlider(
                                           value: rightPadding,
                                           min: 0,
                                           max: 50,
@@ -1062,7 +1063,7 @@ class _ReaderSettings extends StatelessWidget {
                   Expanded(
                     child: BlocBuilder<ThemeCubit, ReaderTheme>(
                       builder: (context, theme) {
-                        return SegmentedButton<ReaderThemeMode>(
+                        return AppSegmentedButton<ReaderThemeMode>(
                           segments: const [
                             ButtonSegment<ReaderThemeMode>(
                               value: ReaderThemeMode.auto,
@@ -1103,7 +1104,7 @@ class _ReaderSettings extends StatelessWidget {
                   Expanded(
                     child: BlocBuilder<ThemeCubit, ReaderTheme>(
                       builder: (context, theme) {
-                        return OutlinedButton.icon(
+                        return AppButton.outlinedIcon(
                           icon: Container(
                             width: 24,
                             height: 24,
@@ -1130,7 +1131,7 @@ class _ReaderSettings extends StatelessWidget {
                   Expanded(
                     child: BlocBuilder<ThemeCubit, ReaderTheme>(
                       builder: (context, theme) {
-                        return OutlinedButton.icon(
+                        return AppButton.outlinedIcon(
                           icon: Container(
                             width: 24,
                             height: 24,
@@ -1168,7 +1169,7 @@ class _ReaderSettings extends StatelessWidget {
                   Expanded(
                     child: BlocBuilder<ThemeCubit, ReaderTheme>(
                       builder: (context, theme) {
-                        return OutlinedButton.icon(
+                        return AppButton.outlinedIcon(
                           icon: Container(
                             width: 24,
                             height: 24,
@@ -1195,7 +1196,7 @@ class _ReaderSettings extends StatelessWidget {
                   Expanded(
                     child: BlocBuilder<ThemeCubit, ReaderTheme>(
                       builder: (context, theme) {
-                        return OutlinedButton.icon(
+                        return AppButton.outlinedIcon(
                           icon: Container(
                             width: 24,
                             height: 24,
@@ -1235,7 +1236,7 @@ class _ReaderSettings extends StatelessWidget {
                     children: [
                       Text('滚动速度'),
                       Expanded(
-                        child: Slider(
+                        child: AppSlider(
                           value: config.scrollSpeed,
                           min: 0.5,
                           max: 3.0,
@@ -1261,7 +1262,7 @@ class _ReaderSettings extends StatelessWidget {
                     children: [
                       Text('滚动间隔'),
                       Expanded(
-                        child: Slider(
+                        child: AppSlider(
                           value: config.scrollInterval.toDouble(),
                           min: 8,
                           max: 32,
@@ -1287,7 +1288,7 @@ class _ReaderSettings extends StatelessWidget {
                     children: [
                       Text('背景透明度'),
                       Expanded(
-                        child: Slider(
+                        child: AppSlider(
                           value: backgroundState.opacity,
                           min: 0.0,
                           max: 1.0,
@@ -1321,7 +1322,7 @@ class _ReaderSettings extends StatelessWidget {
                       Row(
                         children: [
                           Expanded(
-                            child: OutlinedButton.icon(
+                            child: AppButton.outlinedIcon(
                               icon: Icon(
                                 backgroundState.lightBackgroundExists
                                     ? Icons.image
@@ -1340,7 +1341,7 @@ class _ReaderSettings extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                           if (backgroundState.lightBackgroundExists)
-                            OutlinedButton.icon(
+                            AppButton.outlinedIcon(
                               icon: const Icon(Icons.delete),
                               label: const Text('删除'),
                               onPressed: () async {
@@ -1354,7 +1355,7 @@ class _ReaderSettings extends StatelessWidget {
                       Row(
                         children: [
                           Expanded(
-                            child: OutlinedButton.icon(
+                            child: AppButton.outlinedIcon(
                               icon: Icon(
                                 backgroundState.darkBackgroundExists
                                     ? Icons.image
@@ -1373,7 +1374,7 @@ class _ReaderSettings extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                           if (backgroundState.darkBackgroundExists)
-                            OutlinedButton.icon(
+                            AppButton.outlinedIcon(
                               icon: const Icon(Icons.delete),
                               label: const Text('删除'),
                               onPressed: () async {
@@ -1389,7 +1390,7 @@ class _ReaderSettings extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               // 重置按钮
-              TextButton(
+              AppButton.text(
                 onPressed: () async {
                   await themeCubit.resetToDefault();
                   await topBarHeightCubit.updateHeight(56);
@@ -1508,7 +1509,7 @@ class _ChapterListState extends State<_ChapterList> {
             title: const Text('目录'),
             automaticallyImplyLeading: false,
             actions: [
-              IconButton(
+              AppIconButton(
                 icon: const Icon(Icons.close),
                 onPressed: () => Navigator.pop(context),
               ),

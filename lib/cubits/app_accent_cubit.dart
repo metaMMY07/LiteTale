@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/src/rust/api/database.dart';
+import 'package:flutter/foundation.dart';
+import 'package:wild/theme/ios_system_colors.dart';
 
 const appAccentColors = <String, (String, Color)>{
   'iris': ('鸢尾紫', Color(0xFF6750A4)),
@@ -15,6 +17,8 @@ final _customAccentPattern = RegExp(r'^custom:#[0-9a-fA-F]{6}$');
 
 /// A system palette has no seed; preset and custom choices have one.
 Color? appAccentSeed(String value) {
+  if (iosAccentColors.containsKey(value))
+    return iosAccentColors[value]!.$2.color;
   final preset = appAccentColors[value];
   if (preset != null) return preset.$2;
   if (!_customAccentPattern.hasMatch(value)) return null;
@@ -27,6 +31,7 @@ String customAccentValue(Color color) =>
 bool _validAccent(String value) =>
     value == 'system' ||
     appAccentColors.containsKey(value) ||
+    iosAccentColors.containsKey(value) ||
     _customAccentPattern.hasMatch(value);
 
 class AppAccentCubit extends Cubit<String> {
@@ -49,7 +54,11 @@ class AppAccentCubit extends Cubit<String> {
     try {
       final value = await _read();
       if (!isClosed && revision == _revision && _validAccent(value)) {
-        emit(value);
+        emit(
+          defaultTargetPlatform == TargetPlatform.iOS
+              ? iosAccentKey(value)
+              : value,
+        );
       }
     } catch (_) {
       // A missing preference uses the system palette.

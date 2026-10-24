@@ -1,16 +1,14 @@
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/source_api.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 
 class ReviewsPage extends StatefulWidget {
   final String aid;
   final String title;
 
-  const ReviewsPage({
-    super.key,
-    required this.aid,
-    required this.title,
-  });
+  const ReviewsPage({super.key, required this.aid, required this.title});
 
   @override
   State<ReviewsPage> createState() => _ReviewsPageState();
@@ -66,9 +64,7 @@ class _ReviewsPageState extends State<ReviewsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('${widget.title} - 评论'),
-      ),
+      appBar: AppBar(title: Text('${widget.title} - 评论')),
       body: _buildBody(),
     );
   }
@@ -81,7 +77,7 @@ class _ReviewsPageState extends State<ReviewsPage> {
           children: [
             Text(_errorMessage!),
             const SizedBox(height: 16),
-            ElevatedButton(
+            AppButton.elevated(
               onPressed: () => _loadReviews(refresh: true),
               child: const Text('重试'),
             ),
@@ -101,10 +97,13 @@ class _ReviewsPageState extends State<ReviewsPage> {
     return RefreshIndicator(
       onRefresh: () => _loadReviews(refresh: true),
       child: ListView.builder(
-        itemCount: _currentPage!.records.length + (_currentPage!.currentPage < _currentPage!.maxPage ? 1 : 0),
+        itemCount:
+            _currentPage!.records.length +
+            (_currentPage!.currentPage < _currentPage!.maxPage ? 1 : 0),
         itemBuilder: (context, index) {
           if (index == _currentPage!.records.length) {
-            if (!_isLoading && _currentPage!.currentPage < _currentPage!.maxPage) {
+            if (!_isLoading &&
+                _currentPage!.currentPage < _currentPage!.maxPage) {
               Future.microtask(() => _loadReviews());
               return const Center(
                 child: Padding(
@@ -117,7 +116,7 @@ class _ReviewsPageState extends State<ReviewsPage> {
           }
 
           final review = _currentPage!.records[index];
-          return Card(
+          return AppleGlassCard(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -126,9 +125,7 @@ class _ReviewsPageState extends State<ReviewsPage> {
                 children: [
                   Row(
                     children: [
-                      CircleAvatar(
-                        child: const Icon(Icons.person),
-                      ),
+                      CircleAvatar(child: const Icon(Icons.person)),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Column(

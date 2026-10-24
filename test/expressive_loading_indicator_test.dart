@@ -5,12 +5,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 
 Future<Uint8List> indicatorPixels(WidgetTester tester) async {
   final boundary = tester.renderObject<RenderRepaintBoundary>(
     find.descendant(
-      of: find.byType(ExpressiveLoadingIndicator),
+      of: find.byType(AppLoadingIndicator),
       matching: find.byType(RepaintBoundary),
     ),
   );
@@ -23,7 +23,7 @@ Future<Uint8List> indicatorPixels(WidgetTester tester) async {
 Future<void> saveIndicatorPreview(WidgetTester tester, String name) async {
   final boundary = tester.renderObject<RenderRepaintBoundary>(
     find.descendant(
-      of: find.byType(ExpressiveLoadingIndicator),
+      of: find.byType(AppLoadingIndicator),
       matching: find.byType(RepaintBoundary),
     ),
   );
@@ -32,13 +32,13 @@ Future<void> saveIndicatorPreview(WidgetTester tester, String name) async {
   image.dispose();
   final directory = Directory('build/material-loading');
   await directory.create(recursive: true);
-  await File('${directory.path}/$name.png').writeAsBytes(
-    data!.buffer.asUint8List(),
-  );
+  await File(
+    '${directory.path}/$name.png',
+  ).writeAsBytes(data!.buffer.asUint8List());
 }
 
 void main() {
-  testWidgets('loading shape changes while staying in its own paint boundary', (
+  testWidgets('ordinary spinner rotates inside its own paint boundary', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -46,12 +46,16 @@ void main() {
     );
     final initial = (await tester.runAsync(() => indicatorPixels(tester)))!;
     if (Platform.environment['LITETALE_LOADING_CAPTURE'] == '1') {
-      await tester.runAsync(() => saveIndicatorPreview(tester, 'shape-circle'));
+      await tester.runAsync(
+        () => saveIndicatorPreview(tester, 'spinner-first'),
+      );
     }
     await tester.pump(const Duration(milliseconds: 1100));
     final later = (await tester.runAsync(() => indicatorPixels(tester)))!;
     if (Platform.environment['LITETALE_LOADING_CAPTURE'] == '1') {
-      await tester.runAsync(() => saveIndicatorPreview(tester, 'shape-morphed'));
+      await tester.runAsync(
+        () => saveIndicatorPreview(tester, 'spinner-rotated'),
+      );
     }
     expect(listEquals(initial, later), isFalse);
     expect(
@@ -63,7 +67,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('system reduced motion keeps a stable loading shape', (
+  testWidgets('system reduced motion keeps a stable loading ring', (
     tester,
   ) async {
     await tester.pumpWidget(

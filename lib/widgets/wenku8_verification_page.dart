@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -7,7 +8,7 @@ import 'package:wild/services/wenku8_browser.dart';
 import 'package:wild/sources/source_api.dart' show getSessionCookieString;
 import 'package:wild/src/rust/wenku8/models.dart' show HomeBlock;
 import 'package:wild/utils/wenku8_home_dom.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/widgets/wenku_webview.dart';
 
 /// Visible, ordinary site verification/login. Cookies stay in the WebView.
@@ -198,12 +199,12 @@ class _Wenku8VerificationPageState extends State<Wenku8VerificationPage> {
       appBar: AppBar(
         title: const Text('文库8站点验证'),
         actions: [
-          IconButton(
+          AppIconButton(
             onPressed: _initialized ? _openLoginPage : null,
             tooltip: '登录',
             icon: const Icon(Icons.login_rounded),
           ),
-          IconButton(
+          AppIconButton(
             onPressed: _initialized ? _openHomePage : null,
             tooltip: '文库8首页',
             icon: const Icon(Icons.home_outlined),
@@ -216,7 +217,7 @@ class _Wenku8VerificationPageState extends State<Wenku8VerificationPage> {
             MaterialBanner(
               content: Text(error),
               actions: [
-                TextButton(
+                AppButton.text(
                   onPressed: () => setState(() => _error = null),
                   child: const Text('知道了'),
                 ),
@@ -245,7 +246,7 @@ class _Wenku8VerificationPageState extends State<Wenku8VerificationPage> {
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
-                    child: FilledButton.icon(
+                    child: AppButton.filledIcon(
                       onPressed: _extractingHome ? null : _useLoadedHome,
                       icon:
                           _extractingHome

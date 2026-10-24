@@ -1,3 +1,7 @@
+import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/theme/ios_system_colors.dart';
+import 'package:wild/theme/ios_glass_theme.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -89,46 +93,50 @@ class _ThemePaperPageState extends State<ThemePaperPage> {
               ),
             ),
             const SizedBox(height: 10),
-            SettingsSwitch(
-              icon: Icons.format_color_fill_outlined,
-              title: '系统动态配色',
-              description: '从系统主题提取应用颜色（Android 12+）',
-              value: accent == 'system',
-              onChanged:
-                  Platform.isAndroid && sdk < 31
-                      ? null
-                      : (v) => settingsAction(
-                        context,
-                        () => context.read<AppAccentCubit>().select(
-                          v ? 'system' : 'iris',
+            if (!usesAppleGlass)
+              SettingsSwitch(
+                icon: Icons.format_color_fill_outlined,
+                title: '系统动态配色',
+                description: '从系统主题提取应用颜色（Android 12+）',
+                value: accent == 'system',
+                onChanged:
+                    Platform.isAndroid && sdk < 31
+                        ? null
+                        : (v) => settingsAction(
+                          context,
+                          () => context.read<AppAccentCubit>().select(
+                            v ? 'system' : 'iris',
+                          ),
                         ),
-                      ),
-            ),
+              ),
             SettingsEntry(
               icon: Icons.palette_outlined,
               title: '应用配色',
-              description: '预设颜色或自定义颜色',
+              description: usesAppleGlass ? 'iOS 系统颜色，自动适配深浅色' : '预设颜色或自定义颜色',
               option:
-                  accent == 'system'
+                  usesAppleGlass
+                      ? iosAccentColors[iosAccentKey(accent)]?.$1
+                      : accent == 'system'
                       ? '跟随系统'
                       : appAccentColors[accent]?.$1 ?? '自定义颜色',
               filled: false,
               onTap: () => showAppColors(context),
               trailing: _ColorDot(colors.primary),
             ),
-            SettingsSwitch(
-              icon: Icons.nightlight_round,
-              title: '纯黑深色主题',
-              description: '深色模式使用更深的应用背景',
-              value: preferences.blackTheme,
-              onChanged:
-                  (v) => settingsAction(
-                    context,
-                    () => context.read<SettingsPreferencesCubit>().update(
-                      (s) => s.copyWith(blackTheme: v),
+            if (!usesAppleGlass)
+              SettingsSwitch(
+                icon: Icons.nightlight_round,
+                title: '纯黑深色主题',
+                description: '深色模式使用更深的应用背景',
+                value: preferences.blackTheme,
+                onChanged:
+                    (v) => settingsAction(
+                      context,
+                      () => context.read<SettingsPreferencesCubit>().update(
+                        (s) => s.copyWith(blackTheme: v),
+                      ),
                     ),
-                  ),
-            ),
+              ),
             if (Platform.isAndroid)
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 2),
@@ -137,7 +145,7 @@ class _ThemePaperPageState extends State<ThemePaperPage> {
             const SettingsSectionLabel('纸张'),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: SegmentedButton<bool>(
+              child: AppSegmentedButton<bool>(
                 segments: const [
                   ButtonSegment(
                     value: false,
@@ -228,7 +236,7 @@ class _ThemePaperPageState extends State<ThemePaperPage> {
                   trailing:
                       paperPath == null
                           ? const Icon(Icons.add)
-                          : IconButton(
+                          : AppIconButton(
                             tooltip: '恢复纯色纸张',
                             icon: const Icon(Icons.close),
                             onPressed:
@@ -323,10 +331,10 @@ Future<Color?> pickSettingsColor(
   Color initial,
 ) {
   var value = initial;
-  return showDialog<Color>(
+  return showAdaptiveDialog<Color>(
     context: context,
     builder:
-        (context) => AlertDialog(
+        (context) => AlertDialog.adaptive(
           title: Text(title),
           content: SingleChildScrollView(
             child: ColorPicker(
@@ -337,11 +345,11 @@ Future<Color?> pickSettingsColor(
             ),
           ),
           actions: [
-            TextButton(
+            AppButton.text(
               onPressed: () => Navigator.pop(context),
               child: const Text('取消'),
             ),
-            FilledButton(
+            AppButton.filled(
               onPressed: () => Navigator.pop(context, value),
               child: const Text('保存'),
             ),
@@ -442,10 +450,16 @@ class _ThemePreviewPainter extends CustomPainter {
     canvas.save();
     canvas.clipRRect(rect);
     void preview(bool dark) {
-      final scheme = ColorScheme.fromSeed(
-        seedColor: seed,
-        brightness: dark ? Brightness.dark : Brightness.light,
-      );
+      final scheme =
+          usesAppleGlass
+              ? iosGlassTheme(
+                dark ? Brightness.dark : Brightness.light,
+                accent: seed,
+              ).colorScheme
+              : ColorScheme.fromSeed(
+                seedColor: seed,
+                brightness: dark ? Brightness.dark : Brightness.light,
+              );
       final paint = Paint()..color = scheme.surface;
       canvas.drawRect(Rect.fromLTWH(0, 0, 100, height), paint);
       paint.color = scheme.secondaryContainer;
@@ -550,7 +564,7 @@ class _SettingsValueSliderState extends State<SettingsValueSlider> {
               Text('${value.toStringAsFixed(widget.decimals)}${widget.suffix}'),
             ],
           ),
-          Slider(
+          AppSlider(
             value: value,
             min: widget.min,
             max: widget.max,

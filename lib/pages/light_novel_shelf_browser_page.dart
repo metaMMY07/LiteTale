@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -210,18 +211,18 @@ class _LightNovelShelfBrowserPageState
         title: Text(widget.title, overflow: TextOverflow.ellipsis),
         actions: [
           if (_canGoBack)
-            IconButton(
+            AppIconButton(
               tooltip: '返回 LiteTale',
               onPressed: () => Navigator.of(context).maybePop(),
               icon: const Icon(Icons.close),
             ),
           if (_initialized)
-            IconButton(
+            AppIconButton(
               tooltip: '刷新',
               onPressed: _reload,
               icon: const Icon(Icons.refresh),
             ),
-          IconButton(
+          AppIconButton(
             tooltip: '在浏览器中打开',
             onPressed: _openExternal,
             icon: const Icon(Icons.open_in_browser),
@@ -242,7 +243,7 @@ class _LightNovelShelfBrowserPageState
                           children: [
                             Text(_error!, textAlign: TextAlign.center),
                             const SizedBox(height: 16),
-                            TextButton(
+                            AppButton.text(
                               onPressed: _openExternal,
                               child: const Text('在浏览器中打开'),
                             ),

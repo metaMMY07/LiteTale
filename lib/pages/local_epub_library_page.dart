@@ -1,3 +1,5 @@
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/services/epub/epub_models.dart';
@@ -7,7 +9,7 @@ import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' as api;
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/cached_image.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 
 class LocalEpubLibraryPage extends StatefulWidget {
   const LocalEpubLibraryPage({super.key, this.library});
@@ -135,18 +137,18 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
 
   Future<void> _remove(LocalEpubBook book) async {
     if (_busy || _picking) return;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAdaptiveDialog<bool>(
       context: context,
       builder:
-          (ctx) => AlertDialog(
+          (ctx) => AlertDialog.adaptive(
             title: const Text('移除本地书籍'),
             content: Text('移除《${book.title}》及其本机阅读记录？原 EPUB 文件会保留。'),
             actions: [
-              TextButton(
+              AppButton.text(
                 onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('取消'),
               ),
-              FilledButton(
+              AppButton.filled(
                 onPressed: () => Navigator.pop(ctx, true),
                 child: const Text('移除'),
               ),
@@ -174,10 +176,10 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
   }
 
   void _bookDetails(LocalEpubBook book) {
-    showDialog<void>(
+    showAdaptiveDialog<void>(
       context: context,
       builder:
-          (ctx) => AlertDialog(
+          (ctx) => AlertDialog.adaptive(
             title: Text(book.title),
             content: SingleChildScrollView(
               child: Text(
@@ -191,7 +193,7 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
               ),
             ),
             actions: [
-              TextButton(
+              AppButton.text(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('完成'),
               ),
@@ -221,7 +223,7 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
         appBar: AppBar(
           title: const Text('本地书籍'),
           actions: [
-            IconButton(
+            AppIconButton(
               tooltip: '导入 EPUB',
               icon: const Icon(Icons.file_open_outlined),
               onPressed: _busy || _picking ? null : _import,
@@ -232,7 +234,7 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-              child: TextField(
+              child: AppTextField(
                 controller: _search,
                 decoration: const InputDecoration(
                   prefixIcon: Icon(Icons.search_rounded),
@@ -253,7 +255,7 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
                     SizedBox(
                       width: 24,
                       height: 24,
-                      child: ExpressiveLoadingIndicator(size: 24),
+                      child: AppLoadingIndicator(size: 24),
                     ),
                     SizedBox(width: 12),
                     Text('正在处理本地书籍…'),
@@ -278,7 +280,7 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
                         style: TextStyle(color: colors.onErrorContainer),
                       ),
                       if (_library.initializationError != null)
-                        TextButton(
+                        AppButton.text(
                           onPressed: _busy ? null : _retryInitialization,
                           child: const Text('重试'),
                         ),
@@ -328,7 +330,7 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
                                   textAlign: TextAlign.center,
                                 ),
                                 const SizedBox(height: 24),
-                                FilledButton.icon(
+                                AppButton.filledIcon(
                                   onPressed: _busy || _picking ? null : _import,
                                   icon: const Icon(Icons.add_rounded),
                                   label: const Text('导入 EPUB'),
@@ -354,7 +356,7 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
                         itemCount: books.length,
                         itemBuilder: (context, index) {
                           final book = books[index];
-                          return Card(
+                          return AppleGlassCard(
                             clipBehavior: Clip.antiAlias,
                             margin: EdgeInsets.zero,
                             child: InkWell(
@@ -419,7 +421,7 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
                                                 ).textTheme.bodySmall,
                                           ),
                                         ),
-                                        PopupMenuButton<String>(
+                                        AppPopupMenuButton<String>(
                                           tooltip: '${book.title}的操作',
                                           enabled: !_busy && !_picking,
                                           onSelected:

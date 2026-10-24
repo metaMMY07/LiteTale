@@ -1,3 +1,4 @@
+import 'package:wild/theme/ios_system_colors.dart';
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:wild/pages/apple_books_open_page.dart';
@@ -186,7 +187,10 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                               : usesAppleGlass
                               ? iosGlassTheme(
                                 Brightness.light,
-                                accent: appAccentSeed(accent),
+                                accent: IosSystemColors.accent(
+                                  accent,
+                                  Brightness.light,
+                                ),
                               )
                               : lightTheme,
                           appFont,
@@ -204,7 +208,10 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                               : usesAppleGlass
                               ? iosGlassTheme(
                                 Brightness.dark,
-                                accent: appAccentSeed(accent),
+                                accent: IosSystemColors.accent(
+                                  accent,
+                                  Brightness.dark,
+                                ),
                               )
                               : darkTheme,
                           appFont,

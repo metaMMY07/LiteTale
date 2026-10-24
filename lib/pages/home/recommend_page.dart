@@ -1,3 +1,5 @@
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/light_novel_shelf_browser_page.dart';
@@ -9,7 +11,7 @@ import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
 import 'package:wild/widgets/novel_card.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/bili_api_source.dart';
 import 'package:wild/sources/bili_site_source.dart';
@@ -72,7 +74,7 @@ class RecommendPage extends StatelessWidget {
                           spacing: 12,
                           runSpacing: 8,
                           children: [
-                            FilledButton.icon(
+                            AppButton.filledIcon(
                               onPressed:
                                   () => context.read<RecommendCubit>().load(
                                     forceRefresh: true,
@@ -81,7 +83,7 @@ class RecommendPage extends StatelessWidget {
                               label: const Text('重试首页'),
                             ),
                             if (showSiteEntry)
-                              OutlinedButton.icon(
+                              AppButton.outlinedIcon(
                                 onPressed: () => _openWenku8Site(context),
                                 icon: const Icon(Icons.open_in_browser_rounded),
                                 label: const Text('打开文库8验证 / 登录'),
@@ -94,7 +96,7 @@ class RecommendPage extends StatelessWidget {
                                     forceRefresh: true,
                                   ),
                             ),
-                            OutlinedButton.icon(
+                            AppButton.outlinedIcon(
                               onPressed:
                                   () => Navigator.push(
                                     context,
@@ -203,7 +205,7 @@ class RecommendationFeed extends StatelessWidget {
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  child: Card(
+                  child: AppleGlassCard(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
@@ -212,7 +214,7 @@ class RecommendationFeed extends StatelessWidget {
                       child: Row(
                         children: [
                           const Expanded(child: Text('已通过网页加载推荐')),
-                          TextButton(
+                          AppButton.text(
                             onPressed:
                                 () => context.read<RecommendCubit>().load(
                                   forceRefresh: true,
@@ -248,7 +250,7 @@ class RecommendationFeed extends StatelessWidget {
                             ),
                           )
                           : Center(
-                            child: TextButton(
+                            child: AppButton.text(
                               onPressed:
                                   () =>
                                       context.read<RecommendCubit>().loadMore(),
@@ -292,7 +294,7 @@ class _LightNovelShelfBlock {
                   ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                 ),
               ),
-              TextButton(
+              AppButton.text(
                 onPressed:
                     () => _open(
                       context,

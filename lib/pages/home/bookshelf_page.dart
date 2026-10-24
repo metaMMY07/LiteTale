@@ -1,3 +1,5 @@
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/sources/book_source.dart';
@@ -7,7 +9,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/widgets/cf_action_loader.dart';
 import 'package:wild/widgets/novel_card.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/pages/local_epub_library_page.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
@@ -20,7 +22,7 @@ class BookshelfPage extends StatefulWidget {
 }
 
 class _BookshelfPageState extends State<BookshelfPage> {
-  Widget _localLibraryButton(BuildContext context) => TextButton.icon(
+  Widget _localLibraryButton(BuildContext context) => AppButton.textIcon(
     icon: const Icon(Icons.folder_open_rounded),
     label: const Text('本地书籍'),
     onPressed:
@@ -108,32 +110,32 @@ class _BookshelfPageState extends State<BookshelfPage> {
         actions: [
           if (!state.isSelecting) _localLibraryButton(context),
           if (state.isSelecting) ...[
-            IconButton(
+            AppIconButton(
               icon: const Icon(Icons.delete_outline),
               onPressed:
                   state.selectedBids.isEmpty
                       ? null
                       : () => _showDeleteConfirmDialog(context),
             ),
-            IconButton(
+            AppIconButton(
               icon: const Icon(Icons.move_to_inbox),
               onPressed:
                   state.selectedBids.isEmpty
                       ? null
                       : () => _showMoveDialog(context),
             ),
-            IconButton(
+            AppIconButton(
               icon: const Icon(Icons.close),
               onPressed:
                   () => context.read<BookshelfCubit>().toggleSelectMode(),
             ),
           ] else ...[
             if (state.tip.isNotEmpty)
-              IconButton(
+              AppIconButton(
                 icon: const Icon(Icons.info_outline),
                 onPressed: () => _showTipDialog(context, state.tip),
               ),
-            IconButton(
+            AppIconButton(
               icon: const Icon(Icons.select_all),
               onPressed:
                   () => context.read<BookshelfCubit>().toggleSelectMode(),
@@ -146,33 +148,48 @@ class _BookshelfPageState extends State<BookshelfPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               if (isCfLoading) const LinearProgressIndicator(minHeight: 3),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
+              if (usesAppleGlass)
+                AppleGlassFilterBar(
+                  labels:
+                      state.bookcases
+                          .map((bookcase) => bookcase.title)
+                          .toList(),
+                  index: state.bookcases.indexWhere(
+                    (bookcase) => bookcase.id == state.currentCaseId,
+                  ),
+                  onSelect:
+                      (index) => context.read<BookshelfCubit>().selectBookcase(
+                        state.bookcases[index].id,
+                      ),
+                )
+              else
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    children:
+                        state.bookcases.map((bookcase) {
+                          final isSelected = bookcase.id == state.currentCaseId;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: FilterChip(
+                              label: Text(bookcase.title),
+                              selected: isSelected,
+                              onSelected: (selected) {
+                                if (selected) {
+                                  context.read<BookshelfCubit>().selectBookcase(
+                                    bookcase.id,
+                                  );
+                                }
+                              },
+                            ),
+                          );
+                        }).toList(),
+                  ),
                 ),
-                child: Row(
-                  children:
-                      state.bookcases.map((bookcase) {
-                        final isSelected = bookcase.id == state.currentCaseId;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: FilterChip(
-                            label: Text(bookcase.title),
-                            selected: isSelected,
-                            onSelected: (selected) {
-                              if (selected) {
-                                context.read<BookshelfCubit>().selectBookcase(
-                                  bookcase.id,
-                                );
-                              }
-                            },
-                          ),
-                        );
-                      }).toList(),
-                ),
-              ),
             ],
           ),
         ),
@@ -183,7 +200,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
             MaterialBanner(
               content: Text(state.errorMessage!),
               actions: [
-                TextButton(
+                AppButton.text(
                   onPressed:
                       state.isRefreshing
                           ? null
@@ -233,18 +250,18 @@ class _BookshelfPageState extends State<BookshelfPage> {
   }
 
   void _showDeleteConfirmDialog(BuildContext context) {
-    showDialog(
+    showAdaptiveDialog(
       context: context,
       builder:
-          (ctx) => AlertDialog(
+          (ctx) => AlertDialog.adaptive(
             title: const Text('确认删除'),
             content: const Text('确定要删除选中的书籍吗？'),
             actions: [
-              TextButton(
+              AppButton.text(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('取消'),
               ),
-              TextButton(
+              AppButton.text(
                 onPressed: () async {
                   Navigator.pop(ctx);
                   final cubit = context.read<BookshelfCubit>();
@@ -298,7 +315,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
 })();
 ''';
 
-    showDialog(
+    showAdaptiveDialog(
       context: context,
       barrierDismissible: false,
       builder:
@@ -324,20 +341,22 @@ class _BookshelfPageState extends State<BookshelfPage> {
   }
 
   void _showTipDialog(BuildContext context, String tip) {
-    showDialog(
+    showAdaptiveDialog(
       context: context,
       builder:
-          (context) =>
-              AlertDialog(title: const Text('书架容量'), content: Text(tip)),
+          (context) => AlertDialog.adaptive(
+            title: const Text('书架容量'),
+            content: Text(tip),
+          ),
     );
   }
 
   void _showMoveDialog(BuildContext context) {
     final state = context.read<BookshelfCubit>().state;
-    showDialog(
+    showAdaptiveDialog(
       context: context,
       builder:
-          (context) => AlertDialog(
+          (context) => AlertDialog.adaptive(
             title: const Text('移动到书架'),
             content: SizedBox(
               width: double.maxFinite,
@@ -366,7 +385,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
               ),
             ),
             actions: [
-              TextButton(
+              AppButton.text(
                 onPressed: () => Navigator.pop(context),
                 child: const Text('取消'),
               ),

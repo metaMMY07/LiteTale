@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -80,18 +81,18 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
         case 'enable':
           await registry.setEnabled(id, !entry.enabled);
         case 'remove':
-          final yes = await showDialog<bool>(
+          final yes = await showAdaptiveDialog<bool>(
             context: context,
             builder:
-                (ctx) => AlertDialog(
+                (ctx) => AlertDialog.adaptive(
                   title: const Text('移除书源规则'),
                   content: const Text('保留这本书源的书架、历史与离线内容。重新导入相同书源后可继续使用。'),
                   actions: [
-                    TextButton(
+                    AppButton.text(
                       onPressed: () => Navigator.pop(ctx, false),
                       child: const Text('取消'),
                     ),
-                    FilledButton(
+                    AppButton.filled(
                       onPressed: () => Navigator.pop(ctx, true),
                       child: const Text('移除规则'),
                     ),
@@ -135,12 +136,12 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
                 spacing: 12,
                 runSpacing: 8,
                 children: [
-                  FilledButton.tonalIcon(
+                  AppButton.tonalIcon(
                     onPressed: busy ? null : () => _import(false),
                     icon: const Icon(Icons.file_open_outlined),
                     label: const Text('本地文件'),
                   ),
-                  OutlinedButton.icon(
+                  AppButton.outlinedIcon(
                     onPressed: busy ? null : () => _import(true),
                     icon: const Icon(Icons.link),
                     label: const Text('链接导入'),
@@ -169,7 +170,7 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
                   ),
                   isThreeLine: true,
                   onTap: entry.enabled ? () => _action(entry, 'use') : null,
-                  trailing: PopupMenuButton<String>(
+                  trailing: AppPopupMenuButton<String>(
                     onSelected: (value) => _action(entry, value),
                     itemBuilder:
                         (_) => [
@@ -208,22 +209,22 @@ Future<String?> _input(
 }) async {
   final controller = TextEditingController(text: initial);
   try {
-    return await showDialog<String>(
+    return await showAdaptiveDialog<String>(
       context: context,
       builder:
-          (ctx) => AlertDialog(
+          (ctx) => AlertDialog.adaptive(
             title: Text(title),
-            content: TextField(
+            content: AppTextField(
               controller: controller,
               autofocus: true,
               decoration: InputDecoration(labelText: label),
             ),
             actions: [
-              TextButton(
+              AppButton.text(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('取消'),
               ),
-              FilledButton(
+              AppButton.filled(
                 onPressed: () => Navigator.pop(ctx, controller.text),
                 child: const Text('确定'),
               ),
@@ -324,7 +325,7 @@ class _RuleImportPreviewPageState extends State<RuleImportPreviewPage> {
             ),
           Padding(
             padding: const EdgeInsets.all(16),
-            child: FilledButton.icon(
+            child: AppButton.filledIcon(
               onPressed: saving || selected.isEmpty ? null : _save,
               icon: const Icon(Icons.download_done_rounded),
               label: Text(saving ? '正在保存…' : '导入所选书源'),
@@ -351,7 +352,7 @@ class _RuleImportPreviewPageState extends State<RuleImportPreviewPage> {
     return AppleGlassCard(
       child: Column(
         children: [
-          CheckboxListTile(
+          AppCheckboxListTile(
             value: selected.contains(index),
             onChanged:
                 saving
@@ -371,7 +372,7 @@ class _RuleImportPreviewPageState extends State<RuleImportPreviewPage> {
           if (existing != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: DropdownButtonFormField<String>(
+              child: AppDropdownButtonFormField<String>(
                 value: modes[index] == 'new' ? 'replace' : modes[index],
                 decoration: InputDecoration(
                   labelText: '已有版本 ${existing.definition.version}',

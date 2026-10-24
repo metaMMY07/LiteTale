@@ -1,10 +1,11 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/app_color_settings.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:wild/pages/auth_cubit.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/widgets/left_aligned_scrollable.dart';
 import 'package:wild/widgets/wenku8_verification_page.dart';
 import 'package:wild/services/wenku8_browser.dart';
@@ -97,18 +98,18 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _onRegisterPressed() async {
-    final result = await showDialog<bool>(
+    final result = await showAdaptiveDialog<bool>(
       context: context,
       builder:
-          (context) => AlertDialog(
+          (context) => AlertDialog.adaptive(
             title: const Text('注册提示'),
             content: const Text('注册需要在网页端进行，是否跳转到注册页面？'),
             actions: [
-              TextButton(
+              AppButton.text(
                 onPressed: () => Navigator.pop(context, false),
                 child: const Text('取消'),
               ),
-              TextButton(
+              AppButton.text(
                 onPressed: () => Navigator.pop(context, true),
                 child: const Text('确定'),
               ),
@@ -137,7 +138,7 @@ class _LoginPageState extends State<LoginPage> {
         title: Text(usesMaterialYou ? '欢迎来到 LiteTale' : '登录轻小说文库'),
         actions: [
           if (usesMaterialYou)
-            IconButton(
+            AppIconButton(
               tooltip: '主题配色',
               icon: const Icon(Icons.palette_outlined),
               onPressed: () => showAppColors(context),
@@ -232,7 +233,7 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       const SizedBox(height: 28),
                     ],
-                    TextFormField(
+                    AppTextFormField(
                       controller: _usernameController,
                       textInputAction: TextInputAction.next,
                       autofillHints: const [AutofillHints.username],
@@ -248,7 +249,7 @@ class _LoginPageState extends State<LoginPage> {
                       },
                     ),
                     const SizedBox(height: 16),
-                    TextFormField(
+                    AppTextFormField(
                       controller: _passwordController,
                       textInputAction: TextInputAction.next,
                       autofillHints: const [AutofillHints.password],
@@ -307,7 +308,7 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ],
                     const SizedBox(height: 8),
-                    OutlinedButton.icon(
+                    AppButton.outlinedIcon(
                       onPressed:
                           state.status == AuthStatus.loading
                               ? null
@@ -316,7 +317,7 @@ class _LoginPageState extends State<LoginPage> {
                       label: const Text('打开站点验证 / 登录'),
                     ),
                     Container(height: 20),
-                    TextFormField(
+                    AppTextFormField(
                       controller: _checkcodeController,
                       textInputAction: TextInputAction.done,
                       onFieldSubmitted: (_) {
@@ -340,7 +341,7 @@ class _LoginPageState extends State<LoginPage> {
                       children: [
                         Expanded(
                           flex: 1,
-                          child: OutlinedButton(
+                          child: AppButton.outlined(
                             onPressed: _onRegisterPressed,
                             child: const Text('注册'),
                           ),
@@ -348,7 +349,7 @@ class _LoginPageState extends State<LoginPage> {
                         const SizedBox(width: 16),
                         Expanded(
                           flex: 2,
-                          child: FilledButton(
+                          child: AppButton.filled(
                             onPressed:
                                 state.status == AuthStatus.loading ||
                                         state.checkcodeStatus !=

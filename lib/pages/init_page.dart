@@ -1,4 +1,6 @@
+import 'package:wild/theme/material_you.dart';
 import 'dart:io';
+import 'package:wild/theme/ios_system_colors.dart';
 import 'package:wild/services/epub/local_epub_library.dart';
 import 'package:wild/cubits/app_accent_cubit.dart';
 import 'package:wild/cubits/reader_curl_cubit.dart';
@@ -7,7 +9,7 @@ import 'package:wild/sources/source_api.dart' show loadSourceSelection;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:wild/theme/material_you.dart';
+import 'package:wild/widgets/app_launch_screen.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/auth_cubit.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
@@ -66,6 +68,7 @@ class _InitPageState extends State<InitPage> {
     final volumeControlCubit = context.read<VolumeControlCubit>();
 
     // 等待所有 Cubit 初始化完成
+    await IosSystemColors.initialize();
     await Future.wait([
       LocalEpubLibrary.instance.initialize(root).catchError((Object _) {
         // Local library exposes a retryable error; online reading still starts.
@@ -138,62 +141,6 @@ class _InitPageState extends State<InitPage> {
         ),
       );
     }
-    return Scaffold(
-      body: ConstrainedBox(
-        constraints: const BoxConstraints.expand(),
-        child: LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints constraints) {
-            var width = 1080;
-            var height = 1920;
-            var min =
-                constraints.maxWidth > constraints.maxHeight
-                    ? constraints.maxHeight
-                    : constraints.maxWidth;
-            var newHeight = min;
-            var newWidth = min * (width / height);
-
-            return Stack(
-              children: [
-                Center(
-                  child: ShaderMask(
-                    shaderCallback: (Rect bounds) {
-                      return const LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black,
-                          Colors.black,
-                          Colors.transparent,
-                        ],
-                        stops: [0.0, 0.95, 1.0],
-                      ).createShader(bounds);
-                    },
-                    blendMode: BlendMode.dstIn,
-                    child: Image.asset(
-                      'lib/assets/startup.png',
-                      width: newWidth,
-                      height: newHeight,
-                    ),
-                  ),
-                ),
-                // 加载指示器
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 48,
-                  child: Center(
-                    child: CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
+    return const AppLaunchScreen();
   }
 }

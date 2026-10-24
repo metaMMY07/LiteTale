@@ -1,5 +1,7 @@
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart';
@@ -30,21 +32,21 @@ class NovelDownloadInfoPage extends StatelessWidget {
                 if (state is! NovelDownloadInfoLoaded) {
                   return const SizedBox.shrink();
                 }
-                return IconButton(
+                return AppIconButton(
                   icon: const Icon(Icons.delete_outline),
                   onPressed: () async {
-                    final confirmed = await showDialog<bool>(
+                    final confirmed = await showAdaptiveDialog<bool>(
                       context: context,
                       builder:
-                          (context) => AlertDialog(
+                          (context) => AlertDialog.adaptive(
                             title: const Text('确认删除'),
                             content: const Text('确定要删除这本小说的下载内容吗？'),
                             actions: [
-                              TextButton(
+                              AppButton.text(
                                 onPressed: () => Navigator.pop(context, false),
                                 child: const Text('取消'),
                               ),
-                              TextButton(
+                              AppButton.text(
                                 onPressed: () => Navigator.pop(context, true),
                                 child: const Text('删除'),
                               ),
@@ -77,7 +79,7 @@ class NovelDownloadInfoPage extends StatelessWidget {
                   children: [
                     Text(state.message),
                     const SizedBox(height: 16),
-                    ElevatedButton(
+                    AppButton.elevated(
                       onPressed: () {
                         context.read<NovelDownloadInfoCubit>().load();
                       },
@@ -203,7 +205,7 @@ class _NovelDownloadInfoContent extends StatelessWidget {
                 left: 16,
                 right: 16,
               ),
-              child: ElevatedButton.icon(
+              child: AppButton.elevatedIcon(
                 onPressed:
                     () => _navigateToReader(
                       context,
@@ -425,7 +427,7 @@ class _NovelTags extends StatelessWidget {
         runSpacing: 8,
         children:
             tags.map((tag) {
-              return Chip(
+              return AppChip(
                 label: Text(tag),
                 backgroundColor: Theme.of(context).colorScheme.primaryContainer,
                 labelStyle: TextStyle(
@@ -446,7 +448,7 @@ class _VolumeItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return AppleGlassCard(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

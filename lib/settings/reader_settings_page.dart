@@ -1,3 +1,4 @@
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
@@ -74,17 +75,18 @@ class ReaderSettingsPage extends StatelessWidget {
                 }
               },
             ),
-            SettingsSwitch(
-              icon: Icons.auto_stories_outlined,
-              title: '仿真翻页',
-              description: '用于在线书源的纸张曲面与手势跟随；本地 EPUB 使用普通翻页',
-              value: curl.state,
-              onChanged:
-                  type.state == ReaderType.html
-                      ? null
-                      : (v) =>
-                          settingsAction(context, () => curl.setEnabled(v)),
-            ),
+            if (!usesAppleGlass)
+              SettingsSwitch(
+                icon: Icons.auto_stories_outlined,
+                title: '仿真翻页',
+                description: '用于在线书源的纸张曲面与手势跟随；本地 EPUB 使用普通翻页',
+                value: curl.state,
+                onChanged:
+                    type.state == ReaderType.html
+                        ? null
+                        : (v) =>
+                            settingsAction(context, () => curl.setEnabled(v)),
+              ),
             const ReaderVolumeTurnSetting(),
             const SettingsSectionLabel('页边距'),
             const Padding(

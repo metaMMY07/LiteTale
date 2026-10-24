@@ -1,9 +1,10 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:wild/services/bili_browser.dart';
 import 'package:wild/utils/bili_site_dom.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/widgets/wenku_webview.dart';
 
 /// Ordinary, user-visible site verification. No cookie or challenge token is
@@ -171,7 +172,7 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
       appBar: AppBar(
         title: Text(widget.request.contentRequired ? '哔哩原站阅读' : '哔哩原站验证'),
         actions: [
-          IconButton(
+          AppIconButton(
             tooltip: '重新打开原站页面',
             onPressed:
                 _initialized && !_checking && !_closed ? _openTarget : null,
@@ -185,7 +186,7 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
             MaterialBanner(
               content: Text(message),
               actions: [
-                TextButton(
+                AppButton.text(
                   onPressed: () => setState(() => _error = null),
                   child: const Text('知道了'),
                 ),
@@ -217,7 +218,7 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
-                    child: FilledButton.icon(
+                    child: AppButton.filledIcon(
                       onPressed:
                           _initialized && !_checking && !_closed && !_blocked
                               ? _continue

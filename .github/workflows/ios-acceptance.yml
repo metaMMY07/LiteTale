@@ -63,7 +63,7 @@ jobs:
           if d['state']!='Booted':subprocess.run(['xcrun','simctl','boot',d['udid']],check=True,timeout=90)
           subprocess.run(['xcrun','simctl','bootstatus',d['udid'],'-b'],check=True,timeout=300)
           PY
-      - name: Exercise Books handoff, native glass and textured curl
+      - name: Exercise Books handoff, native colors, glass and ordinary paging
         timeout-minutes: 20
         run: |
           set -euo pipefail

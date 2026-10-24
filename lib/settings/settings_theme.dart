@@ -20,7 +20,10 @@ ThemeData applySettingsTheme(ThemeData theme, SettingsPreferences settings) {
     labelMedium: t.labelMedium?.copyWith(locale: locale),
     labelSmall: t.labelSmall?.copyWith(locale: locale),
   );
-  final black = settings.blackTheme && theme.brightness == Brightness.dark;
+  final black =
+      theme.platform != TargetPlatform.iOS &&
+      settings.blackTheme &&
+      theme.brightness == Brightness.dark;
   return theme.copyWith(
     textTheme: regional(theme.textTheme),
     primaryTextTheme: regional(theme.primaryTextTheme),

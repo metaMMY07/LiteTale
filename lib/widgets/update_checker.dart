@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/update_cubit.dart';
@@ -67,7 +68,7 @@ class _UpdateCheckerState extends State<UpdateChecker> {
                       const SizedBox(height: 24),
                       Align(
                         alignment: Alignment.centerRight,
-                        child: TextButton(
+                        child: AppButton.text(
                           onPressed: () {
                             _overlayEntry?.remove();
                             _overlayEntry = null;

@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:wild/settings/app_logs.dart';
@@ -41,7 +42,7 @@ class _LogsPageState extends State<LogsPage> {
     appBar: AppBar(
       title: const Text('应用日志'),
       actions: [
-        IconButton(
+        AppIconButton(
           tooltip: '导出日志',
           onPressed: saving ? null : _save,
           icon: const Icon(Icons.save_alt_outlined),

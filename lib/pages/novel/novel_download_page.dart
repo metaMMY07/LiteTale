@@ -1,5 +1,7 @@
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/novel/novel_download_cubit.dart';
 import 'package:wild/widgets/cached_image.dart';
@@ -30,7 +32,7 @@ class _NovelDownloadContent extends StatelessWidget {
       appBar: AppBar(
         title: const Text('下载'),
         actions: [
-          IconButton(
+          AppIconButton(
             icon: const Icon(Icons.refresh),
             tooltip: '重置失败下载',
             onPressed: () async {
@@ -74,7 +76,7 @@ class _NovelDownloadContent extends StatelessWidget {
                 children: [
                   Text(state.error!),
                   const SizedBox(height: 16),
-                  ElevatedButton(
+                  AppButton.elevated(
                     onPressed: () {
                       context.read<NovelDownloadCubit>().loadDownloads();
                     },
@@ -95,7 +97,7 @@ class _NovelDownloadContent extends StatelessWidget {
             itemCount: state.downloads.length,
             itemBuilder: (context, index) {
               final download = state.downloads[index];
-              return Card(
+              return AppleGlassCard(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: InkWell(
                   onTap: () async {

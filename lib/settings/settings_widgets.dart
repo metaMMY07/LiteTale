@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
@@ -160,7 +161,9 @@ class SettingsEntry extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     return Material(
       color:
-          filled
+          usesAppleGlass
+              ? Colors.transparent
+              : filled
               ? settingsSurfaceLayer(colors, colors.surfaceContainer, 0.07)
               : colors.surface,
       child: ListTile(
@@ -217,7 +220,7 @@ class SettingsSwitch extends StatelessWidget {
     description: description,
     filled: filled,
     onTap: onChanged == null ? null : () => onChanged!(!value),
-    trailing: Switch(value: value, onChanged: onChanged),
+    trailing: AppSwitch(value: value, onChanged: onChanged),
   );
 }
 
@@ -241,10 +244,10 @@ Future<T?> chooseSetting<T>(
   String title,
   Map<T, String> options,
   T selected,
-) => showDialog<T>(
+) => showAdaptiveDialog<T>(
   context: context,
   builder:
-      (context) => AlertDialog(
+      (context) => AlertDialog.adaptive(
         title: Text(title),
         contentPadding: const EdgeInsets.symmetric(vertical: 16),
         content: SizedBox(
@@ -254,7 +257,7 @@ Future<T?> chooseSetting<T>(
               mainAxisSize: MainAxisSize.min,
               children: [
                 for (final entry in options.entries)
-                  RadioListTile<T>(
+                  AppRadioListTile<T>(
                     title: Text(entry.value),
                     value: entry.key,
                     groupValue: selected,
@@ -265,7 +268,7 @@ Future<T?> chooseSetting<T>(
           ),
         ),
         actions: [
-          TextButton(
+          AppButton.text(
             onPressed: () => Navigator.pop(context),
             child: const Text('取消'),
           ),

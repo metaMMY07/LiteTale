@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/shelf_session.dart';
 import 'package:wild/sources/source_api.dart' show clearShelfSessionCache;
@@ -84,7 +85,7 @@ class _ShelfLoginPageState extends State<ShelfLoginPage> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 28),
-                TextFormField(
+                AppTextFormField(
                   controller: _email,
                   enabled: !_busy,
                   keyboardType: TextInputType.emailAddress,
@@ -101,7 +102,7 @@ class _ShelfLoginPageState extends State<ShelfLoginPage> {
                               : '请输入邮箱',
                 ),
                 const SizedBox(height: 16),
-                TextFormField(
+                AppTextFormField(
                   controller: _password,
                   enabled: !_busy,
                   obscureText: _obscure,
@@ -113,7 +114,7 @@ class _ShelfLoginPageState extends State<ShelfLoginPage> {
                   decoration: InputDecoration(
                     labelText: '密码',
                     prefixIcon: const Icon(Icons.lock_outline),
-                    suffixIcon: IconButton(
+                    suffixIcon: AppIconButton(
                       tooltip: _obscure ? '显示密码' : '隐藏密码',
                       onPressed: () => setState(() => _obscure = !_obscure),
                       icon: Icon(
@@ -138,7 +139,7 @@ class _ShelfLoginPageState extends State<ShelfLoginPage> {
                     ),
                   ),
                 const SizedBox(height: 24),
-                FilledButton(
+                AppButton.filled(
                   onPressed: _busy ? null : _submit,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 14),

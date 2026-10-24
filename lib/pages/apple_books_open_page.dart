@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/services/epub/apple_books_opener.dart';
 import 'package:wild/services/epub/local_epub_library.dart';
@@ -59,7 +60,7 @@ class _AppleBooksOpenPageState extends State<AppleBooksOpenPage> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),
-            FilledButton(
+            AppButton.filled(
               onPressed: _opening ? null : _open,
               child: Text(_opening ? '正在打开系统菜单…' : '添加到图书'),
             ),

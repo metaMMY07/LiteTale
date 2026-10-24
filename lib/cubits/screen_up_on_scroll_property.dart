@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -22,7 +23,7 @@ Widget screenUpOnScrollSetting() {
   if (Platform.isAndroid || Platform.isIOS) {
     return StatefulBuilder(
       builder: (BuildContext context, void Function(void Function()) setState) {
-        return SwitchListTile(
+        return AppSwitchListTile(
           title: Text("滚屏时保持亮屏"),
           value: _screenUpOnScrollProperty,
           onChanged: (v) {

@@ -105,7 +105,7 @@ def package(app, output):
         "known_limitations": [
             "Native Liquid Glass, edge-back gestures and source switching require iPhone/iPad acceptance.",
             "iOS local EPUB uses the system document share to open in Apple Books; the user chooses Books. Android keeps the in-app CSS reader.",
-            "iOS online page curl uses a textured mesh with an opaque blank back; local EPUB keeps ordinary turns.",
+            "iOS uses ordinary page turns; simulated page curl is removed. Android keeps its existing reader.",
             "Online sessions, font import and volume keys require physical-device validation.",
         ],
     }

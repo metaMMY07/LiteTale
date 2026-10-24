@@ -1,11 +1,13 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/source_api.dart' as api;
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
 import 'package:wild/sources/rule_book_source.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 
 /// Uses the same card grid, tabs and color scheme as the Wenku8 catalogue.
 class ShelfCatalogPage extends StatefulWidget {
@@ -147,68 +149,112 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
   Widget build(BuildContext context) => Column(
     children: [
       if (widget.mode == 'category')
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              ChoiceChip(
-                label: const Text('全部'),
-                selected: _category == null,
-                onSelected: (_) {
-                  _category = null;
+        if (usesAppleGlass)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: AppleGlassMenu(
+                label: '分类',
+                selected: _category?.toString() ?? 'all',
+                items: [
+                  const {'label': '全部', 'value': 'all'},
+                  for (final category in _categories)
+                    {
+                      'label': '${category['Name']}',
+                      'value': '${category['Id']}',
+                    },
+                ],
+                onSelect: (value) {
+                  _category = value == 'all' ? null : int.tryParse(value);
                   _load();
                 },
               ),
-              ..._categories.map(
-                (c) => Padding(
-                  padding: const EdgeInsets.only(left: 8),
-                  child: ChoiceChip(
-                    label: Text('${c['Name']}'),
-                    selected: _category == c['Id'],
-                    onSelected: (_) {
-                      _category = c['Id'] as int;
-                      _load();
-                    },
+            ),
+          )
+        else
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                ChoiceChip(
+                  label: const Text('全部'),
+                  selected: _category == null,
+                  onSelected: (_) {
+                    _category = null;
+                    _load();
+                  },
+                ),
+                ..._categories.map(
+                  (c) => Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: ChoiceChip(
+                      label: Text('${c['Name']}'),
+                      selected: _category == c['Id'],
+                      onSelected: (_) {
+                        _category = c['Id'] as int;
+                        _load();
+                      },
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
       if (widget.mode == 'rank' && _source == SourceId.lightNovelShelf)
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: SegmentedButton<int>(
-            segments: const [
-              ButtonSegment(value: 1, label: Text('日榜')),
-              ButtonSegment(value: 7, label: Text('周榜')),
-              ButtonSegment(value: 31, label: Text('月榜')),
-            ],
-            selected: {_days},
-            onSelectionChanged: (s) {
-              _days = s.first;
+        if (usesAppleGlass)
+          AppleGlassFilterBar(
+            labels: const ['日榜', '周榜', '月榜'],
+            index: const [1, 7, 31].indexOf(_days),
+            onSelect: (index) {
+              _days = const [1, 7, 31][index];
               _load();
             },
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: AppSegmentedButton<int>(
+              segments: const [
+                ButtonSegment(value: 1, label: Text('日榜')),
+                ButtonSegment(value: 7, label: Text('周榜')),
+                ButtonSegment(value: 31, label: Text('月榜')),
+              ],
+              selected: {_days},
+              onSelectionChanged: (s) {
+                _days = s.first;
+                _load();
+              },
+            ),
           ),
-        ),
       if (widget.mode == 'rank' && _source == SourceId.lnovel)
         const Padding(padding: EdgeInsets.all(12), child: Text('按原站阅读人气排序')),
       if (_source == SourceId.bili && widget.mode == 'rank')
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: SegmentedButton<int>(
-            segments: const [
-              ButtonSegment(value: 7, label: Text('周点击榜')),
-              ButtonSegment(value: 31, label: Text('月点击榜')),
-            ],
-            selected: {_days},
-            onSelectionChanged: (selection) {
-              _days = selection.first;
+        if (usesAppleGlass)
+          AppleGlassFilterBar(
+            labels: const ['周点击榜', '月点击榜'],
+            index: _days == 31 ? 1 : 0,
+            onSelect: (index) {
+              _days = index == 1 ? 31 : 7;
               _load();
             },
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: AppSegmentedButton<int>(
+              segments: const [
+                ButtonSegment(value: 7, label: Text('周点击榜')),
+                ButtonSegment(value: 31, label: Text('月点击榜')),
+              ],
+              selected: {_days},
+              onSelectionChanged: (selection) {
+                _days = selection.first;
+                _load();
+              },
+            ),
           ),
-        ),
       if (widget.mode == 'all' && _source == SourceId.lightNovelShelf)
         const Padding(
           padding: EdgeInsets.all(12),
@@ -225,7 +271,7 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
                 source: _source,
                 onRecovered: () => _load(more: _errorMore),
               ),
-              TextButton(
+              AppButton.text(
                 onPressed: () => _load(more: _page != null),
                 child: const Text('重试'),
               ),
@@ -259,10 +305,10 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
       if (_loading && _page != null)
         const SizedBox(
           height: 48,
-          child: Center(child: ExpressiveLoadingIndicator(size: 24)),
+          child: Center(child: AppLoadingIndicator(size: 24)),
         ),
       if (!_loading && _page != null && _page!.currentPage < _page!.maxPage)
-        TextButton(
+        AppButton.text(
           onPressed: _loading ? null : () => _load(more: true),
           child: const Text('加载更多'),
         ),

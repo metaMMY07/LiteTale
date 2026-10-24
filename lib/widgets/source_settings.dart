@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/auth_cubit.dart';
@@ -34,7 +35,7 @@ class SourceSettings extends StatelessWidget {
                       const SizedBox(height: 8),
                       const Text('一次使用一个书源。切换后保留各自的登录状态。'),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<SourceId>(
+                      AppDropdownButtonFormField<SourceId>(
                         value: source,
                         decoration: const InputDecoration(labelText: '当前书源'),
                         items:
@@ -115,7 +116,7 @@ class SourceSettings extends StatelessWidget {
                                       Wrap(
                                         spacing: 12,
                                         children: [
-                                          FilledButton.tonal(
+                                          AppButton.tonal(
                                             onPressed: () async {
                                               await Navigator.push(
                                                 context,
@@ -139,7 +140,7 @@ class SourceSettings extends StatelessWidget {
                                             ),
                                           ),
                                           if (signedIn)
-                                            TextButton(
+                                            AppButton.text(
                                               onPressed: () async {
                                                 try {
                                                   if (source ==

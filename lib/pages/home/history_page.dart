@@ -1,10 +1,12 @@
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/widgets/cached_image.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:intl/intl.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 
 import 'history_cubit.dart';
 
@@ -18,22 +20,22 @@ class HistoryPage extends StatelessWidget {
       appBar: AppBar(
         title: const Text('阅读历史'),
         actions: [
-          IconButton(
+          AppIconButton(
             icon: const Icon(Icons.delete_outline_rounded),
             onPressed: () async {
               final source = cubit.historySource;
-              final confirm = await showDialog<bool>(
+              final confirm = await showAdaptiveDialog<bool>(
                 context: context,
                 builder:
-                    (context) => AlertDialog(
+                    (context) => AlertDialog.adaptive(
                       title: const Text('清空历史'),
                       content: Text('确定要清空${source.label}的阅读历史吗？此操作不可恢复。'),
                       actions: [
-                        TextButton(
+                        AppButton.text(
                           onPressed: () => Navigator.pop(context, false),
                           child: const Text('取消'),
                         ),
-                        TextButton(
+                        AppButton.text(
                           onPressed: () => Navigator.pop(context, true),
                           child: const Text('确定'),
                         ),
@@ -54,18 +56,28 @@ class HistoryPage extends StatelessWidget {
           preferredSize: const Size.fromHeight(56),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: SegmentedButton<bool>(
-              segments: [
-                ButtonSegment(
-                  value: false,
-                  label: Text(activeSource.value.label),
-                ),
-                const ButtonSegment(value: true, label: Text('本地 EPUB')),
-              ],
-              selected: {cubit.localOnly},
-              onSelectionChanged:
-                  (selection) => cubit.showLocal(selection.single),
-            ),
+            child:
+                usesAppleGlass
+                    ? AppleGlassChoiceBar(
+                      labels: [activeSource.value.label, '本地 EPUB'],
+                      index: cubit.localOnly ? 1 : 0,
+                      onSelect: (index) => cubit.showLocal(index == 1),
+                    )
+                    : AppSegmentedButton<bool>(
+                      segments: [
+                        ButtonSegment(
+                          value: false,
+                          label: Text(activeSource.value.label),
+                        ),
+                        const ButtonSegment(
+                          value: true,
+                          label: Text('本地 EPUB'),
+                        ),
+                      ],
+                      selected: {cubit.localOnly},
+                      onSelectionChanged:
+                          (selection) => cubit.showLocal(selection.single),
+                    ),
           ),
         ),
       ),
@@ -121,7 +133,7 @@ class _HistoryItem extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final historyCubit = context.read<HistoryCubit>();
 
-    return Card(
+    return AppleGlassCard(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: InkWell(
         onTap: () async {
@@ -135,18 +147,18 @@ class _HistoryItem extends StatelessWidget {
           }
         },
         onLongPress: () {
-          showDialog(
+          showAdaptiveDialog(
             context: context,
             builder:
-                (dialogContext) => AlertDialog(
+                (dialogContext) => AlertDialog.adaptive(
                   title: const Text('删除历史记录'),
                   content: Text('确定要删除《${history.novelName}》的阅读历史吗？'),
                   actions: [
-                    TextButton(
+                    AppButton.text(
                       onPressed: () => Navigator.pop(dialogContext),
                       child: const Text('取消'),
                     ),
-                    TextButton(
+                    AppButton.text(
                       onPressed: () async {
                         Navigator.pop(dialogContext);
                         try {

@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -29,7 +30,7 @@ import 'package:wild/settings/settings_preferences.dart';
 import 'package:wild/widgets/left_aligned_scrollable.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/src/rust/api/system.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 
 class DataSettingsPage extends StatefulWidget {
   const DataSettingsPage({super.key, this.initialExport = false});
@@ -116,10 +117,10 @@ class _DataSettingsPageState extends State<DataSettingsPage> {
     }
     final doc = await service.parse(await file.readAsString());
     if (!mounted) return null;
-    final overwrite = await showDialog<bool>(
+    final overwrite = await showAdaptiveDialog<bool>(
       context: context,
       builder:
-          (ctx) => AlertDialog(
+          (ctx) => AlertDialog.adaptive(
             title: const Text('导入数据'),
             content: SingleChildScrollView(
               child: Text(
@@ -133,15 +134,15 @@ class _DataSettingsPageState extends State<DataSettingsPage> {
               ),
             ),
             actions: [
-              TextButton(
+              AppButton.text(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('取消'),
               ),
-              TextButton(
+              AppButton.text(
                 onPressed: () => Navigator.pop(ctx, true),
                 child: const Text('覆盖'),
               ),
-              FilledButton(
+              AppButton.filled(
                 onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('合并'),
               ),
@@ -171,7 +172,7 @@ class _DataSettingsPageState extends State<DataSettingsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SegmentedButton<bool>(
+          AppSegmentedButton<bool>(
             segments: const [
               ButtonSegment(
                 value: true,
@@ -195,21 +196,21 @@ class _DataSettingsPageState extends State<DataSettingsPage> {
           ),
           const SizedBox(height: 20),
           if (exporting) ...[
-            CheckboxListTile(
+            AppCheckboxListTile(
               title: const Text('书架'),
               subtitle: const Text('轻书架与公开书源的本地收藏、搜索记录'),
               value: bookshelves,
               onChanged:
                   busy ? null : (v) => setState(() => bookshelves = v ?? false),
             ),
-            CheckboxListTile(
+            AppCheckboxListTile(
               title: const Text('阅读数据'),
               subtitle: const Text('各书源独立的阅读进度和真实阅读统计'),
               value: reading,
               onChanged:
                   busy ? null : (v) => setState(() => reading = v ?? false),
             ),
-            CheckboxListTile(
+            AppCheckboxListTile(
               title: const Text('设置'),
               subtitle: const Text('主题、排版、导入字体和阅读背景'),
               value: settings,
@@ -223,7 +224,7 @@ class _DataSettingsPageState extends State<DataSettingsPage> {
               '文库8的在线书架保存在其服务器；登录账号、密码、会话和离线下载不写入快照。文件格式为 LiteTale .litetale，不能直接导入其他应用的 .lnr 文件。',
             ),
           ),
-          FilledButton.icon(
+          AppButton.filledIcon(
             onPressed:
                 busy || (exporting && !bookshelves && !reading && !settings)
                     ? null
@@ -236,7 +237,7 @@ class _DataSettingsPageState extends State<DataSettingsPage> {
           if (busy)
             const Padding(
               padding: EdgeInsets.all(24),
-              child: Center(child: ExpressiveLoadingIndicator()),
+              child: Center(child: AppLoadingIndicator()),
             ),
           if (status.isNotEmpty)
             Padding(padding: const EdgeInsets.all(16), child: Text(status)),

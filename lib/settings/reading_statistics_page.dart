@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'dart:math' as math;
 
@@ -7,7 +8,7 @@ import 'package:wild/settings/reading_statistics.dart';
 import 'package:wild/settings/settings_widgets.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/widgets/left_aligned_scrollable.dart';
 
 class ReadingStatisticsPage extends StatefulWidget {
@@ -39,7 +40,7 @@ class _ReadingStatisticsPageState extends State<ReadingStatisticsPage> {
           appBar: AppBar(
             title: const Text('阅读统计'),
             actions: [
-              PopupMenuButton<SourceId>(
+              AppPopupMenuButton<SourceId>(
                 tooltip: '选择统计书源',
                 icon: const Icon(Icons.filter_list_rounded),
                 onSelected: (value) => setState(() => _source = value),
@@ -75,7 +76,7 @@ class _ReadingStatisticsPageState extends State<ReadingStatisticsPage> {
                         ),
                     warning: state.warning,
                   )
-                  : const Center(child: ExpressiveLoadingIndicator()),
+                  : const Center(child: AppLoadingIndicator()),
         );
       },
     );
@@ -232,7 +233,7 @@ class _StatisticsOverview extends StatelessWidget {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 const Text('每日、每周与每月阅读时长'),
-                FilledButton.tonalIcon(
+                AppButton.tonalIcon(
                   onPressed: onOpenDetails,
                   icon: const Icon(Icons.bar_chart_rounded),
                   label: const Text('查看详情'),
@@ -297,7 +298,7 @@ class _ReadingStatisticsDetailPageState
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Center(
-                  child: SegmentedButton<_StatisticsPeriod>(
+                  child: AppSegmentedButton<_StatisticsPeriod>(
                     segments: const [
                       ButtonSegment(
                         value: _StatisticsPeriod.days,

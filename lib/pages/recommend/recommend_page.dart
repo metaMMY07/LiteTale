@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/src/rust/wenku8/models.dart' as w8;
 import 'package:wild/widgets/novel_card.dart';
 import 'package:wild/sources/book_source.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 
 import '../home/recommend_cubit.dart';
 
@@ -27,9 +26,7 @@ class RecommendPage extends StatelessWidget {
               children: [
                 SizedBox(
                   height: MediaQuery.of(context).size.height - 100,
-                  child: Center(
-                    child: Text('加载失败 (下拉刷新): ${state.message}'),
-                  ),
+                  child: Center(child: Text('加载失败 (下拉刷新): ${state.message}')),
                 ),
               ],
             ),
@@ -69,9 +66,9 @@ class _HomeBlockWidget extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Text(
             block.title,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
           ),
         ),
         Padding(

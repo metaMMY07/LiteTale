@@ -30,6 +30,7 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
   private var tabs: UITabBarController?
   private var segments: UISegmentedControl?
   private var surface: UIVisualEffectView?
+  private var surfaceTint: UInt32?
   private var menuButton: UIButton?
   private var menuItems: [[String: String]] = []
   private var applyingSelection = false
@@ -163,16 +164,29 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     let color = UIColor(red: CGFloat((argb >> 16) & 255) / 255,
       green: CGFloat((argb >> 8) & 255) / 255, blue: CGFloat(argb & 255) / 255, alpha: 1)
     tintColor = color
-    if surface != nil { return }
+    if let surface {
+      let argb = (config["tint"] as? NSNumber)?.uint32Value
+      if #available(iOS 26.0, *), surfaceTint != argb {
+        let glass = UIGlassEffect(style: .regular)
+        if let argb {
+          glass.tintColor = UIColor(red: CGFloat((argb >> 16) & 255) / 255,
+            green: CGFloat((argb >> 8) & 255) / 255, blue: CGFloat(argb & 255) / 255,
+            alpha: CGFloat((argb >> 24) & 255) / 255)
+        }
+        surface.effect = glass
+        surfaceTint = argb
+      }
+      return
+    }
     if let button = menuButton {
       menuItems = config["items"] as? [[String: String]] ?? []
-      prepare(button, symbol: "line.3.horizontal.decrease", title: config["label"] as? String ?? "分类")
+      prepare(button, symbol: config["symbol"] as? String ?? "line.3.horizontal.decrease", title: config["label"] as? String ?? "分类")
       if #available(iOS 14.0, *) {
         let selected = config["selected"] as? String
         let groups = Array(NSOrderedSet(array: menuItems.map { $0["group"] ?? "" })) as? [String] ?? []
         button.menu = UIMenu(children: groups.map { group in
           UIMenu(title: group, options: .displayInline, children: menuItems.filter { ($0["group"] ?? "") == group }.map { item in
-            UIAction(title: item["label"] ?? "", state: item["value"] == selected ? .on : .off) { [weak self] _ in
+            UIAction(title: item["label"] ?? "", attributes: item["disabled"] == "true" ? .disabled : [], state: item["value"] == selected ? .on : .off) { [weak self] _ in
               self?.channel.invokeMethod("action", arguments: ["action": "select", "value": item["value"] ?? ""])
             }
           })
@@ -197,6 +211,10 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
         for (index, title) in labels.enumerated() { segments.insertSegment(withTitle: title, at: index, animated: false) }
       }
       segments.selectedSegmentIndex = config["index"] as? Int ?? 0
+      let enabled = config["enabled"] as? [Bool] ?? []
+      for index in 0..<segments.numberOfSegments {
+        segments.setEnabled(index >= enabled.count || enabled[index], forSegmentAt: index)
+      }
     } else {
       let source = config["source"] as? String ?? "书源"
       sourceButton.accessibilityLabel = "切换书源，当前\(source)"

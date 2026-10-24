@@ -8,7 +8,6 @@ import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
 import 'package:wild/services/hardware_turn_buffer.dart';
 import 'package:wild/utils/controller_event.dart';
 import 'package:wild/widgets/apple_book_cover.dart';
-import 'package:wild/widgets/curl_mesh_layer.dart';
 
 void main() {
   testWidgets('two-line captions align short and long book covers', (
@@ -87,24 +86,6 @@ void main() {
     busy = false;
     await tester.pump(const Duration(milliseconds: 20));
     expect(keys, ['DOWN', 'DOWN']);
-  });
-  test('curl texture bends and its paper reverse stays opaque', () {
-    CurlMeshData mesh(double y) => createCurlMesh(
-      size: const Size(390, 844),
-      progress: .5,
-      startY: y,
-      dragY: y,
-      direction: 1,
-      spread: false,
-      paper: Colors.white,
-    );
-    final center = mesh(.5), top = mesh(.1), bottom = mesh(.9);
-    expect(center.front, isNotEmpty);
-    expect(center.back, isNotEmpty);
-    expect(center.front, isNot(equals(center.uv)));
-    expect(top.front, isNot(equals(bottom.front)));
-    expect(center.backColors.every((c) => ((c >> 24) & 255) == 255), isTrue);
-    expect(center.front.every((n) => n.isFinite), isTrue);
   });
   test(
     'home pagination merges once and rejects another source late result',

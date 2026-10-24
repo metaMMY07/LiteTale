@@ -8,7 +8,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:wild/theme/ios_glass_theme.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
-import 'package:wild/widgets/curl_mesh_layer.dart';
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/app_launch_screen.dart';
+import 'package:wild/theme/ios_system_colors.dart';
+import 'package:wild/services/reader_page_controller.dart';
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -106,44 +109,82 @@ void main() {
     await binding.takeScreenshot('ios-theme-dark');
   });
 
-  testWidgets('textured page bends on the iOS GPU path', (tester) async {
-    final point = ValueNotifier(const Offset(.54, .82));
+  testWidgets('startup shows the book and ordinary themed spinner', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       MaterialApp(
+        theme: iosGlassTheme(Brightness.light),
+        home: const AppLaunchScreen(),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+    await binding.takeScreenshot('ios-startup-book');
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('iOS controls and ordinary paging use system colors', (
+    tester,
+  ) async {
+    await IosSystemColors.initialize();
+    const palette = MethodChannel('litetale/apple_palette');
+    final native = await palette.invokeMapMethod<String, dynamic>('colors');
+    expect(
+      IosSystemColors.color('ios-blue', Brightness.light).toARGB32(),
+      (native!['light'] as Map)['ios-blue'],
+    );
+    final controller = ReaderPageController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: iosGlassTheme(Brightness.light),
         home: Scaffold(
-          body: CurlMeshLayer(
-            index: 0,
-            target: 1,
-            direction: 1,
-            startY: .85,
-            point: point,
-            spread: false,
-            paper: const Color(0xfff3ead8),
-            pageBuilder:
-                (context, index) => ColoredBox(
-                  color: index == 0 ? const Color(0xfff3ead8) : Colors.white,
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      children: [
-                        for (var i = 0; i < 16; i++)
-                          Text(
-                            '第 $i 行，文字应随着纸面弯曲。',
-                            style: const TextStyle(fontSize: 19, height: 1.5),
-                          ),
-                      ],
-                    ),
-                  ),
+          body: Column(
+            children: [
+              const AppleGlassCard(child: ListTile(title: Text('系统颜色与玻璃卡片'))),
+              AppButton.filledIcon(
+                onPressed: () {},
+                icon: const Icon(Icons.book),
+                label: const Text('继续阅读'),
+              ),
+              AppSwitchListTile(
+                title: const Text('音量键翻页'),
+                value: true,
+                onChanged: (_) {},
+              ),
+              AppSlider(value: .5, onChanged: (_) {}),
+              AppTextFormField(
+                decoration: const InputDecoration(labelText: '用户名'),
+                autofillHints: const [AutofillHints.username],
+              ),
+              AppleGlassFilterBar(
+                labels: const ['更新', '发布', '总访问', '总推荐', '总收藏', '月访问'],
+                index: 2,
+                onSelect: (_) {},
+              ),
+              Expanded(
+                child: PageView(
+                  controller: controller,
+                  children: const [
+                    Center(child: Text('普通分页：第一页')),
+                    Center(child: Text('普通分页：第二页')),
+                  ],
                 ),
+              ),
+            ],
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
-    await Future<void>.delayed(const Duration(milliseconds: 800));
-    await binding.takeScreenshot('ios-textured-curl');
+    await binding.takeScreenshot('ios-unified-controls');
+    await controller.turn(1);
+    await tester.pumpAndSettle();
+    expect(controller.page, 1);
     expect(tester.takeException(), isNull);
   });
+
   testWidgets(
     'system EPUB handoff presents and cancellation keeps the original',
     (tester) async {

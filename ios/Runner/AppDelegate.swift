@@ -6,6 +6,26 @@ import MediaPlayer
 @main
 @objc class AppDelegate: FlutterAppDelegate {
 
+  private func systemColors(_ style: UIUserInterfaceStyle) -> [String: Int] {
+    let traits = UITraitCollection(traitsFrom: [UIScreen.main.traitCollection, UITraitCollection(userInterfaceStyle: style)])
+    let values: [String: UIColor] = [
+      "ios-blue": .systemBlue, "ios-indigo": .systemIndigo, "ios-purple": .systemPurple,
+      "ios-pink": .systemPink, "ios-red": .systemRed, "ios-orange": .systemOrange,
+      "ios-yellow": .systemYellow, "ios-green": .systemGreen, "ios-teal": .systemTeal,
+      "background": .systemGroupedBackground, "surface": .secondarySystemGroupedBackground,
+      "tertiarySurface": .tertiarySystemGroupedBackground, "label": .label,
+      "secondaryLabel": .secondaryLabel, "separator": .separator,
+      "opaqueSeparator": .opaqueSeparator, "fill": .tertiarySystemFill,
+    ]
+    return values.mapValues { color in
+      let resolved = color.resolvedColor(with: traits)
+      var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+      resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+      func byte(_ value: CGFloat) -> Int { Int((min(1, max(0, value)) * 255).rounded()) }
+      return (byte(alpha) << 24) | (byte(red) << 16) | (byte(green) << 8) | byte(blue)
+    }
+  }
+
   private enum LauncherIcon: String, CaseIterable {
     case iris, blue, rose, orange, teal, green
 
@@ -20,6 +40,7 @@ import MediaPlayer
 
   private var isChangingLauncherIcon = false
   private var appleBooks: AppleBooksChannel?
+  private var paletteChannel: FlutterMethodChannel?
 
   private var volumeEventSink: FlutterEventSink?
   private var audioSession: AVAudioSession?
@@ -41,6 +62,12 @@ import MediaPlayer
     let documentsPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
     let applicationSupportsPath = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true)[0]
     let controller = self.window!.rootViewController as! FlutterViewController
+    let palette = FlutterMethodChannel(name: "litetale/apple_palette", binaryMessenger: controller.binaryMessenger)
+    palette.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "colors", let self else { result(FlutterMethodNotImplemented); return }
+      result(["light": self.systemColors(.light), "dark": self.systemColors(.dark)])
+    }
+    paletteChannel = palette
     appleBooks = AppleBooksChannel(parent: controller, messenger: controller.binaryMessenger)
     AppleThemeReveal.shared.install(messenger: controller.binaryMessenger, window: { [weak self] in self?.window })
 

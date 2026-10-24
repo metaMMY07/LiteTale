@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 
 /// Resources belonging to one reader page must paint before its PNG is cached.
 /// Changes during asynchronous readback invalidate that readback's revision.

@@ -1,5 +1,7 @@
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/widgets/left_aligned_scrollable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -26,7 +28,7 @@ class AccountPage extends StatelessWidget {
                     children: [
                       Text(state.errorMessage ?? '加载失败'),
                       const SizedBox(height: 16),
-                      ElevatedButton(
+                      AppButton.elevated(
                         onPressed: () {
                           context.read<AccountCubit>().loadUserDetail();
                         },
@@ -98,7 +100,7 @@ class AccountPage extends StatelessWidget {
     String title,
     List<Widget> children,
   ) {
-    return Card(
+    return AppleGlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(

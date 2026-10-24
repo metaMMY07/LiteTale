@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/services/bili_browser.dart';
 import 'package:wild/sources/book_source.dart';
@@ -80,7 +81,7 @@ class _BiliRecoveryButtonState extends State<BiliRecoveryButton> {
         request is! BiliSiteVerificationRequired) {
       return const SizedBox.shrink();
     }
-    return OutlinedButton.icon(
+    return AppButton.outlinedIcon(
       onPressed: _opening ? null : _recover,
       icon: const Icon(Icons.open_in_browser_rounded),
       label: Text(request.contentRequired ? '打开原站加载完整正文' : '打开哔哩原站验证'),

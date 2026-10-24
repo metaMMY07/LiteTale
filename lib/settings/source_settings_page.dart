@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
@@ -43,7 +44,7 @@ class _SourceSettingsPageState extends State<SourceSettingsPage> {
                 padding: EdgeInsets.all(12),
                 child: Text('仅影响文库8；留空使用默认地址。\n$wenku8HostHint'),
               ),
-              TextField(
+              AppTextField(
                 controller: host,
                 decoration: InputDecoration(
                   labelText: '镜像地址',
@@ -58,8 +59,11 @@ class _SourceSettingsPageState extends State<SourceSettingsPage> {
                 child: Wrap(
                   spacing: 12,
                   children: [
-                    FilledButton(onPressed: _saveHost, child: const Text('保存')),
-                    OutlinedButton(
+                    AppButton.filled(
+                      onPressed: _saveHost,
+                      child: const Text('保存'),
+                    ),
+                    AppButton.outlined(
                       onPressed:
                           () => settingsAction(context, () async {
                             await context.read<ApiHostCubit>().resetToDefault();
@@ -86,18 +90,18 @@ class _SourceSettingsPageState extends State<SourceSettingsPage> {
                 title: '清除接口缓存',
                 description: '保留账号、书架和阅读记录',
                 onTap: () async {
-                  final yes = await showDialog<bool>(
+                  final yes = await showAdaptiveDialog<bool>(
                     context: context,
                     builder:
-                        (ctx) => AlertDialog(
+                        (ctx) => AlertDialog.adaptive(
                           title: const Text('清除接口缓存'),
                           content: const Text('下次打开页面时会重新获取数据。'),
                           actions: [
-                            TextButton(
+                            AppButton.text(
                               onPressed: () => Navigator.pop(ctx, false),
                               child: const Text('取消'),
                             ),
-                            FilledButton(
+                            AppButton.filled(
                               onPressed: () => Navigator.pop(ctx, true),
                               child: const Text('清除'),
                             ),

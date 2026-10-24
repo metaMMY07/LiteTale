@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/book_source.dart';
@@ -7,7 +8,7 @@ import 'package:wild/src/rust/api/database.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 
 class CategoryPage extends StatefulWidget {
   final String? initialTag;
@@ -193,7 +194,7 @@ class _CategoryPageState extends State<CategoryPage> {
                           index: int.parse(_viewMode),
                           onSelect: (index) => _changeSelection(mode: '$index'),
                         )
-                        : SegmentedButton<String>(
+                        : AppSegmentedButton<String>(
                           showSelectedIcon: false,
                           segments: const [
                             ButtonSegment(value: "0", label: Text('更新')),
@@ -227,7 +228,7 @@ class _CategoryPageState extends State<CategoryPage> {
                             ],
                             onSelect: (tag) => _changeSelection(tag: tag),
                           )
-                          : PopupMenuButton<String>(
+                          : AppPopupMenuButton<String>(
                             tooltip: '分类',
                             child: Container(
                               padding: const EdgeInsets.symmetric(
@@ -318,7 +319,7 @@ class _CategoryPageState extends State<CategoryPage> {
               else if (_tagError != null)
                 Padding(
                   padding: const EdgeInsets.only(left: 8),
-                  child: TextButton.icon(
+                  child: AppButton.textIcon(
                     onPressed: _loadTags,
                     icon: const Icon(Icons.refresh),
                     label: const Text('重试加载分类'),
@@ -386,7 +387,7 @@ class _CategoryPageState extends State<CategoryPage> {
                                       refresh: true,
                                     ),
                               ),
-                              TextButton(
+                              AppButton.text(
                                 onPressed:
                                     () => _loadTagPage(
                                       _selectedTag!,
@@ -430,7 +431,7 @@ class _CategoryPageState extends State<CategoryPage> {
                         if (index >= _currentPage!.records.length) {
                           if (_pageError != null) {
                             return Center(
-                              child: TextButton(
+                              child: AppButton.text(
                                 onPressed: () => _loadTagPage(_selectedTag!),
                                 child: const Text('加载失败，点击重试'),
                               ),

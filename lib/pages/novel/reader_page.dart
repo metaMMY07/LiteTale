@@ -1,8 +1,9 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/services/hardware_turn_buffer.dart';
 import 'package:wild/cubits/volume_control_cubit.dart';
 import 'package:wild/widgets/wenku8_recovery_button.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
@@ -122,7 +123,7 @@ class ReaderPage extends StatelessWidget {
                         children: [
                           Text(state.error),
                           const SizedBox(height: 16),
-                          ElevatedButton(
+                          AppButton.elevated(
                             onPressed:
                                 () => context.read<ReaderCubit>().loadChapter(),
                             child: const Text('重试'),
@@ -217,6 +218,7 @@ class _ReaderViewState extends State<_ReaderView> {
   SourceId get _bookSource => sourceOf(context.read<ReaderCubit>().initialAid);
 
   bool get _curlEnabled =>
+      !Platform.isIOS &&
       _bookSource != SourceId.localEpub &&
       context.read<ReaderCurlCubit>().state &&
       !MediaQuery.of(context).disableAnimations;
@@ -348,7 +350,7 @@ class _ReaderViewState extends State<_ReaderView> {
 
   void _showChapterList() {
     final readerCubit = context.read<ReaderCubit>();
-    showModalBottomSheet(
+    showAppBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (BuildContext context) {
@@ -376,7 +378,7 @@ class _ReaderViewState extends State<_ReaderView> {
 
   void _showSettings() {
     final readerCubit = context.read<ReaderCubit>();
-    showModalBottomSheet(
+    showAppBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (BuildContext context) {
@@ -583,6 +585,7 @@ class _ReaderViewState extends State<_ReaderView> {
                     child: BlocBuilder<ReaderCurlCubit, bool>(
                       builder: (context, enabled) {
                         final curlEnabled =
+                            !Platform.isIOS &&
                             _bookSource != SourceId.localEpub &&
                             enabled &&
                             !mediaQuery.disableAnimations;
@@ -648,7 +651,7 @@ class _ReaderViewState extends State<_ReaderView> {
                         ),
                         child: Row(
                           children: [
-                            IconButton(
+                            AppIconButton(
                               icon: const Icon(
                                 Icons.arrow_back,
                                 color: Colors.white,
@@ -666,14 +669,14 @@ class _ReaderViewState extends State<_ReaderView> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            IconButton(
+                            AppIconButton(
                               icon: const Icon(
                                 Icons.menu_book,
                                 color: Colors.white,
                               ),
                               onPressed: _showChapterList,
                             ),
-                            IconButton(
+                            AppIconButton(
                               icon: const Icon(
                                 Icons.settings,
                                 color: Colors.white,
@@ -852,7 +855,7 @@ class _ChapterListState extends State<_ChapterList> {
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const Spacer(),
-                TextButton.icon(
+                AppButton.textIcon(
                   onPressed: () => Navigator.pop(context),
                   icon: const Icon(Icons.close),
                   label: const Text('关闭'),
@@ -942,11 +945,11 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
     Color initialColor,
     Function(Color) onColorChanged,
   ) {
-    showDialog(
+    showAdaptiveDialog(
       context: context,
       builder: (BuildContext context) {
         Color pickerColor = initialColor;
-        return AlertDialog(
+        return AlertDialog.adaptive(
           title: const Text('选择颜色'),
           content: SingleChildScrollView(
             child: ColorPicker(
@@ -961,13 +964,13 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
             ),
           ),
           actions: <Widget>[
-            TextButton(
+            AppButton.text(
               child: const Text('取消'),
               onPressed: () {
                 Navigator.of(context).pop();
               },
             ),
-            TextButton(
+            AppButton.text(
               child: const Text('确定'),
               onPressed: () async {
                 onColorChanged(pickerColor);
@@ -1010,7 +1013,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                   Expanded(
                     child: BlocBuilder<ReaderTypeCubit, ReaderType>(
                       builder: (context, type) {
-                        return SegmentedButton<ReaderType>(
+                        return AppSegmentedButton<ReaderType>(
                           segments: const [
                             ButtonSegment<ReaderType>(
                               value: ReaderType.normal,
@@ -1052,7 +1055,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                     children: [
                       Text('字体大小'),
                       Expanded(
-                        child: Slider(
+                        child: AppSlider(
                           value: fontSize,
                           min: 14,
                           max: 24,
@@ -1076,7 +1079,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                     children: [
                       Text('段落间距', style: TextStyle()),
                       Expanded(
-                        child: Slider(
+                        child: AppSlider(
                           value: spacing,
                           min: 2,
                           max: 32,
@@ -1100,7 +1103,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                     children: [
                       Text('行高', style: TextStyle()),
                       Expanded(
-                        child: Slider(
+                        child: AppSlider(
                           value: lineHeight,
                           min: 1.0,
                           max: 2.0,
@@ -1124,7 +1127,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                     children: [
                       Text('顶部边距'),
                       Expanded(
-                        child: Slider(
+                        child: AppSlider(
                           value: height,
                           min: 0,
                           max: 100,
@@ -1148,7 +1151,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                     children: [
                       Text('底部边距'),
                       Expanded(
-                        child: Slider(
+                        child: AppSlider(
                           value: height,
                           min: 0,
                           max: 100,
@@ -1172,7 +1175,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                     children: [
                       Text('左边距'),
                       Expanded(
-                        child: Slider(
+                        child: AppSlider(
                           value: padding,
                           min: 0,
                           max: 50,
@@ -1196,7 +1199,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                     children: [
                       Text('右边距'),
                       Expanded(
-                        child: Slider(
+                        child: AppSlider(
                           value: padding,
                           min: 0,
                           max: 50,
@@ -1220,7 +1223,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                   Text('主题模式', style: TextStyle()),
                   const SizedBox(width: 16),
                   Expanded(
-                    child: SegmentedButton<ReaderThemeMode>(
+                    child: AppSegmentedButton<ReaderThemeMode>(
                       segments: const [
                         ButtonSegment<ReaderThemeMode>(
                           value: ReaderThemeMode.auto,
@@ -1260,7 +1263,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton.icon(
+                    child: AppButton.outlinedIcon(
                       icon: Container(
                         width: 24,
                         height: 24,
@@ -1286,7 +1289,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                   ),
                   const SizedBox(width: 16),
                   Expanded(
-                    child: OutlinedButton.icon(
+                    child: AppButton.outlinedIcon(
                       icon: Container(
                         width: 24,
                         height: 24,
@@ -1323,7 +1326,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton.icon(
+                    child: AppButton.outlinedIcon(
                       icon: Container(
                         width: 24,
                         height: 24,
@@ -1349,7 +1352,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                   ),
                   const SizedBox(width: 16),
                   Expanded(
-                    child: OutlinedButton.icon(
+                    child: AppButton.outlinedIcon(
                       icon: Container(
                         width: 24,
                         height: 24,
@@ -1381,7 +1384,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                     children: [
                       Text('背景透明度'),
                       Expanded(
-                        child: Slider(
+                        child: AppSlider(
                           value: backgroundState.opacity,
                           min: 0.0,
                           max: 1.0,
@@ -1416,7 +1419,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                       Row(
                         children: [
                           Expanded(
-                            child: OutlinedButton.icon(
+                            child: AppButton.outlinedIcon(
                               icon: Icon(
                                 backgroundState.lightBackgroundExists
                                     ? Icons.image
@@ -1436,7 +1439,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                           ),
                           const SizedBox(width: 8),
                           if (backgroundState.lightBackgroundExists)
-                            OutlinedButton.icon(
+                            AppButton.outlinedIcon(
                               icon: const Icon(Icons.delete),
                               label: const Text('删除'),
                               onPressed: () async {
@@ -1451,7 +1454,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                       Row(
                         children: [
                           Expanded(
-                            child: OutlinedButton.icon(
+                            child: AppButton.outlinedIcon(
                               icon: Icon(
                                 backgroundState.darkBackgroundExists
                                     ? Icons.image
@@ -1471,7 +1474,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
                           ),
                           const SizedBox(width: 8),
                           if (backgroundState.darkBackgroundExists)
-                            OutlinedButton.icon(
+                            AppButton.outlinedIcon(
                               icon: const Icon(Icons.delete),
                               label: const Text('删除'),
                               onPressed: () async {
@@ -1488,7 +1491,7 @@ class _ReaderSettingsState extends State<_ReaderSettings> {
               ),
               const SizedBox(height: 16),
               // 重置按钮
-              TextButton(
+              AppButton.text(
                 onPressed: () async {
                   await context.read<ThemeCubit>().resetToDefault();
                   await topBarHeightCubit.updateHeight(56);

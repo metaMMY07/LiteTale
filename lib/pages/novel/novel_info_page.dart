@@ -1,3 +1,5 @@
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/wenku8_recovery_button.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
@@ -11,7 +13,7 @@ import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/widgets/cf_action_loader.dart';
 import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/pages/shelf_login_page.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 
@@ -70,7 +72,7 @@ class NovelInfoPage extends StatelessWidget {
                   if (state is! NovelInfoLoaded) {
                     return const SizedBox.shrink();
                   }
-                  return IconButton(
+                  return AppIconButton(
                     icon: const Icon(Icons.download_outlined),
                     tooltip:
                         sourceOf(novelId) == SourceId.wenku8
@@ -96,7 +98,7 @@ class NovelInfoPage extends StatelessWidget {
                     );
                   }
                   final isInBookshelf = state.isBookInBookshelf(novelId);
-                  return IconButton(
+                  return AppIconButton(
                     icon: Icon(
                       isInBookshelf ? Icons.bookmark : Icons.bookmark_border,
                       color:
@@ -127,7 +129,7 @@ class NovelInfoPage extends StatelessWidget {
                             actionPath =
                                 '/modules/article/addbookcase.php?bid=$novelId';
                           }
-                          showDialog(
+                          showAdaptiveDialog(
                             context: context,
                             barrierDismissible: false,
                             builder:
@@ -179,7 +181,7 @@ class NovelInfoPage extends StatelessWidget {
                       children: [
                         Text(state.message, textAlign: TextAlign.center),
                         const SizedBox(height: 16),
-                        FilledButton(
+                        AppButton.filled(
                           onPressed: () async {
                             final loggedIn = await Navigator.of(
                               context,
@@ -210,7 +212,7 @@ class NovelInfoPage extends StatelessWidget {
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 16),
-                      FilledButton.icon(
+                      AppButton.filledIcon(
                         onPressed: () => context.read<NovelInfoCubit>().load(),
                         icon: const Icon(Icons.refresh),
                         label: const Text('重新加载'),
@@ -284,7 +286,8 @@ class _NovelInfoContent extends StatelessWidget {
         'volumes': volumes,
         'novelInfo': novelInfo,
         'initialPage': initialPage,
-        if (novelId.startsWith('epub:') && currentState.readingHistory?.chapterId == chapterId)
+        if (novelId.startsWith('epub:') &&
+            currentState.readingHistory?.chapterId == chapterId)
           'initialTextOffset': currentState.readingHistory!.progress,
       },
     );
@@ -361,7 +364,7 @@ class _NovelInfoContent extends StatelessWidget {
                 left: 16,
                 right: 16,
               ),
-              child: ElevatedButton.icon(
+              child: AppButton.elevatedIcon(
                 onPressed:
                     () => _navigateToReader(
                       context,
@@ -604,7 +607,7 @@ class _NovelTags extends StatelessWidget {
                           arguments: {'tag': tag},
                         )
                         : null,
-                child: Chip(
+                child: AppChip(
                   label: Text(tag),
                   backgroundColor:
                       Theme.of(context).colorScheme.primaryContainer,
@@ -627,7 +630,7 @@ class _VolumeItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return AppleGlassCard(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

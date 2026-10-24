@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/services/wenku8_browser.dart';
 import 'package:wild/sources/book_source.dart';
@@ -69,7 +70,7 @@ class _Wenku8RecoveryButtonState extends State<Wenku8RecoveryButton> {
         !shouldOfferWenku8SiteVerification(widget.error)) {
       return const SizedBox.shrink();
     }
-    return OutlinedButton.icon(
+    return AppButton.outlinedIcon(
       onPressed: _opening ? null : _recover,
       icon: const Icon(Icons.open_in_browser_rounded),
       label: const Text('打开文库8验证 / 登录'),

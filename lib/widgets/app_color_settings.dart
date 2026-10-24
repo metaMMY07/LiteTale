@@ -1,12 +1,38 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:wild/cubits/app_accent_cubit.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:wild/theme/ios_system_colors.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 
 void showAppColors(BuildContext context) {
   final cubit = context.read<AppAccentCubit>();
   FocusManager.instance.primaryFocus?.unfocus();
-  showModalBottomSheet<void>(
+  if (usesAppleGlass) {
+    showCupertinoModalPopup<void>(
+      context: context,
+      builder:
+          (_) => BlocProvider.value(
+            value: cubit,
+            child: FractionallySizedBox(
+              widthFactor: 1,
+              heightFactor: .66,
+              child: AppleGlassSurface(
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: SafeArea(
+                    child: SingleChildScrollView(child: AppColorSettings()),
+                  ),
+                ),
+              ),
+            ),
+          ),
+    );
+    return;
+  }
+  showAppBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     builder:
@@ -41,10 +67,10 @@ class AppColorSettings extends StatelessWidget {
         Future<void> chooseCustom() async {
           var picked =
               appAccentSeed(selected) ?? Theme.of(context).colorScheme.primary;
-          final result = await showDialog<Color>(
+          final result = await showAdaptiveDialog<Color>(
             context: context,
             builder:
-                (dialogContext) => AlertDialog(
+                (dialogContext) => AlertDialog.adaptive(
                   title: const Text('自定义主题颜色'),
                   content: SingleChildScrollView(
                     child: ColorPicker(
@@ -55,11 +81,11 @@ class AppColorSettings extends StatelessWidget {
                     ),
                   ),
                   actions: [
-                    TextButton(
+                    AppButton.text(
                       onPressed: () => Navigator.pop(dialogContext),
                       child: const Text('取消'),
                     ),
-                    FilledButton(
+                    AppButton.filled(
                       onPressed: () => Navigator.pop(dialogContext, picked),
                       child: const Text('应用'),
                     ),
@@ -71,6 +97,72 @@ class AppColorSettings extends StatelessWidget {
           }
         }
 
+        if (usesAppleGlass) {
+          final brightness = Theme.of(context).brightness;
+          return Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '应用颜色',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                    CupertinoButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('完成'),
+                    ),
+                  ],
+                ),
+                const Text('采用 iOS 系统颜色，自动适配深浅色外观。'),
+                const SizedBox(height: 20),
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 16,
+                  children: [
+                    for (final entry in iosAccentColors.entries)
+                      CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        onPressed: () => choose(entry.key),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 54,
+                              height: 54,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: IosSystemColors.color(
+                                  entry.key,
+                                  brightness,
+                                ),
+                              ),
+                              child:
+                                  iosAccentKey(selected) == entry.key
+                                      ? const Icon(
+                                        CupertinoIcons.check_mark,
+                                        color: CupertinoColors.white,
+                                      )
+                                      : null,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              entry.value.$1,
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        }
         return Padding(
           padding: const EdgeInsets.all(20),
           child: Column(

@@ -1,5 +1,6 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/sources/source_api.dart';
@@ -163,7 +164,7 @@ class _SearchPageState extends State<SearchPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ExpressiveLoadingIndicator(),
+            AppLoadingIndicator(),
             SizedBox(height: 20),
             Text('正在搜索，请稍候…'),
             SizedBox(height: 8),
@@ -185,7 +186,7 @@ class _SearchPageState extends State<SearchPage> {
               const SizedBox(height: 8),
               Text(_error.toString(), textAlign: TextAlign.center),
               const SizedBox(height: 16),
-              FilledButton.icon(
+              AppButton.filledIcon(
                 onPressed: _search,
                 icon: const Icon(Icons.refresh),
                 label: const Text('重试'),
@@ -259,7 +260,7 @@ class _SearchPageState extends State<SearchPage> {
             onRecovered: () => _search(more: true),
           ),
           if (!_loading && _results!.currentPage < _results!.maxPage)
-            TextButton(
+            AppButton.text(
               onPressed: () => _search(more: true),
               child: Text(
                 _error == null
@@ -312,17 +313,17 @@ class _SearchPageState extends State<SearchPage> {
             ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: TextField(
+            child: AppTextField(
               controller: _searchController,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
                 hintText: _searchType == 'author' ? '输入作者名' : '输入书名',
-                prefixIcon: IconButton(
+                prefixIcon: AppIconButton(
                   tooltip: '搜索',
                   icon: const Icon(Icons.search),
                   onPressed: _search,
                 ),
-                suffixIcon: IconButton(
+                suffixIcon: AppIconButton(
                   tooltip: '执行搜索',
                   icon: const Icon(Icons.arrow_forward_rounded),
                   onPressed: _search,
@@ -337,7 +338,7 @@ class _SearchPageState extends State<SearchPage> {
               280)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: SegmentedButton<String>(
+              child: AppSegmentedButton<String>(
                 showSelectedIcon: false,
                 segments: [
                   const ButtonSegment(value: 'articlename', label: Text('书名')),

@@ -37,7 +37,7 @@ class AppleGlassCard extends StatelessWidget {
   final bool filled;
   @override
   Widget build(BuildContext context) {
-    if (!usesAppleGlass || color != null) {
+    if (!usesAppleGlass) {
       return filled
           ? Card.filled(
             color: color,
@@ -59,6 +59,7 @@ class AppleGlassCard extends StatelessWidget {
     return Padding(
       padding: margin ?? const EdgeInsets.all(4),
       child: AppleGlassSurface(
+        tint: color,
         child: Material(type: MaterialType.transparency, child: child),
       ),
     );
@@ -66,8 +67,9 @@ class AppleGlassCard extends StatelessWidget {
 }
 
 class AppleGlassSurface extends StatelessWidget {
-  const AppleGlassSurface({super.key, required this.child});
+  const AppleGlassSurface({super.key, required this.child, this.tint});
   final Widget child;
+  final Color? tint;
   @override
   Widget build(BuildContext context) {
     if (!usesAppleGlass) return child;
@@ -79,6 +81,7 @@ class AppleGlassSurface extends StatelessWidget {
             child: _AppleChrome(
               parameters: {
                 'kind': 'surface',
+                if (tint != null) 'tint': tint!.toARGB32(),
                 'dark': Theme.of(context).brightness == Brightness.dark,
               },
               onAction: (_, _) {},
@@ -105,10 +108,12 @@ class AppleGlassChoiceBar extends StatelessWidget {
     required this.labels,
     required this.index,
     required this.onSelect,
+    this.enabled,
   });
   final List<String> labels;
   final int index;
   final ValueChanged<int> onSelect;
+  final List<bool>? enabled;
   @override
   Widget build(BuildContext context) => SizedBox(
     height: 44,
@@ -116,21 +121,81 @@ class AppleGlassChoiceBar extends StatelessWidget {
       parameters: {
         'kind': 'segments',
         'labels': labels,
+        'accent': Theme.of(context).colorScheme.primary.toARGB32(),
         'index': index,
+        if (enabled != null) 'enabled': enabled!,
         'dark': Theme.of(context).brightness == Brightness.dark,
       },
       onAction: (a, v) {
         if (a == 'select') onSelect(v as int);
       },
-      fallback: CupertinoSlidingSegmentedControl<int>(
-        groupValue: index,
-        children: {for (var i = 0; i < labels.length; i++) i: Text(labels[i])},
-        onValueChanged: (v) {
-          if (v != null) onSelect(v);
-        },
-      ),
+      fallback:
+          labels.length < 2
+              ? Center(child: Text(labels.isEmpty ? '' : labels.first))
+              : CupertinoSegmentedControl<int>(
+                groupValue: index,
+                children: {
+                  for (var i = 0; i < labels.length; i++) i: Text(labels[i]),
+                },
+                onValueChanged: (v) {
+                  onSelect(v);
+                },
+              ),
     ),
   );
+}
+
+/// Native selectors that remain readable when there are many bookcase/sort tabs.
+class AppleGlassFilterBar extends StatelessWidget {
+  const AppleGlassFilterBar({
+    super.key,
+    required this.labels,
+    required this.index,
+    required this.onSelect,
+    this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+  });
+  final List<String> labels;
+  final int index;
+  final ValueChanged<int> onSelect;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    if (labels.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: padding,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          var widestLabel = 0.0;
+          for (final label in labels) {
+            final painter = TextPainter(
+              text: TextSpan(text: label, style: const TextStyle(fontSize: 17)),
+              textDirection: Directionality.of(context),
+              textScaler: MediaQuery.textScalerOf(context),
+            )..layout();
+            if (painter.width > widestLabel) widestLabel = painter.width;
+            painter.dispose();
+          }
+          final desiredWidth = (widestLabel + 32) * labels.length + 24;
+          final width =
+              desiredWidth < constraints.maxWidth
+                  ? constraints.maxWidth
+                  : desiredWidth;
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: width,
+              child: AppleGlassChoiceBar(
+                labels: labels,
+                index: index.clamp(0, labels.length - 1),
+                onSelect: onSelect,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 }
 
 class AppleGlassMenu extends StatelessWidget {
@@ -140,19 +205,25 @@ class AppleGlassMenu extends StatelessWidget {
     required this.items,
     required this.onSelect,
     this.selected,
+    this.width = 98,
+    this.symbol = 'line.3.horizontal.decrease',
   });
   final String label;
   final List<Map<String, String>> items;
   final String? selected;
+  final double width;
+  final String symbol;
   final ValueChanged<String> onSelect;
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 98,
+    width: width,
     height: 44,
     child: _AppleChrome(
       parameters: {
         'kind': 'menu',
+        'accent': Theme.of(context).colorScheme.primary.toARGB32(),
         'label': label,
+        'symbol': symbol,
         'items': items,
         'selected': selected ?? '',
         'dark': Theme.of(context).brightness == Brightness.dark,

@@ -1,3 +1,4 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -12,7 +13,7 @@ import 'package:wild/theme/material_you.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/widgets/theme_reveal_host.dart';
 
 import '../../src/rust/api/database.dart';
@@ -183,7 +184,7 @@ class _IndexPageState extends State<IndexPage>
                 title: Text(usesMaterialYou ? '发现' : '轻小说文库'),
                 actions: [
                   if (usesMaterialYou)
-                    IconButton(
+                    AppIconButton(
                       key: _themeButtonKey,
                       icon: Icon(
                         Theme.of(context).brightness == Brightness.dark
@@ -197,7 +198,7 @@ class _IndexPageState extends State<IndexPage>
                       onPressed: _switchTheme,
                     )
                   else
-                    IconButton(
+                    AppIconButton(
                       icon: const Icon(Icons.search_rounded),
                       tooltip: '搜索',
                       onPressed: () {
@@ -272,7 +273,7 @@ class _IndexPageState extends State<IndexPage>
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 16),
-                      FilledButton.tonal(
+                      AppButton.tonal(
                         onPressed:
                             () => Navigator.push(
                               context,
@@ -409,35 +410,53 @@ class _ToplistPageState extends State<ToplistPage> {
     return Column(
       children: [
         // Sort selector
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children:
-                  _sortOptions.map((option) {
-                    final (label, value) = option;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: FilterChip(
-                        label: Text(label),
-                        selected: _selectedSort == value,
-                        onSelected: (selected) {
-                          if (selected) {
-                            setState(() {
-                              _selectedSort = value;
-                              _errorMessage = null;
-                            });
-                            _loadToplist(refresh: true);
-                            _saveState();
-                          }
-                        },
-                      ),
-                    );
-                  }).toList(),
+        if (usesAppleGlass)
+          AppleGlassFilterBar(
+            labels: _sortOptions.map((option) => option.$1).toList(),
+            index: _sortOptions.indexWhere(
+              (option) => option.$2 == _selectedSort,
+            ),
+            onSelect: (index) {
+              final value = _sortOptions[index].$2;
+              if (_selectedSort == value) return;
+              setState(() {
+                _selectedSort = value;
+                _errorMessage = null;
+              });
+              _loadToplist(refresh: true);
+              _saveState();
+            },
+          )
+        else
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children:
+                    _sortOptions.map((option) {
+                      final (label, value) = option;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          label: Text(label),
+                          selected: _selectedSort == value,
+                          onSelected: (selected) {
+                            if (selected) {
+                              setState(() {
+                                _selectedSort = value;
+                                _errorMessage = null;
+                              });
+                              _loadToplist(refresh: true);
+                              _saveState();
+                            }
+                          },
+                        ),
+                      );
+                    }).toList(),
+              ),
             ),
           ),
-        ),
         // Novel grid or error state
         Expanded(
           child:

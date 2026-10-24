@@ -1,12 +1,11 @@
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../cubits/articlelist_cubit.dart';
-import '../../src/rust/wenku8/models.dart';
-import '../../widgets/cached_image.dart';
 import 'package:wild/widgets/novel_card.dart';
 import 'package:wild/sources/book_source.dart';
-import 'package:wild/widgets/expressive_loading_indicator.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 
 class ArticlelistPage extends StatefulWidget {
   const ArticlelistPage({super.key});
@@ -49,8 +48,11 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
               children: [
                 Text(state.message),
                 const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: () => context.read<ArticlelistCubit>().loadNovels(refresh: true),
+                AppButton.elevated(
+                  onPressed:
+                      () => context.read<ArticlelistCubit>().loadNovels(
+                        refresh: true,
+                      ),
                   child: const Text('重试'),
                 ),
               ],
@@ -60,41 +62,44 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
 
         if (state is ArticlelistLoaded) {
           return RefreshIndicator(
-            onRefresh: () => context.read<ArticlelistCubit>().loadNovels(refresh: true),
-            child: state.novels.isEmpty
-                ? const CenteredLoadingIndicator()
-                : GridView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(8),
-                    gridDelegate: const BookGridDelegate(
-                      childAspectRatio: 0.7,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                    ),
-                    itemCount: state.novels.length + (state.hasMore ? 1 : 0),
-                    itemBuilder: (context, index) {
-                      if (index == state.novels.length) {
-                        return const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(16.0),
-                            child: CircularProgressIndicator(),
-                          ),
-                        );
-                      }
-                      final novel = state.novels[index];
-                      return NovelCard.fromNovel(
-                        novel: novel,
-                        source: sourceOf(novel.id),
-                        onTap: () {
-                          Navigator.pushNamed(
-                            context,
-                            '/novel/info',
-                            arguments: novel.id,
+            onRefresh:
+                () =>
+                    context.read<ArticlelistCubit>().loadNovels(refresh: true),
+            child:
+                state.novels.isEmpty
+                    ? const CenteredLoadingIndicator()
+                    : GridView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.all(8),
+                      gridDelegate: const BookGridDelegate(
+                        childAspectRatio: 0.7,
+                        crossAxisSpacing: 8,
+                        mainAxisSpacing: 8,
+                      ),
+                      itemCount: state.novels.length + (state.hasMore ? 1 : 0),
+                      itemBuilder: (context, index) {
+                        if (index == state.novels.length) {
+                          return const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(16.0),
+                              child: CircularProgressIndicator(),
+                            ),
                           );
-                        },
-                      );
-                    },
-                  ),
+                        }
+                        final novel = state.novels[index];
+                        return NovelCard.fromNovel(
+                          novel: novel,
+                          source: sourceOf(novel.id),
+                          onTap: () {
+                            Navigator.pushNamed(
+                              context,
+                              '/novel/info',
+                              arguments: novel.id,
+                            );
+                          },
+                        );
+                      },
+                    ),
           );
         }
 

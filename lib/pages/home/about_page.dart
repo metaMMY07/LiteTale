@@ -1,3 +1,5 @@
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -62,7 +64,7 @@ class AboutPage extends StatelessWidget {
                 if (state.updateInfo != null)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: FilledButton.icon(
+                    child: AppButton.filledIcon(
                       onPressed: () async {
                         try {
                           await _launchUrl(state.updateInfo!.url);
@@ -81,7 +83,7 @@ class AboutPage extends StatelessWidget {
                 else
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: OutlinedButton.icon(
+                    child: AppButton.outlinedIcon(
                       onPressed: () {
                         context.read<UpdateCubit>().checkUpdate(force: true);
                       },
@@ -91,7 +93,7 @@ class AboutPage extends StatelessWidget {
                   ),
                 const SizedBox(height: 32),
                 // 其他信息
-                Card(
+                AppleGlassCard(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Column(
@@ -113,7 +115,7 @@ class AboutPage extends StatelessWidget {
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                         const SizedBox(height: 8),
-                        TextButton.icon(
+                        AppButton.textIcon(
                           onPressed:
                               () => _launchUrl(
                                 'https://github.com/metaMMY07/LiteTale',
@@ -121,7 +123,7 @@ class AboutPage extends StatelessWidget {
                           icon: const Icon(Icons.code),
                           label: const Text('查看 LiteTale 源代码'),
                         ),
-                        TextButton.icon(
+                        AppButton.textIcon(
                           onPressed:
                               () =>
                                   _launchUrl('https://github.com/niuhuan/wild'),
@@ -139,7 +141,7 @@ class AboutPage extends StatelessWidget {
                           'Wild 衍生代码采用 GNU GPL v3；应用图标来自 Novella，并按 GNU AGPL v3 许可使用。',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
-                        TextButton.icon(
+                        AppButton.textIcon(
                           onPressed: () => showLicensePage(context: context),
                           icon: const Icon(Icons.description_outlined),
                           label: const Text('查看开源许可'),
