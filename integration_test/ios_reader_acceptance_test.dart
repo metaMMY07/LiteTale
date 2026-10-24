@@ -68,8 +68,22 @@ void main() {
     expect(await reveal.invokeMethod<bool>('status'), isTrue);
     brightness.value = Brightness.dark;
     await tester.pump();
+    expect(
+      await reveal.invokeMethod<bool>('status'),
+      isTrue,
+      reason: 'Changing the theme must preserve the frozen overlay',
+    );
     await reveal.invokeMethod<void>('animate');
+    final details = await reveal.invokeMapMethod<String, dynamic>('details');
+    expect(details!['visible'], isTrue);
+    if (details['reducedMotion'] != true) {
+      expect(details['maskWidth'], details['width']);
+      expect(details['animating'], isTrue);
+    }
     await Future<void>.delayed(const Duration(milliseconds: 200));
+    if (details['reducedMotion'] != true) {
+      expect(await reveal.invokeMethod<bool>('freezeForCapture'), isTrue);
+    }
     final middle = await binding.takeScreenshot('ios-theme-mid');
     final codec = await ui.instantiateImageCodec(Uint8List.fromList(middle));
     final frame = await codec.getNextFrame();
@@ -82,7 +96,9 @@ void main() {
         light++;
       }
     }
-    expect(light / (frame.image.width * frame.image.height), greaterThan(.4));
+    if (details['reducedMotion'] != true) {
+      expect(light / (frame.image.width * frame.image.height), greaterThan(.4));
+    }
     frame.image.dispose();
     codec.dispose();
     await Future<void>.delayed(const Duration(milliseconds: 650));

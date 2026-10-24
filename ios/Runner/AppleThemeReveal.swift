@@ -21,10 +21,35 @@ final class AppleThemeReveal {
       case "animate": self.animate(); result(nil)
       case "cancel": self.cancel(); result(nil)
       case "status": result(self.overlay != nil)
+#if DEBUG
+      // drawHierarchy renders model layers. Freeze the actual compositor path
+      // first so integration screenshots can observe an intermediate CA frame.
+      case "freezeForCapture": result(self.freezeForCapture())
+#endif
+      case "details": result([
+        "visible": self.overlay != nil,
+        "width": Double(self.overlay?.bounds.width ?? 0),
+        "maskWidth": Double(self.overlay?.layer.mask?.bounds.width ?? 0),
+        "animating": self.overlay?.layer.mask?.animation(forKey: "theme-reveal") != nil,
+        "reducedMotion": UIAccessibility.isReduceMotionEnabled
+      ] as [String: Any])
       default: result(FlutterMethodNotImplemented)
       }
     }
   }
+
+#if DEBUG
+  private func freezeForCapture() -> Bool {
+    guard let mask = overlay?.layer.mask as? CAShapeLayer,
+          let current = mask.presentation() as? CAShapeLayer,
+          let path = current.path else { return false }
+    CATransaction.begin(); CATransaction.setDisableActions(true)
+    mask.path = path
+    mask.removeAnimation(forKey: "theme-reveal")
+    CATransaction.commit()
+    return true
+  }
+#endif
 
   private func prepare(_ window: UIWindow?) -> Bool {
     guard let window else { return false }
@@ -67,7 +92,11 @@ final class AppleThemeReveal {
         width: radius * 2, height: radius * 2)))
       return shape.cgPath
     }
-    let mask = CAShapeLayer(); mask.fillRule = .evenOdd; mask.path = path(radius)
+    let mask = CAShapeLayer()
+    mask.frame = snapshot.bounds
+    mask.fillColor = UIColor.black.cgColor
+    mask.fillRule = .evenOdd
+    mask.path = path(radius)
     snapshot.layer.mask = mask
     let animation = CABasicAnimation(keyPath: "path")
     animation.fromValue = path(0.1); animation.toValue = path(radius)
