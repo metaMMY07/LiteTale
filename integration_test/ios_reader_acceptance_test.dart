@@ -106,35 +106,54 @@ void main() {
     },
   );
 
-  testWidgets('native glass surfaces and theme snapshot are live', (
+  testWidgets('native glass and theme overlay survive a real theme change', (
     tester,
   ) async {
+    final brightness = ValueNotifier(Brightness.light);
+    addTearDown(brightness.dispose);
     await tester.pumpWidget(
-      MaterialApp(
-        theme: iosGlassTheme(Brightness.light),
-        home: Scaffold(
-          body: Column(
-            children: [
-              AppleGlassToolbar(
-                source: '哔哩轻小说',
-                onSource: () {},
-                onSearch: () {},
-                onTheme: () {},
+      ValueListenableBuilder<Brightness>(
+        valueListenable: brightness,
+        builder:
+            (_, value, __) => MaterialApp(
+              themeAnimationDuration: Duration.zero,
+              theme: ThemeData(
+                brightness: value,
+                extensions: const [AppleGlassTheme(available: true)],
               ),
-              const AppleGlassCard(
-                child: ListTile(title: Text('主题与纸张'), subtitle: Text('原生玻璃分组')),
+              home: Scaffold(
+                backgroundColor:
+                    value == Brightness.light ? Colors.white : Colors.black,
+                body: Column(
+                  children: [
+                    AppleGlassToolbar(
+                      source: '哔哩轻小说',
+                      onSource: () {},
+                      onSearch: () {},
+                      onTheme: () {},
+                    ),
+                    const AppleGlassCard(
+                      child: ListTile(
+                        title: Text('主题与纸张'),
+                        subtitle: Text('原生玻璃分组'),
+                      ),
+                    ),
+                    AppleGlassMenu(
+                      label: '分类',
+                      items: const [
+                        {'group': '日常', 'label': '校园', 'value': 'school'},
+                      ],
+                      onSelect: (_) {},
+                    ),
+                    const Text('主题切换期间正文保留在原位'),
+                  ],
+                ),
+                bottomNavigationBar: AppleGlassBottomBar(
+                  index: 0,
+                  onSelect: (_) {},
+                ),
               ),
-              AppleGlassMenu(
-                label: '分类',
-                items: const [
-                  {'group': '日常', 'label': '校园', 'value': 'school'},
-                ],
-                onSelect: (_) {},
-              ),
-            ],
-          ),
-          bottomNavigationBar: AppleGlassBottomBar(index: 0, onSelect: (_) {}),
-        ),
+            ),
       ),
     );
     await tester.pumpAndSettle();
@@ -143,9 +162,14 @@ void main() {
     const reveal = MethodChannel('litetale/theme_reveal');
     expect(await reveal.invokeMethod<bool>('prepare'), isTrue);
     expect(await reveal.invokeMethod<bool>('status'), isTrue);
+    brightness.value = Brightness.dark;
+    await tester.pump();
     await reveal.invokeMethod<void>('animate');
-    await Future<void>.delayed(const Duration(milliseconds: 850));
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await binding.takeScreenshot('ios-theme-mid');
+    await Future<void>.delayed(const Duration(milliseconds: 650));
     expect(await reveal.invokeMethod<bool>('status'), isFalse);
+    await binding.takeScreenshot('ios-theme-dark');
   });
 
   testWidgets('textured page bends on the iOS GPU path', (tester) async {

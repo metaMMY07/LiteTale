@@ -166,9 +166,10 @@ final class EpubPageChannel: NSObject {
     let expression = capture
       ? "({ready:!!window.EpubEngine?.ready,selected:!!window.EpubEngine?.selected,error:window.EpubEngine?.error})"
       : "(window.EpubEngine?.ready?{ready:true,error:window.EpubEngine.error,pages:window.EpubEngine.pages,textLength:window.EpubEngine.textLength,text:window.EpubEngine.text}:{ready:false,error:window.EpubEngine?.error})"
-    session.web.evaluateJavaScript(expression) { [weak self] raw, error in
+    session.web.evaluateJavaScript("JSON.stringify(" + expression + ")") { [weak self] raw, error in
       guard let self, self.valid(session.id, token) else { return }
-      guard error == nil, let info = raw as? [String: Any], info["error"] as? String == nil else {
+      guard error == nil, let json = raw as? String, let bytes = json.data(using: .utf8),
+            let info = (try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any], info["error"] as? String == nil else {
         self.remove(session.id); self.fail("epub_layout", "本章 CSS 排版失败"); return
       }
       if info["ready"] as? Bool != true || (capture && info["selected"] as? Bool != true) {

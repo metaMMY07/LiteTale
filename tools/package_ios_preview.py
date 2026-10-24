@@ -104,8 +104,8 @@ def package(app, output):
         "device_tested": False,
         "known_limitations": [
             "Native Liquid Glass, edge-back gestures and source switching require iPhone/iPad acceptance.",
-            "iOS EPUB currently uses the legacy rich-text reader; Android CSS engine has not been ported.",
-            "Online page curl uses the Flutter fallback; Android PTQ parity is not verified.",
+            "iOS EPUB uses the offline WebKit/Foliate CSS engine; validate publisher styles on your books.",
+            "iOS online page curl uses a textured mesh with an opaque blank back; local EPUB keeps ordinary turns.",
             "Online sessions, font import and volume keys require physical-device validation.",
         ],
     }
@@ -115,7 +115,7 @@ def package(app, output):
         "This IPA is unsigned. Sign and install using Sideloadly on Windows.\n"
         "Keep the same Apple Account and Bundle ID for future updates; do not uninstall to refresh signing.\n"
         "Use the included verification manifest for the exact source, version and limitations.\n"
-        "iOS EPUB CSS fidelity and device behavior are not yet accepted.\n",
+        "See the separate simulator acceptance results; physical-device behavior still needs acceptance.\n",
         encoding="utf-8",
     )
     print(json.dumps({"ipa": str(ipa), "sha256": manifest["sha256"], "bytes": manifest["bytes"]}))
