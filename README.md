@@ -8,17 +8,17 @@
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
-## 最新测试包（2026-10-24）
+## 最新正式版（2026-10-24）
 
-[Android build75：ARM64](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-ios-preview.2026-10-24/LiteTale-1.0.0-build75-arm64-v8a.apk) · [x86_64](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-ios-preview.2026-10-24/LiteTale-1.0.0-build75-x86_64.apk) · [iOS build13 IPA（未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-ios-preview.2026-10-24/LiteTale-1.0.0-ios-13-unsigned.ipa) · [发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v1.0.0-ios-preview.2026-10-24)
+[Android build75：ARM64](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-build75/LiteTale-1.0.0-build75-arm64-v8a.apk) · [x86_64](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-build75/LiteTale-1.0.0-build75-x86_64.apk) · [iOS build13 IPA（未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-build75/LiteTale-1.0.0-ios-13-unsigned.ipa) · [发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v1.0.0-build75)
 
-iOS IPA 需自行签名安装；Android build75 包含哔哩轻小说修复。iOS 模拟器验收通过，实体设备由用户继续测试。
+iOS IPA 需自行签名安装；Android build75 包含哔哩轻小说修复。
 
-## Android 正式版 v1.0.0
+## LiteTale 1.0.0
 
-LiteTale 1.0.0 已发布，提供 ARM64 手机／平板版和 x86_64 模拟器版。在线轻小说与本地 EPUB 书籍可以在同一书架管理；本地 EPUB 支持离线阅读、常见原书 CSS、自选字体、横屏双页和跨章节连续翻页。
+LiteTale 1.0.0 提供 Android ARM64 手机／平板版、x86_64 模拟器版和 iOS 版。在线轻小说与本地 EPUB 书籍可以在同一书架管理。
 
-[下载 ARM64 手机／平板版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0/LiteTale-1.0.0-arm64-v8a.apk) · [下载 x86_64 模拟器版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0/LiteTale-1.0.0-x86_64.apk) · [查看 v1.0.0 发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v1.0.0)
+[下载 ARM64 手机／平板版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-build75/LiteTale-1.0.0-build75-arm64-v8a.apk) · [下载 x86_64 模拟器版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-build75/LiteTale-1.0.0-build75-x86_64.apk) · [下载 iOS IPA（未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-build75/LiteTale-1.0.0-ios-13-unsigned.ipa) · [查看正式发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v1.0.0-build75)
 
 完整功能和安装包校验值见 [1.0.0 发布记录](docs/releases/1.0.0.md)。
 
