@@ -56,15 +56,24 @@ class _IndexPageState extends State<IndexPage>
   }
 
   Future<void> _switchTheme() async {
+    final theme = context.read<ThemeCubit>();
+    if (usesAppleGlass) {
+      // During AnimatedTheme interpolation, brightness still represents the
+      // presentation state. Toggle the latest intent so a second tap reverses.
+      final mode = theme.state.themeMode;
+      final dark =
+          mode == ReaderThemeMode.dark ||
+          (mode == ReaderThemeMode.auto &&
+              MediaQuery.platformBrightnessOf(context) == Brightness.dark);
+      await theme.setThemeMode(
+        dark ? ReaderThemeMode.light : ReaderThemeMode.dark,
+      );
+      return;
+    }
     final target =
         Theme.of(context).brightness == Brightness.dark
             ? ReaderThemeMode.light
             : ReaderThemeMode.dark;
-    final theme = context.read<ThemeCubit>();
-    if (usesAppleGlass) {
-      await theme.setThemeMode(target);
-      return;
-    }
     final reveal = ThemeRevealHost.maybeOf(context);
     if (reveal == null) {
       await theme.setThemeMode(target);

@@ -181,13 +181,16 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     if let tabs {
       tabs.view.frame = bounds
     } else if let segments {
-      segments.frame = bounds.insetBy(dx: 12, dy: 4)
+      segments.frame = bounds.insetBy(dx: 12, dy: 0)
     } else {
       sourceButton.frame = CGRect(x: 8, y: 6, width: min(136, bounds.width * 0.34), height: 44)
       searchButton.frame = CGRect(x: bounds.width - 52, y: 6, width: 44, height: 44)
       themeButton.frame = CGRect(x: bounds.width - 104, y: 6, width: 44, height: 44)
       let leading = sourceButton.frame.maxX + 8
-      titleLabel.frame = CGRect(x: leading, y: 6, width: max(0, themeButton.frame.minX - leading - 8), height: 44)
+      let halfWidth = max(0, min(bounds.midX - leading,
+        themeButton.frame.minX - 8 - bounds.midX))
+      titleLabel.frame = CGRect(x: bounds.midX - halfWidth, y: 6,
+        width: halfWidth * 2, height: 44)
     }
   }
 
