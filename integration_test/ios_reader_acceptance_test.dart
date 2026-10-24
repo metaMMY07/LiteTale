@@ -47,7 +47,7 @@ void main() {
         'html':
             '''<!doctype html><html><head><meta name="viewport" content="width=300,height=400">
       <style>body{margin:0}#box{position:absolute;left:40px;top:50px;width:60px;height:80px;background:#ff0000}
-      #title{position:absolute;left:180px;top:100px;writing-mode:vertical-rl;color:#008000;font-size:24px}</style>
+      #title{position:absolute;left:180px;top:100px;writing-mode:vertical-rl;color:#00ff00;font-size:24px}</style>
       </head><body><div id="box"></div><div id="title">原书排版</div></body></html>''',
         'resources': <String, Uint8List>{},
         'options': options(true),
