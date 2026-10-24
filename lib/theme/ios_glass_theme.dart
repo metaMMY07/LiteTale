@@ -17,8 +17,8 @@ ThemeData iosGlassTheme(Brightness brightness, {Color? accent}) {
     useMaterial3: true,
     brightness: brightness,
     colorScheme: colors,
-    // UIKit uses SF; imported app fonts are applied afterwards by the app root.
-    fontFamily: '.SF Pro Text',
+    // Flutter's iOS typography selects registered CupertinoSystem fonts.
+    // Imported app fonts are applied afterwards by the app root.
     scaffoldBackgroundColor:
         dark ? const Color(0xFF000000) : const Color(0xFFF2F2F7),
     pageTransitionsTheme: horizontalPageTransitionsTheme,

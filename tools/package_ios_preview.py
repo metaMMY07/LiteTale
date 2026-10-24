@@ -103,6 +103,7 @@ def package(app, output):
         "signing": "unsigned; sign on Windows before installing",
         "device_tested": False,
         "known_limitations": [
+            "Native Liquid Glass, edge-back gestures and source switching require iPhone/iPad acceptance.",
             "iOS EPUB currently uses the legacy rich-text reader; Android CSS engine has not been ported.",
             "Online page curl uses the Flutter fallback; Android PTQ parity is not verified.",
             "Online sessions, font import and volume keys require physical-device validation.",

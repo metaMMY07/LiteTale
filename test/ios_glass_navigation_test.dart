@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,6 +17,12 @@ void iosTest(String name, WidgetTesterCallback body) {
 }
 
 void main() {
+  test('iOS typography uses registered system fonts', () {
+    expect(
+      iosGlassTheme(Brightness.light).textTheme.bodyMedium!.fontFamily,
+      'CupertinoSystemText',
+    );
+  });
   iosTest('iOS toolbar keeps source switching, theme and search accessible', (
     tester,
   ) async {

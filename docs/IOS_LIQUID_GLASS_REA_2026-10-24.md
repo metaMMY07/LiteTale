@@ -54,6 +54,8 @@ LiteTale 的 `AppleGlassPlugin.swift` 使用子控制器包含关系，不替换
 
 ## 验证
 
-- 目标测试 42 项通过：iOS 工具栏入口、交互式返回、手机/iPad“我的”全宽布局、Android 转场与布局、网格、哔哩长章节/循环/超时/跨站保护。
-- 原生编译、完整 Flutter 回归及构建产物记录将在构建完成后补充。
+- 目标测试 42 项通过：iOS 工具栏入口、交互式返回、手机/iPad“我的”全宽布局、Android 转场与布局、网格、哔哩长章节/循环/超时/跨站保护；随后新增系统字体检查，5 项 iOS 专项验证全部通过。
+- 完整 Flutter 回归 699 项通过；相关文件静态分析无问题。
+- [iOS 构建 3](https://github.com/metaMMY07/LiteTale/actions/runs/40076810298)成功通过原生 Swift、Rust 和设备 Release 编译。系统字体与主题渐变细化将包含在后续测试包。
+- Android 1.0.0 build 74 的 arm64/x86_64 Release 编译成功。
 - 当前没有 iPhone/iPad 的直接控制通道，最终材质观感、原站真实章节和触摸响应需要使用新安装包在真机确认。
