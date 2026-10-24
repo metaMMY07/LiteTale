@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
@@ -7,6 +8,174 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 bool get usesAppleGlass => defaultTargetPlatform == TargetPlatform.iOS;
+
+class AppleGlassCard extends StatelessWidget {
+  const AppleGlassCard({
+    super.key,
+    this.child,
+    this.color,
+    this.margin,
+    this.clipBehavior = Clip.none,
+    this.shape,
+    this.elevation,
+  }) : filled = false;
+  const AppleGlassCard.filled({
+    super.key,
+    this.child,
+    this.color,
+    this.margin,
+    this.clipBehavior = Clip.none,
+    this.shape,
+    this.elevation,
+  }) : filled = true;
+  final Widget? child;
+  final Color? color;
+  final EdgeInsetsGeometry? margin;
+  final Clip clipBehavior;
+  final ShapeBorder? shape;
+  final double? elevation;
+  final bool filled;
+  @override
+  Widget build(BuildContext context) {
+    if (!usesAppleGlass || color != null) {
+      return filled
+          ? Card.filled(
+            color: color,
+            margin: margin,
+            shape: shape,
+            elevation: elevation,
+            clipBehavior: clipBehavior,
+            child: child,
+          )
+          : Card(
+            color: color,
+            margin: margin,
+            shape: shape,
+            elevation: elevation,
+            clipBehavior: clipBehavior,
+            child: child,
+          );
+    }
+    return Padding(
+      padding: margin ?? const EdgeInsets.all(4),
+      child: AppleGlassSurface(
+        child: Material(type: MaterialType.transparency, child: child),
+      ),
+    );
+  }
+}
+
+class AppleGlassSurface extends StatelessWidget {
+  const AppleGlassSurface({super.key, required this.child});
+  final Widget child;
+  @override
+  Widget build(BuildContext context) {
+    if (!usesAppleGlass) return child;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: _AppleChrome(
+              parameters: {
+                'kind': 'surface',
+                'dark': Theme.of(context).brightness == Brightness.dark,
+              },
+              onAction: (_, _) {},
+              fallback: BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                child: ColoredBox(
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.surface.withValues(alpha: .64),
+                ),
+              ),
+            ),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class AppleGlassChoiceBar extends StatelessWidget {
+  const AppleGlassChoiceBar({
+    super.key,
+    required this.labels,
+    required this.index,
+    required this.onSelect,
+  });
+  final List<String> labels;
+  final int index;
+  final ValueChanged<int> onSelect;
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 44,
+    child: _AppleChrome(
+      parameters: {
+        'kind': 'segments',
+        'labels': labels,
+        'index': index,
+        'dark': Theme.of(context).brightness == Brightness.dark,
+      },
+      onAction: (a, v) {
+        if (a == 'select') onSelect(v as int);
+      },
+      fallback: CupertinoSlidingSegmentedControl<int>(
+        groupValue: index,
+        children: {for (var i = 0; i < labels.length; i++) i: Text(labels[i])},
+        onValueChanged: (v) {
+          if (v != null) onSelect(v);
+        },
+      ),
+    ),
+  );
+}
+
+class AppleGlassMenu extends StatelessWidget {
+  const AppleGlassMenu({
+    super.key,
+    required this.label,
+    required this.items,
+    required this.onSelect,
+    this.selected,
+  });
+  final String label;
+  final List<Map<String, String>> items;
+  final String? selected;
+  final ValueChanged<String> onSelect;
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 98,
+    height: 44,
+    child: _AppleChrome(
+      parameters: {
+        'kind': 'menu',
+        'label': label,
+        'items': items,
+        'selected': selected ?? '',
+        'dark': Theme.of(context).brightness == Brightness.dark,
+      },
+      onAction: (a, v) {
+        if (a == 'select') onSelect(v as String);
+      },
+      fallback: PopupMenuButton<String>(
+        tooltip: label,
+        onSelected: onSelect,
+        itemBuilder:
+            (_) => [
+              for (final item in items)
+                PopupMenuItem(
+                  value: item['value'],
+                  child: Text(item['label']!),
+                ),
+            ],
+        child: Center(child: Text(label)),
+      ),
+    ),
+  );
+}
 
 /// UIKit owns the material, selection animation, SF Symbols and accessibility.
 /// The fallback is for desktop widget tests; an iPhone uses the native view.
@@ -207,7 +376,8 @@ class _AppleChromeState extends State<_AppleChrome> {
   @override
   Widget build(BuildContext context) {
     // UIKit chrome must never float above a reader, pushed page or popup.
-    if (ModalRoute.of(context)?.isCurrent == false) {
+    if (widget.parameters['kind'] != 'surface' &&
+        ModalRoute.of(context)?.isCurrent == false) {
       return const SizedBox.shrink();
     }
     if (kIsWeb || !Platform.isIOS) return widget.fallback;
@@ -218,7 +388,10 @@ class _AppleChromeState extends State<_AppleChrome> {
       onPlatformViewCreated: _created,
       // The floating bar overlaps tappable book covers. Keep those recognizers
       // out of its gesture arena so a tab press reaches UIKit immediately.
-      hitTestBehavior: PlatformViewHitTestBehavior.opaque,
+      hitTestBehavior:
+          widget.parameters['kind'] == 'surface'
+              ? PlatformViewHitTestBehavior.transparent
+              : PlatformViewHitTestBehavior.opaque,
     );
   }
 }

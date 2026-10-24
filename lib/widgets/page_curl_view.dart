@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:wild/widgets/reader_raster_readiness.dart';
+import 'curl_mesh_layer.dart';
 
 /// PTQFlipper page curl on Android, with a blank, opaque reverse side.
 ///
@@ -60,6 +61,8 @@ class PageCurlViewState extends State<PageCurlView>
   double _width = 1;
   double _height = 1;
   bool _settling = false;
+  final _meshKey = GlobalKey<CurlMeshLayerState>();
+  bool _meshPreparing = false;
 
   // PTQFlipper owns the actual curl on Android. Flutter pages are rasterized
   // only when pagination changes; no Dart geometry runs on drag frames.
@@ -88,7 +91,7 @@ class PageCurlViewState extends State<PageCurlView>
   bool get isTurning =>
       Platform.isAndroid
           ? _nativeTurning || _pendingNativeDirection != null
-          : _direction != 0 || _settling;
+          : _direction != 0 || _settling || _meshPreparing;
 
   @visibleForTesting
   bool get isNativeInteractive => _nativeInteractive;
@@ -654,6 +657,12 @@ class PageCurlViewState extends State<PageCurlView>
       return;
     }
     if (isTurning || !_canTurn(direction)) return;
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      _meshPreparing = true;
+      await _meshKey.currentState?.capture();
+      _meshPreparing = false;
+      if (!mounted || isTurning || !_canTurn(direction)) return;
+    }
     if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) {
       widget.onPageChanged(widget.index + direction);
       return;
@@ -752,30 +761,47 @@ class PageCurlViewState extends State<PageCurlView>
           onHorizontalDragUpdate: _updateDrag,
           onHorizontalDragEnd: _endDrag,
           onHorizontalDragCancel: () => _settle(false),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (_direction == 0)
-                _paper(context, widget.index)
-              else ...[
-                _paper(context, target),
-                ClipPath(
-                  clipper: _FoldClipper(_foldPoint, _direction, _startY),
-                  child: _paper(context, widget.index),
-                ),
-                IgnorePointer(
-                  child: CustomPaint(
-                    painter: _FoldPainter(
-                      _foldPoint,
-                      _direction,
-                      _startY,
-                      widget.paperColor,
-                    ),
+          child:
+              defaultTargetPlatform == TargetPlatform.iOS
+                  ? CurlMeshLayer(
+                    key: _meshKey,
+                    index: widget.index,
+                    target: target,
+                    direction: _direction,
+                    startY: _startY,
+                    point: _foldPoint,
+                    spread: widget.isSpread,
+                    paper: widget.paperColor,
+                    pageBuilder: (context, index) => _paper(context, index),
+                  )
+                  : Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (_direction == 0)
+                        _paper(context, widget.index)
+                      else ...[
+                        _paper(context, target),
+                        ClipPath(
+                          clipper: _FoldClipper(
+                            _foldPoint,
+                            _direction,
+                            _startY,
+                          ),
+                          child: _paper(context, widget.index),
+                        ),
+                        IgnorePointer(
+                          child: CustomPaint(
+                            painter: _FoldPainter(
+                              _foldPoint,
+                              _direction,
+                              _startY,
+                              widget.paperColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                ),
-              ],
-            ],
-          ),
         );
       },
     );

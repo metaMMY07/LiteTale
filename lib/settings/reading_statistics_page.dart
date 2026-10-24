@@ -1,3 +1,4 @@
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -376,7 +377,7 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final empty = snapshot.isEmpty;
-    return Card(
+    return AppleGlassCard(
       color: colors.secondaryContainer,
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -474,7 +475,7 @@ class _SectionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final colors = Theme.of(context).colorScheme;
-    return Card(
+    return AppleGlassCard(
       color: settingsSurfaceLayer(colors, colors.surfaceContainerLow, .04),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -510,7 +511,7 @@ class _NoticeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Card(
+    return AppleGlassCard(
       color: colors.errorContainer,
       child: Padding(
         padding: const EdgeInsets.all(14),

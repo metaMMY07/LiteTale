@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'apple_book_cover.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/cached_image.dart';
@@ -91,6 +92,16 @@ class NovelCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (Theme.of(context).platform == TargetPlatform.iOS) {
+      return AppleBookCover(
+        title: title,
+        url: coverUrl,
+        source: source,
+        author: showAuthor ? author : null,
+        showAuthor: showAuthor,
+        onTap: onTap,
+      );
+    }
     final cardRadius =
         borderRadius ?? BorderRadius.circular(usesMaterialYou ? 16 : 4);
     final logicalCoverWidth =

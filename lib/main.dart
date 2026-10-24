@@ -159,10 +159,7 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                     (dynamicLight, dynamicDark) => MaterialApp(
                       title: 'LiteTale',
                       debugShowCheckedModeBanner: false,
-                      themeAnimationDuration:
-                          usesAppleGlass
-                              ? const Duration(milliseconds: 240)
-                              : Duration.zero,
+                      themeAnimationDuration: Duration.zero,
                       themeAnimationCurve: Curves.easeInOutCubic,
                       builder:
                           (context, child) => Wenku8BrowserHost(

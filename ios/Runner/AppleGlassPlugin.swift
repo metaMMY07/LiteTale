@@ -29,6 +29,9 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
   private weak var parentController: UIViewController?
   private var tabs: UITabBarController?
   private var segments: UISegmentedControl?
+  private var surface: UIVisualEffectView?
+  private var menuButton: UIButton?
+  private var menuItems: [[String: String]] = []
   private var applyingSelection = false
   private let sourceButton = UIButton(type: .system)
   private let themeButton = UIButton(type: .system)
@@ -51,6 +54,20 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       control.addTarget(self, action: #selector(selectSegment), for: .valueChanged)
       segments = control
       addSubview(control)
+    } else if kind == "surface" {
+      let effect: UIVisualEffect
+      if #available(iOS 26.0, *) { effect = UIGlassEffect(style: .regular) }
+      else { effect = UIBlurEffect(style: .systemMaterial) }
+      let view = UIVisualEffectView(effect: effect)
+      view.isUserInteractionEnabled = false
+      surface = view; addSubview(view)
+      layer.cornerRadius = 20; clipsToBounds = true
+    } else if kind == "menu" {
+      let button = UIButton(type: .system)
+      prepare(button, symbol: "line.3.horizontal.decrease", title: "分类")
+      menuButton = button; addSubview(button)
+      if #available(iOS 14.0, *) { button.showsMenuAsPrimaryAction = true }
+      else { button.addTarget(self, action: #selector(openLegacyMenu), for: .touchUpInside) }
     } else {
       makeToolbar()
     }
@@ -99,6 +116,13 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       style.image = UIImage(systemName: symbol)
       style.title = title
       style.imagePadding = 4
+      style.titleLineBreakMode = .byTruncatingTail
+      if title != nil {
+        style.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 16)
+        style.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { input in
+          var output = input; output.font = UIFont.preferredFont(forTextStyle: .subheadline); return output
+        }
+      }
       style.cornerStyle = .capsule
       style.baseForegroundColor = .label
       button.configuration = style
@@ -116,6 +140,7 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
   }
 
   private func makeToolbar() {
+    AppleThemeReveal.shared.button = themeButton
     prepare(sourceButton, symbol: "books.vertical", title: "书源")
     prepare(themeButton, symbol: "moon")
     prepare(searchButton, symbol: "magnifyingglass")
@@ -138,6 +163,23 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     let color = UIColor(red: CGFloat((argb >> 16) & 255) / 255,
       green: CGFloat((argb >> 8) & 255) / 255, blue: CGFloat(argb & 255) / 255, alpha: 1)
     tintColor = color
+    if surface != nil { return }
+    if let button = menuButton {
+      menuItems = config["items"] as? [[String: String]] ?? []
+      prepare(button, symbol: "line.3.horizontal.decrease", title: config["label"] as? String ?? "分类")
+      if #available(iOS 14.0, *) {
+        let selected = config["selected"] as? String
+        let groups = Array(NSOrderedSet(array: menuItems.map { $0["group"] ?? "" })) as? [String] ?? []
+        button.menu = UIMenu(children: groups.map { group in
+          UIMenu(title: group, options: .displayInline, children: menuItems.filter { ($0["group"] ?? "") == group }.map { item in
+            UIAction(title: item["label"] ?? "", state: item["value"] == selected ? .on : .off) { [weak self] _ in
+              self?.channel.invokeMethod("action", arguments: ["action": "select", "value": item["value"] ?? ""])
+            }
+          })
+        })
+      }
+      return
+    }
     if let tabs {
       tabs.overrideUserInterfaceStyle = overrideUserInterfaceStyle
       tabs.view.tintColor = color
@@ -149,8 +191,12 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
         applyingSelection = false
       }
     } else if let segments {
+      let labels = config["labels"] as? [String] ?? ["推荐", "分类", "排行", config["lastLabel"] as? String ?? "全部"]
+      if (0..<segments.numberOfSegments).map({ segments.titleForSegment(at: $0) ?? "" }) != labels {
+        segments.removeAllSegments()
+        for (index, title) in labels.enumerated() { segments.insertSegment(withTitle: title, at: index, animated: false) }
+      }
       segments.selectedSegmentIndex = config["index"] as? Int ?? 0
-      segments.setTitle(config["lastLabel"] as? String ?? "全部", forSegmentAt: 3)
     } else {
       let source = config["source"] as? String ?? "书源"
       sourceButton.accessibilityLabel = "切换书源，当前\(source)"
@@ -178,7 +224,9 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    if let tabs {
+    if let surface { surface.frame = bounds }
+    else if let button = menuButton { button.frame = bounds }
+    else if let tabs {
       tabs.view.frame = bounds
     } else if let segments {
       segments.frame = bounds.insetBy(dx: 12, dy: 0)
@@ -199,6 +247,15 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     channel.invokeMethod("action", arguments: ["action": "select", "value": controller.selectedIndex])
   }
   @objc private func openSources() { channel.invokeMethod("action", arguments: ["action": "source"]) }
+  @objc private func openLegacyMenu() {
+    let sheet = UIAlertController(title: "分类", message: nil, preferredStyle: .actionSheet)
+    for item in menuItems { sheet.addAction(UIAlertAction(title: item["label"], style: .default) { [weak self] _ in
+      self?.channel.invokeMethod("action", arguments: ["action": "select", "value": item["value"] ?? ""])
+    }) }
+    sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+    sheet.popoverPresentationController?.sourceView = menuButton
+    parentController?.present(sheet, animated: true)
+  }
   @objc private func selectSegment() {
     channel.invokeMethod("action", arguments: ["action": "select", "value": segments?.selectedSegmentIndex ?? 0])
   }
@@ -206,6 +263,7 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
   @objc private func openSearch() { channel.invokeMethod("action", arguments: ["action": "search"]) }
 
   deinit {
+    if kind == "toolbar" { AppleThemeReveal.shared.cancel() }
     channel.setMethodCallHandler(nil)
     if let tabs, tabs.parent != nil {
       tabs.willMove(toParent: nil)

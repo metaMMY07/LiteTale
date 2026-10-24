@@ -1,3 +1,4 @@
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:file_selector/file_selector.dart';
@@ -154,7 +155,7 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
                 child: Text(registry.warning!),
               ),
             for (final entry in registry.entries)
-              Card(
+              AppleGlassCard(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: ListTile(
                   leading: Icon(
@@ -338,7 +339,7 @@ class _RuleImportPreviewPageState extends State<RuleImportPreviewPage> {
     final item = widget.items[index];
     final source = item.definition;
     if (source == null) {
-      return Card(
+      return AppleGlassCard(
         child: ListTile(
           leading: const Icon(Icons.error_outline),
           title: Text('第 ${index + 1} 项未通过'),
@@ -347,7 +348,7 @@ class _RuleImportPreviewPageState extends State<RuleImportPreviewPage> {
       );
     }
     final existing = registry[source.id];
-    return Card(
+    return AppleGlassCard(
       child: Column(
         children: [
           CheckboxListTile(

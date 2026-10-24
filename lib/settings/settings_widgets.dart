@@ -1,8 +1,10 @@
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/settings/app_logs.dart';
 
 Color settingsSurfaceLayer(ColorScheme colors, Color role, double contrast) {
+  if (usesAppleGlass) return Colors.transparent;
   // Older Android dynamic palettes omit the newer M3 surface roles. Their
   // Flutter fallback is the base surface, which erases the settings groups.
   return role == colors.surface
@@ -64,68 +66,70 @@ class _SettingsGroupState extends State<SettingsGroup> {
     final colors = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      child: Material(
-        color: settingsSurfaceLayer(colors, colors.surfaceContainerLow, 0.04),
-        borderRadius: BorderRadius.circular(16),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          children: [
-            InkWell(
-              onTap: () => setState(() => expanded = !expanded),
-              child: Semantics(
-                button: true,
-                expanded: expanded,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 12, 16, 12),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: settingsSurfaceLayer(
-                            colors,
-                            colors.surfaceContainerHigh,
-                            0.10,
+      child: AppleGlassSurface(
+        child: Material(
+          color: settingsSurfaceLayer(colors, colors.surfaceContainerLow, 0.04),
+          borderRadius: BorderRadius.circular(16),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              InkWell(
+                onTap: () => setState(() => expanded = !expanded),
+                child: Semantics(
+                  button: true,
+                  expanded: expanded,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 16, 12),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: settingsSurfaceLayer(
+                              colors,
+                              colors.surfaceContainerHigh,
+                              0.10,
+                            ),
+                            shape: BoxShape.circle,
                           ),
-                          shape: BoxShape.circle,
+                          child: Icon(
+                            widget.icon,
+                            color: colors.primary,
+                            size: 22,
+                          ),
                         ),
-                        child: Icon(
-                          widget.icon,
-                          color: colors.primary,
-                          size: 22,
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Text(
+                            widget.title,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w600),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Text(
-                          widget.title,
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                      Icon(expanded ? Icons.expand_less : Icons.expand_more),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            if (expanded)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Column(
-                    children: [
-                      for (var i = 0; i < widget.children.length; i++) ...[
-                        if (i > 0) const SizedBox(height: 6),
-                        widget.children[i],
+                        Icon(expanded ? Icons.expand_less : Icons.expand_more),
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
-          ],
+              if (expanded)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Column(
+                      children: [
+                        for (var i = 0; i < widget.children.length; i++) ...[
+                          if (i > 0) const SizedBox(height: 6),
+                          widget.children[i],
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

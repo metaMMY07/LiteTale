@@ -1,3 +1,4 @@
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/theme/material_you.dart';
@@ -231,7 +232,7 @@ class MorePage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Card.filled(
+                  AppleGlassCard.filled(
                     margin: EdgeInsets.zero,
                     color: colors.primaryContainer,
                     child: Padding(
@@ -268,7 +269,7 @@ class MorePage extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  Card.filled(
+                  AppleGlassCard.filled(
                     key: const ValueKey('more-navigation-card'),
                     margin: EdgeInsets.zero,
                     clipBehavior: Clip.antiAlias,
@@ -279,7 +280,7 @@ class MorePage extends StatelessWidget {
                           index < entries.length;
                           index++
                         ) ...[
-                          if (index > 0)
+                          if (index > 0 && !usesAppleGlass)
                             Divider(
                               height: 1,
                               indent: 76,

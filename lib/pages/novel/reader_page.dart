@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:wild/services/hardware_turn_buffer.dart';
+import 'package:wild/cubits/volume_control_cubit.dart';
 import 'package:wild/widgets/wenku8_recovery_button.dart';
 import 'package:wild/widgets/expressive_loading_indicator.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
@@ -177,6 +179,18 @@ class _ReaderView extends StatefulWidget {
 }
 
 class _ReaderViewState extends State<_ReaderView> {
+  late final _hardwareTurns = HardwareTurnBuffer(
+    active:
+        () =>
+            mounted &&
+            ModalRoute.of(context)?.isCurrent != false &&
+            (WidgetsBinding.instance.lifecycleState == null ||
+                WidgetsBinding.instance.lifecycleState ==
+                    AppLifecycleState.resumed) &&
+            context.read<VolumeControlCubit>().state,
+    busy: () => _isTurning,
+    dispatch: _onController,
+  );
   late ReaderPageController _pageController;
   final _curlKey = GlobalKey<PageCurlViewState>();
   bool _wasCurlEnabled = false;
@@ -221,6 +235,7 @@ class _ReaderViewState extends State<_ReaderView> {
 
   @override
   void dispose() {
+    _hardwareTurns.dispose();
     _pageController.dispose();
     setKeepScreenUpOnReading(false);
     setKeepScreenUpOnScroll(false);
@@ -677,7 +692,7 @@ class _ReaderViewState extends State<_ReaderView> {
       },
     );
     return ReaderVolumeTurnScope(
-      onTurn: _onController,
+      onTurn: _hardwareTurns.add,
       child: PopScope(
         canPop: !preferences.preventBack || widget.state.showControls,
         onPopInvokedWithResult: (didPop, result) {

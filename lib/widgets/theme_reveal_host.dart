@@ -1,8 +1,10 @@
 import 'dart:math' as math;
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 
 /// Keeps the old screen still while the new theme expands from the tapped icon.
 /// Only one bitmap and a circular clip are painted during the transition.
@@ -26,6 +28,7 @@ class ThemeRevealHostState extends State<ThemeRevealHost>
   ui.Image? _oldFrame;
   Offset _origin = Offset.zero;
   bool _busy = false;
+  int _nativeGeneration = 0;
 
   @override
   void initState() {
@@ -52,6 +55,31 @@ class ThemeRevealHostState extends State<ThemeRevealHost>
     required BuildContext triggerContext,
     required VoidCallback changeTheme,
   }) async {
+    if (Platform.isIOS) {
+      final generation = ++_nativeGeneration;
+      const channel = MethodChannel('litetale/theme_reveal');
+      bool captured = false;
+      try {
+        captured = await channel.invokeMethod<bool>('prepare') ?? false;
+      } on PlatformException {
+        /* Change the theme even if capture is unavailable. */
+      } on MissingPluginException {
+        /* Desktop tests use the same theme path. */
+      }
+      if (!mounted || generation != _nativeGeneration) return;
+      changeTheme();
+      if (captured) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (mounted && generation == _nativeGeneration) {
+          try {
+            await channel.invokeMethod<void>('animate');
+          } on PlatformException {
+            /* Native cleanup also has a bounded deadline. */
+          }
+        }
+      }
+      return;
+    }
     if (_busy) return;
     _busy = true;
     try {

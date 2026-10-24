@@ -19,6 +19,7 @@ import MediaPlayer
   }
 
   private var isChangingLauncherIcon = false
+  private var epubPages: EpubPageChannel?
 
   private var volumeEventSink: FlutterEventSink?
   private var audioSession: AVAudioSession?
@@ -26,7 +27,11 @@ import MediaPlayer
   private var silentPlayer: AVAudioPlayer?
   private var previousVolume: Float = 0.5  // 使用者的原始音量，重設目標
   private var isObservingVolume = false
-  private var isResettingVolume = false     // 防止自己的重設再次觸發事件
+  private var volumeGeneration = 0
+  private var volumeBaseline: Float = 0.5
+  private var lastObservedVolume: Float = 0.5
+  private var expectedReset: Float?
+  private var resetDeadline: CFAbsoluteTime = 0
 
   override func application(
     _ application: UIApplication,
@@ -36,6 +41,8 @@ import MediaPlayer
     let documentsPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
     let applicationSupportsPath = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true)[0]
     let controller = self.window!.rootViewController as! FlutterViewController
+    epubPages = EpubPageChannel(parent: controller, messenger: controller.binaryMessenger)
+    AppleThemeReveal.shared.install(messenger: controller.binaryMessenger, window: { [weak self] in self?.window })
 
     let channel = FlutterMethodChannel(name: "methods", binaryMessenger: controller.binaryMessenger)
     channel.setMethodCallHandler { (call, result) in
@@ -155,8 +162,10 @@ import MediaPlayer
     guard let info = notification.userInfo,
           let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
           let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-    if type == .ended {
+    if type == .ended, volumeEventSink != nil {
       assertAudioSessionCategory()
+      silentPlayer?.play()
+      resetVolume(to: volumeBaseline)
     }
   }
 
@@ -164,7 +173,14 @@ import MediaPlayer
     assertAudioSessionCategory()
     let session = AVAudioSession.sharedInstance()
     audioSession = session
+    volumeGeneration += 1
     previousVolume = session.outputVolume
+    lastObservedVolume = previousVolume
+    volumeBaseline = min(0.9375, max(0.0625, previousVolume))
+    let vv = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+    vv.alpha = 0.01; vv.isUserInteractionEnabled = false; vv.accessibilityElementsHidden = true
+    window?.addSubview(vv)
+    volumeView = vv
 
     NotificationCenter.default.addObserver(
       self,
@@ -174,7 +190,7 @@ import MediaPlayer
     )
 
     if !isObservingVolume {
-      session.addObserver(self, forKeyPath: "outputVolume", options: [.new], context: nil)
+      session.addObserver(self, forKeyPath: "outputVolume", options: [.new, .old], context: nil)
       isObservingVolume = true
     }
 
@@ -188,18 +204,40 @@ import MediaPlayer
       }
     }
 
-    DispatchQueue.main.async {
-      let vv = MPVolumeView(frame: CGRect(x: -1000, y: -1000, width: 1, height: 1))
-      vv.alpha = 0.01
-      if let window = UIApplication.shared.windows.first {
-        window.addSubview(vv)
+    armVolumeSlider(generation: volumeGeneration, attempts: 5)
+  }
+
+  private func armVolumeSlider(generation: Int, attempts: Int) {
+    guard generation == volumeGeneration, volumeEventSink != nil else { return }
+    if findVolumeSlider(volumeView) != nil {
+      if abs((audioSession?.outputVolume ?? volumeBaseline) - volumeBaseline) > 0.0005 {
+        resetVolume(to: volumeBaseline)
       }
-      self.volumeView = vv
-      // 不改變音量，保留使用者原始音量作為重設基準
+    } else if attempts > 0 {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+        self?.armVolumeSlider(generation: generation, attempts: attempts - 1)
+      }
     }
   }
 
+  private func findVolumeSlider(_ view: UIView?) -> UISlider? {
+    guard let view else { return nil }
+    if let slider = view as? UISlider { return slider }
+    for child in view.subviews { if let slider = findVolumeSlider(child) { return slider } }
+    return nil
+  }
+
+  private func resetVolume(to value: Float) {
+    guard let slider = findVolumeSlider(volumeView) else { return }
+    guard abs((audioSession?.outputVolume ?? value) - value) > 0.0005 else { return }
+    expectedReset = value; resetDeadline = CFAbsoluteTimeGetCurrent() + 0.25
+    slider.setValue(value, animated: false)
+    slider.sendActions(for: .valueChanged)
+  }
+
   private func removeVolumeObserver() {
+    volumeGeneration += 1
+    expectedReset = nil
     NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: audioSession)
     if isObservingVolume {
       audioSession?.removeObserver(self, forKeyPath: "outputVolume")
@@ -207,10 +245,11 @@ import MediaPlayer
     }
     silentPlayer?.stop()
     silentPlayer = nil
-    DispatchQueue.main.async {
-      self.volumeView?.removeFromSuperview()
-      self.volumeView = nil
-    }
+    resetVolume(to: previousVolume)
+    let oldView = volumeView
+    volumeView = nil
+    oldView?.removeFromSuperview()
+    try? audioSession?.setActive(false, options: .notifyOthersOnDeactivation)
     audioSession = nil
   }
 
@@ -220,34 +259,32 @@ import MediaPlayer
     change: [NSKeyValueChangeKey: Any]?,
     context: UnsafeMutableRawPointer?
   ) {
-    guard keyPath == "outputVolume",
-          let sink = volumeEventSink,
-          let newVolume = change?[.newKey] as? Float else {
+    guard keyPath == "outputVolume", let newVolume = change?[.newKey] as? Float else {
       super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
       return
     }
-
-    DispatchQueue.main.async {
-      // 跳過由我們自己重設音量所觸發的回呼
-      if self.isResettingVolume {
-        self.isResettingVolume = false
+    let oldVolume = change?[.oldKey] as? Float
+    let generation = volumeGeneration
+    let handle = { [weak self] in
+      guard let self, generation == self.volumeGeneration,
+            self.isObservingVolume, let sink = self.volumeEventSink else { return }
+      if let target = self.expectedReset,
+         CFAbsoluteTimeGetCurrent() <= self.resetDeadline,
+         abs(newVolume - target) < 0.0005 {
+        self.expectedReset = nil
+        self.lastObservedVolume = newVolume
         return
       }
-
-      if newVolume > self.previousVolume {
-        sink("UP")
-      } else if newVolume < self.previousVolume {
-        sink("DOWN")
-      }
-
-      // 重設回使用者的原始音量，確保可連續偵測
-      self.isResettingVolume = true
-      if let slider = self.volumeView?.subviews.compactMap({ $0 as? UISlider }).first {
-        slider.value = self.previousVolume
-      }
-      // previousVolume 維持不變，始終代表使用者進入閱讀前的音量
+      self.expectedReset = nil
+      let previous = oldVolume ?? self.lastObservedVolume
+      self.lastObservedVolume = newVolume
+      if newVolume > previous + 0.0005 { sink("UP") }
+      else if newVolume < previous - 0.0005 { sink("DOWN") }
+      self.resetVolume(to: self.volumeBaseline)
     }
+    if Thread.isMainThread { handle() } else { DispatchQueue.main.async(execute: handle) }
   }
+
 }
 
 extension AppDelegate: FlutterStreamHandler {

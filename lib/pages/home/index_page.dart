@@ -65,9 +65,18 @@ class _IndexPageState extends State<IndexPage>
           mode == ReaderThemeMode.dark ||
           (mode == ReaderThemeMode.auto &&
               MediaQuery.platformBrightnessOf(context) == Brightness.dark);
-      await theme.setThemeMode(
-        dark ? ReaderThemeMode.light : ReaderThemeMode.dark,
+      void changeTheme() => unawaited(
+        theme.setThemeMode(dark ? ReaderThemeMode.light : ReaderThemeMode.dark),
       );
+      final reveal = ThemeRevealHost.maybeOf(context);
+      if (reveal != null) {
+        await reveal.revealFrom(
+          triggerContext: context,
+          changeTheme: changeTheme,
+        );
+      } else {
+        changeTheme();
+      }
       return;
     }
     final target =

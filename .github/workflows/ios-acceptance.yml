@@ -1,0 +1,67 @@
+name: iOS reader acceptance
+on:
+  workflow_dispatch:
+  push:
+    branches: ['build/ios-preview-*']
+    paths: ['ios/**','lib/**','integration_test/ios_reader_acceptance_test.dart','test_driver/ios_reader_acceptance.dart','.github/workflows/ios-acceptance.yml']
+permissions:
+  contents: read
+concurrency:
+  group: ios-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      CARGOKIT_RUST_TOOLCHAIN: '1.90.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.3'
+          channel: stable
+          cache: true
+      - name: Set up simulator Rust toolchain
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal
+          rustup default 1.90.0
+          if [ "$(uname -m)" = arm64 ]; then TARGET=aarch64-apple-ios-sim; else TARGET=x86_64-apple-ios; fi
+          rustup target add "$TARGET" --toolchain 1.90.0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/Library/Caches/CocoaPods
+          key: ios-sim-deps-1.90-${{ hashFiles('rust/Cargo.lock','pubspec.lock') }}
+      - name: Resolve locked dependencies
+        run: |
+          flutter config --no-analytics
+          flutter precache --ios
+          flutter pub get --enforce-lockfile
+          cd ios && pod install
+      - name: Boot an iOS 26 phone
+        run: |
+          python3 - <<'PY'
+          import json,subprocess,os
+          devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json']))['devices']
+          choices=[d for runtime,items in devices.items() if 'iOS-26' in runtime for d in items if 'iPhone' in d['name']]
+          assert choices,'An iOS 26 runtime is required for glass acceptance'
+          d=choices[0]
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('SIMULATOR_ID='+d['udid']+'\n')
+          if d['state']!='Booted':subprocess.run(['xcrun','simctl','boot',d['udid']],check=True)
+          subprocess.run(['xcrun','simctl','bootstatus',d['udid'],'-b'],check=True)
+          PY
+      - name: Exercise real WebKit and native UIKit
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios-acceptance
+          flutter drive --driver=test_driver/ios_reader_acceptance.dart --target=integration_test/ios_reader_acceptance_test.dart -d "$SIMULATOR_ID" --no-pub 2>&1 | tee build/ios-acceptance/acceptance.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LiteTale-iOS-acceptance-${{ github.run_number }}
+          path: build/ios-acceptance
+          retention-days: 7

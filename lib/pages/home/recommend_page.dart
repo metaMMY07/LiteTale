@@ -123,6 +123,10 @@ class RecommendPage extends StatelessWidget {
                   blocks: state.blocks,
                   lightNovelShelfBooks: state.lightNovelShelfBooks,
                   isWenku8WebViewFallback: state.isWenku8WebViewFallback,
+                  moreBooks: state.moreBooks,
+                  hasMore: state.hasMore,
+                  loadingMore: state.loadingMore,
+                  moreError: state.moreError,
                 ),
               );
             }
@@ -156,47 +160,106 @@ class RecommendationFeed extends StatelessWidget {
     required this.blocks,
     this.lightNovelShelfBooks = const [],
     this.isWenku8WebViewFallback = false,
+    this.moreBooks = const [],
+    this.hasMore = false,
+    this.loadingMore = false,
+    this.moreError,
   });
 
   final List<w8.HomeBlock> blocks;
   final List<LightNovelShelfBook> lightNovelShelfBooks;
   final bool isWenku8WebViewFallback;
+  final List<w8.NovelCover> moreBooks;
+  final bool hasMore, loadingMore;
+  final String? moreError;
 
   @override
   Widget build(BuildContext context) {
-    return CustomScrollView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      slivers: [
-        if (isWenku8WebViewFallback)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: Card(
+    void nearEnd(ScrollMetrics metrics) {
+      if (hasMore &&
+          !loadingMore &&
+          moreError == null &&
+          metrics.extentAfter < 480) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (context.mounted) context.read<RecommendCubit>().loadMore();
+        });
+      }
+    }
+
+    return NotificationListener<ScrollMetricsNotification>(
+      onNotification: (event) {
+        nearEnd(event.metrics);
+        return false;
+      },
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (event) {
+          nearEnd(event.metrics);
+          return false;
+        },
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            if (isWenku8WebViewFallback)
+              SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  child: Row(
-                    children: [
-                      const Expanded(child: Text('已通过网页加载推荐')),
-                      TextButton(
-                        onPressed:
-                            () => context.read<RecommendCubit>().load(
-                              forceRefresh: true,
-                            ),
-                        child: const Text('重新加载'),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
                       ),
-                    ],
+                      child: Row(
+                        children: [
+                          const Expanded(child: Text('已通过网页加载推荐')),
+                          TextButton(
+                            onPressed:
+                                () => context.read<RecommendCubit>().load(
+                                  forceRefresh: true,
+                                ),
+                            child: const Text('重新加载'),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-        if (lightNovelShelfBooks.isNotEmpty)
-          ..._LightNovelShelfBlock.slivers(context, lightNovelShelfBooks),
-        for (final block in blocks) ..._HomeBlockWidget.slivers(context, block),
-      ],
+            if (lightNovelShelfBooks.isNotEmpty)
+              ..._LightNovelShelfBlock.slivers(context, lightNovelShelfBooks),
+            for (final block in blocks)
+              ..._HomeBlockWidget.slivers(context, block),
+            if (moreBooks.isNotEmpty)
+              ..._HomeBlockWidget.slivers(
+                context,
+                w8.HomeBlock(title: '更多小说', list: moreBooks),
+              ),
+            if (hasMore)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child:
+                      moreError == null
+                          ? const Center(
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                          : Center(
+                            child: TextButton(
+                              onPressed:
+                                  () =>
+                                      context.read<RecommendCubit>().loadMore(),
+                              child: Text(moreError!),
+                            ),
+                          ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

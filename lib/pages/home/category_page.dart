@@ -1,3 +1,4 @@
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/wenku8_recovery_button.dart';
@@ -185,106 +186,134 @@ class _CategoryPageState extends State<CategoryPage> {
             children: [
               // View mode selector
               Expanded(
-                child: SegmentedButton<String>(
-                  showSelectedIcon: false,
-                  segments: const [
-                    ButtonSegment(value: "0", label: Text('更新')),
-                    ButtonSegment(value: "1", label: Text('热门')),
-                    ButtonSegment(value: "2", label: Text('完结')),
-                    ButtonSegment(value: "3", label: Text('动画')),
-                  ],
-                  selected: {_viewMode},
-                  onSelectionChanged:
-                      (selection) => _changeSelection(mode: selection.first),
-                ),
+                child:
+                    usesAppleGlass
+                        ? AppleGlassChoiceBar(
+                          labels: const ['更新', '热门', '完结', '动画'],
+                          index: int.parse(_viewMode),
+                          onSelect: (index) => _changeSelection(mode: '$index'),
+                        )
+                        : SegmentedButton<String>(
+                          showSelectedIcon: false,
+                          segments: const [
+                            ButtonSegment(value: "0", label: Text('更新')),
+                            ButtonSegment(value: "1", label: Text('热门')),
+                            ButtonSegment(value: "2", label: Text('完结')),
+                            ButtonSegment(value: "3", label: Text('动画')),
+                          ],
+                          selected: {_viewMode},
+                          onSelectionChanged:
+                              (selection) =>
+                                  _changeSelection(mode: selection.first),
+                        ),
               ),
               // Category selector
               if (_tagGroups != null)
                 Padding(
                   padding: const EdgeInsets.only(left: 8),
-                  child: PopupMenuButton<String>(
-                    tooltip: '分类',
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: Theme.of(context).dividerColor,
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _selectedTag ?? '分类',
-                            style: TextStyle(
-                              color:
-                                  _selectedTag != null
-                                      ? Theme.of(context).colorScheme.primary
-                                      : null,
-                              fontWeight:
-                                  _selectedTag != null
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          const Icon(Icons.arrow_drop_down),
-                        ],
-                      ),
-                    ),
-                    itemBuilder: (context) {
-                      final items = <PopupMenuEntry<String>>[];
-                      for (final group in _tagGroups!) {
-                        items.add(
-                          PopupMenuItem<String>(
-                            enabled: false,
-                            child: Text(
-                              group.title,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
+                  child:
+                      usesAppleGlass
+                          ? AppleGlassMenu(
+                            label: _selectedTag ?? '分类',
+                            selected: _selectedTag,
+                            items: [
+                              for (final group in _tagGroups!)
+                                for (final tag in group.tags)
+                                  {
+                                    'group': group.title,
+                                    'label': tag,
+                                    'value': tag,
+                                  },
+                            ],
+                            onSelect: (tag) => _changeSelection(tag: tag),
+                          )
+                          : PopupMenuButton<String>(
+                            tooltip: '分类',
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
                               ),
-                            ),
-                          ),
-                        );
-                        for (final tag in group.tags) {
-                          items.add(
-                            PopupMenuItem<String>(
-                              value: tag,
-                              child: Padding(
-                                padding: const EdgeInsets.only(left: 16),
-                                child: Text(
-                                  tag,
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color:
-                                        _selectedTag == tag
-                                            ? Theme.of(
-                                              context,
-                                            ).colorScheme.primary
-                                            : null,
-                                    fontWeight:
-                                        _selectedTag == tag
-                                            ? FontWeight.bold
-                                            : FontWeight.normal,
-                                  ),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: Theme.of(context).dividerColor,
                                 ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _selectedTag ?? '分类',
+                                    style: TextStyle(
+                                      color:
+                                          _selectedTag != null
+                                              ? Theme.of(
+                                                context,
+                                              ).colorScheme.primary
+                                              : null,
+                                      fontWeight:
+                                          _selectedTag != null
+                                              ? FontWeight.bold
+                                              : FontWeight.normal,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  const Icon(Icons.arrow_drop_down),
+                                ],
                               ),
                             ),
-                          );
-                        }
-                        if (group != _tagGroups!.last) {
-                          items.add(const PopupMenuDivider());
-                        }
-                      }
-                      return items;
-                    },
-                    onSelected: (tag) => _changeSelection(tag: tag),
-                  ),
+                            itemBuilder: (context) {
+                              final items = <PopupMenuEntry<String>>[];
+                              for (final group in _tagGroups!) {
+                                items.add(
+                                  PopupMenuItem<String>(
+                                    enabled: false,
+                                    child: Text(
+                                      group.title,
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                                for (final tag in group.tags) {
+                                  items.add(
+                                    PopupMenuItem<String>(
+                                      value: tag,
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(
+                                          left: 16,
+                                        ),
+                                        child: Text(
+                                          tag,
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color:
+                                                _selectedTag == tag
+                                                    ? Theme.of(
+                                                      context,
+                                                    ).colorScheme.primary
+                                                    : null,
+                                            fontWeight:
+                                                _selectedTag == tag
+                                                    ? FontWeight.bold
+                                                    : FontWeight.normal,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }
+                                if (group != _tagGroups!.last) {
+                                  items.add(const PopupMenuDivider());
+                                }
+                              }
+                              return items;
+                            },
+                            onSelected: (tag) => _changeSelection(tag: tag),
+                          ),
                 )
               else if (_tagError != null)
                 Padding(
