@@ -18,6 +18,11 @@ jobs:
       CARGOKIT_RUST_TOOLCHAIN: '1.90.0'
     steps:
       - uses: actions/checkout@v4
+      - name: Select Xcode and prime simulator services
+        run: |
+          sudo xcode-select --switch "$DEVELOPER_DIR"
+          sudo xcodebuild -runFirstLaunch
+          nohup xcrun simctl list devices available --json > /tmp/litetale-simulator-prime.log 2>&1 &
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.29.3'
@@ -47,7 +52,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import json,subprocess,os
-          devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json'],timeout=90))['devices']
+          devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json'],timeout=300))['devices']
           runtimes=sorted([r for r in devices if 'iOS-26' in r],reverse=True)
           choices=[d for runtime in runtimes[:1] for d in devices[runtime] if 'iPhone' in d['name']]
           assert choices,'An iOS 26 runtime is required for glass acceptance'
