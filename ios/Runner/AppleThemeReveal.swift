@@ -27,7 +27,12 @@ final class AppleThemeReveal {
   }
 
   private func prepare(_ window: UIWindow?) -> Bool {
-    guard let window, let snapshot = window.snapshotView(afterScreenUpdates: false) else { return false }
+    guard let window else { return false }
+    // Freeze pixels, not a live snapshot layer: Flutter's Metal surface can
+    // change underneath snapshotView(). Use UIKit's full-window capture.
+    let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+    let image = renderer.image { _ in _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+    let snapshot = UIImageView(image: image)
     // Capture the currently presented mixture before removing an interrupted
     // reveal, so another tap starts from the visible result rather than a target.
     cancel()

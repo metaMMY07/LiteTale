@@ -2,6 +2,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/services/epub/epub_models.dart';
 import 'package:wild/services/epub/local_epub_library.dart';
+import 'package:wild/services/epub/apple_books_opener.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' as api;
 import 'package:wild/widgets/book_grid_delegate.dart';
@@ -69,6 +70,7 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
           ),
         ),
       );
+      if (AppleBooksOpener.instance.isSupported) await _open(result.book);
     } catch (error) {
       if (mounted) {
         setState(
@@ -111,6 +113,23 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
 
   Future<void> _open(LocalEpubBook book) async {
     if (!mounted || !_library.contains(book.id)) return;
+    if (AppleBooksOpener.instance.isSupported) {
+      try {
+        await AppleBooksOpener.instance.open(
+          _library,
+          book.id,
+          isActive:
+              () => mounted && (ModalRoute.of(context)?.isCurrent ?? false),
+        );
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('未能打开原 EPUB，请重新导入后重试。')));
+        }
+      }
+      return;
+    }
     await Navigator.pushNamed(context, '/novel/info', arguments: book.id);
   }
 

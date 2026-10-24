@@ -19,7 +19,7 @@ import MediaPlayer
   }
 
   private var isChangingLauncherIcon = false
-  private var epubPages: EpubPageChannel?
+  private var appleBooks: AppleBooksChannel?
 
   private var volumeEventSink: FlutterEventSink?
   private var audioSession: AVAudioSession?
@@ -41,7 +41,7 @@ import MediaPlayer
     let documentsPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
     let applicationSupportsPath = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true)[0]
     let controller = self.window!.rootViewController as! FlutterViewController
-    epubPages = EpubPageChannel(parent: controller, messenger: controller.binaryMessenger)
+    appleBooks = AppleBooksChannel(parent: controller, messenger: controller.binaryMessenger)
     AppleThemeReveal.shared.install(messenger: controller.binaryMessenger, window: { [weak self] in self?.window })
 
     let channel = FlutterMethodChannel(name: "methods", binaryMessenger: controller.binaryMessenger)

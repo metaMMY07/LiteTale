@@ -45,7 +45,8 @@ class LocalEpubLibrary extends ChangeNotifier {
        _readFileBytes = readFileBytes ?? _readBytes,
        _renameDirectory = renameDirectory ?? _rename,
        _now = now ?? DateTime.now,
-       _renderLegacyArtwork = rasterizeArtwork != null || !Platform.isAndroid,
+       _renderLegacyArtwork =
+           rasterizeArtwork != null || !(Platform.isAndroid || Platform.isIOS),
        _rasterizeArtwork = rasterizeArtwork ?? rasterizeEpubArtwork;
 
   static final instance = LocalEpubLibrary();
@@ -258,6 +259,22 @@ class LocalEpubLibrary extends ChangeNotifier {
 
   Future<String> chapter(String bookId, String chapterId) async =>
       (await chapterData(bookId, chapterId)).content;
+
+  /// Exports the verified, app-owned original without rebuilding its EPUB/CSS.
+  Future<File> originalFileForOpening(String bookId) async {
+    final record = _record(bookId), revision = revisionFor(bookId);
+    final entry = record.publication;
+    if (entry == null) {
+      throw const EpubImportException('请重新导入原 EPUB 后在图书中打开');
+    }
+    final bytes = await _readOwned(record, entry.file, entry.length);
+    await _background(_verifyAssetJob, (bytes, entry.length, entry.digest));
+    _assertCurrent(record, revision);
+    return _checkedFile(
+      record.directoryOverride ?? _join(_requireBase(), record.book.digest),
+      entry.file,
+    );
+  }
 
   Future<EpubPublicationDocument> publication(
     String bookId,

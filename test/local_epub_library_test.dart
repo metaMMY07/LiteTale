@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
+import 'package:wild/services/epub/apple_books_opener.dart';
 import 'package:wild/models/reader_document.dart';
 import 'package:wild/services/epub/epub_models.dart';
 import 'package:wild/services/epub/local_epub_library.dart';
@@ -150,6 +151,48 @@ void main() {
     }
     await root.delete();
   });
+
+  test(
+    'Books handoff uses the exact original and cancellation preserves the library',
+    () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final lib = library();
+      await lib.initialize(root.path);
+      final bytes = Uint8List.fromList([1, 2, 3, 4, 5]);
+      final imported = await lib.importFile(
+        XFile.fromData(bytes, name: 'test.epub'),
+      );
+      const channel = MethodChannel('litetale/apple_books');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      var calls = 0;
+      String? path;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls++;
+        path = (call.arguments as Map)['path'] as String;
+        expect(call.method, 'open');
+        expect(await File(path!).readAsBytes(), bytes);
+        return {'completed': false, 'activity': ''};
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final opener = AppleBooksOpener(channel: channel, isIOS: true);
+      expect(await opener.open(lib, imported.book.id), isFalse);
+      expect(lib.contains(imported.book.id), isTrue);
+      expect(calls, 1);
+      expect(
+        await opener.open(lib, imported.book.id, isActive: () => false),
+        isFalse,
+      );
+      expect(calls, 1);
+      await File(path!).writeAsBytes([5, 4, 3, 2, 1]);
+      await expectLater(
+        opener.open(lib, imported.book.id),
+        throwsA(isA<EpubImportException>()),
+      );
+      expect(calls, 1);
+      lib.dispose();
+    },
+  );
 
   test(
     'real parser and default background isolates import and reopen EPUB',

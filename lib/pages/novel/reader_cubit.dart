@@ -641,7 +641,7 @@ class ReaderCubit extends Cubit<ReaderState> {
     _bookFlow?.close();
     final oldCssReader = _cssReader;
     final useCss =
-        (Platform.isAndroid || Platform.isIOS) &&
+        Platform.isAndroid &&
         LocalEpubLibrary.instance.book(aid)?.hasPublication == true;
     final cssReader = useCss ? EpubCssReader() : null;
     _cssReader = cssReader;

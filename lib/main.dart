@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:wild/pages/apple_books_open_page.dart';
+import 'package:wild/sources/book_source.dart' as book_sources;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:wild/widgets/bili_browser_host.dart';
@@ -255,6 +258,12 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                             final args =
                                 ModalRoute.of(context)!.settings.arguments
                                     as Map<String, dynamic>;
+                            final aid = args['novelId'] as String;
+                            if (Platform.isIOS &&
+                                book_sources.sourceOf(aid) ==
+                                    book_sources.SourceId.localEpub) {
+                              return AppleBooksOpenPage(bookId: aid);
+                            }
                             final readerType =
                                 context.read<ReaderTypeCubit>().state;
 
