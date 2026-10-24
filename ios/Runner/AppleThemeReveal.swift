@@ -21,7 +21,7 @@ final class AppleThemeReveal {
       case "animate": self.animate(); result(nil)
       case "cancel": self.cancel(); result(nil)
       case "status": result(self.overlay != nil)
-#if DEBUG
+#if targetEnvironment(simulator)
       // drawHierarchy renders model layers. Freeze the actual compositor path
       // first so integration screenshots can observe an intermediate CA frame.
       case "freezeForCapture": result(self.freezeForCapture())
@@ -38,7 +38,7 @@ final class AppleThemeReveal {
     }
   }
 
-#if DEBUG
+#if targetEnvironment(simulator)
   private func freezeForCapture() -> Bool {
     guard let mask = overlay?.layer.mask as? CAShapeLayer,
           let current = mask.presentation() as? CAShapeLayer,
