@@ -178,7 +178,62 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await binding.takeScreenshot('ios-unified-controls');
+    // UIKit platform views finish composition after Flutter's last scheduled frame.
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+    await tester.pump(const Duration(milliseconds: 50));
+    final bar = tester.getRect(find.byType(AppleGlassFilterBar));
+    final screen = tester.getSize(find.byType(Scaffold));
+    final screenshot = await binding.takeScreenshot('ios-unified-controls');
+    final codec = await ui.instantiateImageCodec(
+      Uint8List.fromList(screenshot),
+    );
+    final frame = await codec.getNextFrame();
+    final rgba =
+        (await frame.image.toByteData(
+          format: ui.ImageByteFormat.rawRgba,
+        ))!.buffer.asUint8List();
+    final scale = frame.image.width / screen.width;
+    var labelPixels = 0;
+    for (
+      var y = ((bar.top + 8) * scale).round();
+      y < ((bar.bottom - 8) * scale).round();
+      y++
+    ) {
+      for (
+        var x = ((bar.left + 16) * scale).round();
+        x < ((bar.right - 16) * scale).round();
+        x++
+      ) {
+        final offset = (y * frame.image.width + x) * 4;
+        if (rgba[offset] < 100 &&
+            rgba[offset + 1] < 100 &&
+            rgba[offset + 2] < 100)
+          labelPixels++;
+      }
+    }
+    frame.image.dispose();
+    codec.dispose();
+    expect(
+      labelPixels,
+      greaterThan(50),
+      reason:
+          'UIKit selector text must be visible in the actual composited frame',
+    );
+    final scroll = tester.state<ScrollableState>(
+      find
+          .descendant(
+            of: find.byType(AppleGlassFilterBar),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.drag(find.byType(AppleGlassFilterBar), const Offset(-200, 0));
+    await tester.pumpAndSettle();
+    expect(
+      scroll.position.pixels,
+      greaterThan(0),
+      reason: 'Native selector must let horizontal pans scroll the strip',
+    );
     await controller.turn(1);
     await tester.pumpAndSettle();
     expect(controller.page, 1);
