@@ -63,9 +63,14 @@ jobs:
           if d['state']!='Booted':subprocess.run(['xcrun','simctl','boot',d['udid']],check=True,timeout=90)
           subprocess.run(['xcrun','simctl','bootstatus',d['udid'],'-b'],check=True,timeout=300)
           PY
-      - name: Exercise real WebKit and native UIKit
+      - name: Exercise Books handoff, native glass and textured curl
+        env:
+          XCODE_XCCONFIG_FILE: /tmp/litetale-native-acceptance.xcconfig
         run: |
           set -euo pipefail
+          cat > "$XCODE_XCCONFIG_FILE" <<'FLAGS'
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) DEBUG
+          FLAGS
           mkdir -p build/ios-acceptance
           flutter drive --driver=test_driver/ios_reader_acceptance.dart --target=integration_test/ios_reader_acceptance_test.dart -d "$SIMULATOR_ID" --no-pub 2>&1 | tee build/ios-acceptance/acceptance.log
       - uses: actions/upload-artifact@v4
