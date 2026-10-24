@@ -1,12 +1,18 @@
 <div align="center">
   <img src="assets/icon_previews/iris.png" width="144" alt="LiteTale 应用图标">
   <h1>LiteTale</h1>
-  <p>基于 Wild 的 Material You Android 轻小说阅读器</p>
+  <p>基于 Wild 的 Android 与 iOS 轻小说阅读器</p>
 
 [![license](https://img.shields.io/github/license/metaMMY07/LiteTale)](LICENSE)
 [![release](https://img.shields.io/github/v/release/metaMMY07/LiteTale)](https://github.com/metaMMY07/LiteTale/releases)
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
+
+## 最新测试包（2026-10-24）
+
+[Android build75：ARM64](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-ios-preview.2026-10-24/LiteTale-1.0.0-build75-arm64-v8a.apk) · [x86_64](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-ios-preview.2026-10-24/LiteTale-1.0.0-build75-x86_64.apk) · [iOS build13 IPA（未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-ios-preview.2026-10-24/LiteTale-1.0.0-ios-13-unsigned.ipa) · [发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v1.0.0-ios-preview.2026-10-24)
+
+iOS IPA 需自行签名安装；Android build75 包含哔哩轻小说修复。iOS 模拟器验收通过，实体设备由用户继续测试。
 
 ## Android 正式版 v1.0.0
 
@@ -36,9 +42,9 @@ LiteTale 1.0.0 已发布，提供 ARM64 手机／平板版和 x86_64 模拟器�
 ### 功能
 
 - 在哔哩轻小说、文库8、轻书架与轻小说百科之间切换，也可以导入自定义规则书源；各书源的账号、书架和阅读记录分别保存。
-- 支持 EPUB 2/3 图文书导入：从“书架 → 本地书籍”选择文件，离线阅读，支持常见原书 CSS、阅读字体、横屏双页、连续翻页与音量键翻页。
+- 支持 EPUB 2/3 图文书：Android 可在应用内离线阅读并保留常见原书 CSS；iOS 可将原书交给 Apple Books 阅读。
 - 支持搜索、书籍详情、目录与阅读；增加哔哩轻小说原站读取和验证恢复入口，并持续改进文库8与轻书架的读取稳定性。
-- 提供 Material You 配色、多种应用图标配色、平板横屏双页阅读和仿真翻页。
+- iOS 使用系统配色和液态玻璃控件；Android 保留原有 Material You 界面。Android 支持平板横屏双页和仿真翻页，iOS 使用普通翻页。
 - 分别导入全局界面字体和阅读字体，支持 TTF／OTF；加密章节继续使用书源所需字体，避免乱码。
 - 书源导入支持 LiteTale JSON 和 Legado JSON 的部分 CSS／JSON 规则；不执行外部脚本。
 
