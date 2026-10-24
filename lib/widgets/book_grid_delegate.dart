@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/rendering.dart';
+import 'package:flutter/foundation.dart';
 
 /// Keeps book covers at a readable size on both narrow and desktop windows.
 class BookGridDelegate extends SliverGridDelegate {
@@ -31,7 +32,11 @@ class BookGridDelegate extends SliverGridDelegate {
     var columns = math.max(
       1,
       ((constraints.crossAxisExtent + crossAxisSpacing) /
-              (preferredCardWidth + crossAxisSpacing))
+              ((defaultTargetPlatform == TargetPlatform.iOS &&
+                          preferredCardWidth == 220
+                      ? 160
+                      : preferredCardWidth) +
+                  crossAxisSpacing))
           .ceil(),
     );
     final count = sectionItemCount;
@@ -39,7 +44,11 @@ class BookGridDelegate extends SliverGridDelegate {
 
     return SliverGridDelegateWithFixedCrossAxisCount(
       crossAxisCount: columns,
-      childAspectRatio: childAspectRatio,
+      childAspectRatio:
+          defaultTargetPlatform == TargetPlatform.iOS &&
+                  childAspectRatio == 207 / 307
+              ? .56
+              : childAspectRatio,
       crossAxisSpacing: crossAxisSpacing,
       mainAxisSpacing: mainAxisSpacing,
     ).getLayout(constraints);

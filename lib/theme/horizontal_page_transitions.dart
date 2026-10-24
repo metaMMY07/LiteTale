@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 const horizontalPageTransitionsTheme = PageTransitionsTheme(
   builders: {
     TargetPlatform.android: HorizontalCoverPageTransitionsBuilder(),
-    TargetPlatform.iOS: HorizontalCoverPageTransitionsBuilder(),
+    TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
     TargetPlatform.fuchsia: HorizontalCoverPageTransitionsBuilder(),
     TargetPlatform.linux: HorizontalCoverPageTransitionsBuilder(),
     TargetPlatform.macOS: HorizontalCoverPageTransitionsBuilder(),
@@ -59,13 +59,10 @@ class HorizontalCoverPageRoute<T> extends MaterialPageRoute<T> {
     Animation<double> animation,
     Animation<double> secondaryAnimation,
     Widget child,
-  ) => const HorizontalCoverPageTransitionsBuilder().buildTransitions(
-    this,
-    context,
-    animation,
-    secondaryAnimation,
-    child,
-  );
+  ) => (Theme.of(context).platform == TargetPlatform.iOS
+          ? const CupertinoPageTransitionsBuilder()
+          : const HorizontalCoverPageTransitionsBuilder())
+      .buildTransitions(this, context, animation, secondaryAnimation, child);
 }
 
 class _HorizontalCoverTransition extends StatefulWidget {

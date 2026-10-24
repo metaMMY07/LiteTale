@@ -20,7 +20,10 @@ class MorePage extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocBuilder<UpdateCubit, UpdateState>(
       builder: (context, state) {
-        if (usesMaterialYou) return _mobilePage(context, state);
+        if (usesMaterialYou ||
+            Theme.of(context).platform == TargetPlatform.iOS) {
+          return _mobilePage(context, state);
+        }
         return Scaffold(
           appBar: AppBar(title: const Text('更多')),
           body: LeftAlignedScrollView(

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/auth_cubit.dart';
 import 'package:wild/sources/book_source.dart';
@@ -36,7 +37,17 @@ class _IndexPageState extends State<IndexPage>
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+    _tabController.addListener(_tabsChanged);
   }
+
+  void _tabsChanged() {
+    if (mounted && usesAppleGlass) setState(() {});
+  }
+
+  void _openSources() => Navigator.push(
+    context,
+    HorizontalCoverPageRoute(builder: (_) => const SourceSettingsPage()),
+  );
 
   @override
   void dispose() {
@@ -50,6 +61,10 @@ class _IndexPageState extends State<IndexPage>
             ? ReaderThemeMode.light
             : ReaderThemeMode.dark;
     final theme = context.read<ThemeCubit>();
+    if (usesAppleGlass) {
+      await theme.setThemeMode(target);
+      return;
+    }
     final reveal = ThemeRevealHost.maybeOf(context);
     if (reveal == null) {
       await theme.setThemeMode(target);
@@ -121,77 +136,107 @@ class _IndexPageState extends State<IndexPage>
       (auth) => auth.state.status == AuthStatus.authenticated,
     );
     return Scaffold(
-      appBar: AppBar(
-        title: Text(usesMaterialYou ? '发现' : '轻小说文库'),
-        actions: [
-          if (usesMaterialYou)
-            IconButton(
-              key: _themeButtonKey,
-              icon: Icon(
-                Theme.of(context).brightness == Brightness.dark
-                    ? Icons.light_mode_rounded
-                    : Icons.dark_mode_rounded,
-              ),
-              tooltip:
-                  Theme.of(context).brightness == Brightness.dark
-                      ? '切换浅色模式'
-                      : '切换深色模式',
-              onPressed: _switchTheme,
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.search_rounded),
-              tooltip: '搜索',
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  HorizontalCoverPageRoute(
-                    builder: (context) => const SearchPage(),
-                  ),
-                );
-              },
-            ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: Size.fromHeight(usesMaterialYou ? 132 : 48),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (usesMaterialYou)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-                  child: Semantics(
-                    button: true,
-                    label:
-                        activeSource.value == SourceId.bili
-                            ? '搜索书名'
-                            : activeSource.value == SourceId.lnovel
-                            ? '按目录查找繁体书名'
-                            : '搜索书名、作者',
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(32),
-                      onTap: () => Navigator.pushNamed(context, '/search'),
-                      child: IgnorePointer(
-                        child: SearchBar(
-                          hintText:
-                              activeSource.value == SourceId.bili
-                                  ? '搜索书名'
-                                  : sourceUsesCatalogSearch(activeSource.value)
-                                  ? '按目录查找书名'
-                                  : '搜索书名、作者',
-                          leading: const Icon(Icons.search_rounded),
-                          trailing: const [Icon(Icons.auto_stories_rounded)],
-                          elevation: const WidgetStatePropertyAll(0),
-                        ),
+      appBar:
+          usesAppleGlass
+              ? PreferredSize(
+                preferredSize: const Size.fromHeight(108),
+                child: SafeArea(
+                  bottom: false,
+                  child: Column(
+                    children: [
+                      AppleGlassToolbar(
+                        source: activeSource.value.label,
+                        onSource: _openSources,
+                        onTheme: _switchTheme,
+                        onSearch: () => Navigator.pushNamed(context, '/search'),
                       ),
-                    ),
+                      AppleGlassSegments(
+                        index: _tabController.index,
+                        lastLabel:
+                            activeSource.value == SourceId.wenku8 ? '完结' : '全部',
+                        onSelect: _tabController.animateTo,
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                   ),
                 ),
-              _buildDiscoveryTabs(context),
-            ],
-          ),
-        ),
-      ),
+              )
+              : AppBar(
+                title: Text(usesMaterialYou ? '发现' : '轻小说文库'),
+                actions: [
+                  if (usesMaterialYou)
+                    IconButton(
+                      key: _themeButtonKey,
+                      icon: Icon(
+                        Theme.of(context).brightness == Brightness.dark
+                            ? Icons.light_mode_rounded
+                            : Icons.dark_mode_rounded,
+                      ),
+                      tooltip:
+                          Theme.of(context).brightness == Brightness.dark
+                              ? '切换浅色模式'
+                              : '切换深色模式',
+                      onPressed: _switchTheme,
+                    )
+                  else
+                    IconButton(
+                      icon: const Icon(Icons.search_rounded),
+                      tooltip: '搜索',
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          HorizontalCoverPageRoute(
+                            builder: (context) => const SearchPage(),
+                          ),
+                        );
+                      },
+                    ),
+                ],
+                bottom: PreferredSize(
+                  preferredSize: Size.fromHeight(usesMaterialYou ? 132 : 48),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (usesMaterialYou)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                          child: Semantics(
+                            button: true,
+                            label:
+                                activeSource.value == SourceId.bili
+                                    ? '搜索书名'
+                                    : activeSource.value == SourceId.lnovel
+                                    ? '按目录查找繁体书名'
+                                    : '搜索书名、作者',
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(32),
+                              onTap:
+                                  () => Navigator.pushNamed(context, '/search'),
+                              child: IgnorePointer(
+                                child: SearchBar(
+                                  hintText:
+                                      activeSource.value == SourceId.bili
+                                          ? '搜索书名'
+                                          : sourceUsesCatalogSearch(
+                                            activeSource.value,
+                                          )
+                                          ? '按目录查找书名'
+                                          : '搜索书名、作者',
+                                  leading: const Icon(Icons.search_rounded),
+                                  trailing: const [
+                                    Icon(Icons.auto_stories_rounded),
+                                  ],
+                                  elevation: const WidgetStatePropertyAll(0),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      _buildDiscoveryTabs(context),
+                    ],
+                  ),
+                ),
+              ),
       body:
           activeSource.value == SourceId.wenku8 && !signedIn
               ? Center(

@@ -201,6 +201,34 @@ void main() {
       );
     },
   );
+  test('reads twelve pages beyond the old eight-page ceiling', () async {
+    final p = _Port()..chapterPages = 12;
+    final chapter = await session(p).chapter('bili:1', 'bili:1:2');
+    expect(chapter.content, List.generate(12, (i) => '第${i + 1}页').join('\n'));
+    expect(p.urls.where((url) => url.startsWith('https:')), hasLength(12));
+  });
+
+  test(
+    'unbounded chapter navigation retains a finite safety ceiling',
+    () async {
+      final p = _Port()..chapterPages = BiliBrowserSession.maxChapterPages + 1;
+      await expectLater(
+        session(p).chapter('bili:1', 'bili:1:2'),
+        throwsA(
+          isA<BiliBrowserException>().having(
+            (error) => error.message,
+            'message',
+            contains('64页安全上限'),
+          ),
+        ),
+      );
+      expect(
+        p.urls.where((url) => url.startsWith('https:')),
+        hasLength(BiliBrowserSession.maxChapterPages),
+      );
+    },
+  );
+
   test('rejects wrong book before navigation', () async {
     final p = _Port();
     await expectLater(
@@ -320,6 +348,7 @@ class _Port implements BiliBrowserPort {
   final urls = <String>[];
   String current = 'about:blank';
   String? next, chapterNext;
+  int? chapterPages;
   bool submitted = false, blank = false, stall = false;
   String? staleDocumentUrl;
   int documentProbes = 0;
@@ -384,6 +413,21 @@ class _Port implements BiliBrowserPort {
       };
     }
     if (script == biliChapterProbeScript) {
+      final pages = chapterPages;
+      if (pages != null) {
+        final page = int.parse(
+          RegExp(r'_(\d+)\.html$').firstMatch(current)?.group(1) ?? '1',
+        );
+        return {
+          'url': current,
+          'ready': true,
+          'content': '第$page页',
+          'next':
+              page < pages
+                  ? 'https://www.bilinovel.net/novel/1/2_${page + 1}.html'
+                  : null,
+        };
+      }
       return {
         'url': current,
         'ready': true,

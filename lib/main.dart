@@ -50,6 +50,8 @@ import 'package:wild/theme/imported_font_theme.dart';
 import 'package:wild/settings/settings_preferences.dart';
 import 'package:wild/settings/reading_statistics.dart';
 import 'package:wild/settings/settings_theme.dart';
+import 'package:wild/theme/ios_glass_theme.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 
 final lightTheme = ThemeData(
   colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
@@ -177,6 +179,11 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                                 dynamicScheme: dynamicLight,
                                 seedColor: appAccentSeed(accent),
                               )
+                              : usesAppleGlass
+                              ? iosGlassTheme(
+                                Brightness.light,
+                                accent: appAccentSeed(accent),
+                              )
                               : lightTheme,
                           appFont,
                         ),
@@ -189,6 +196,11 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                                 Brightness.dark,
                                 dynamicScheme: dynamicDark,
                                 seedColor: appAccentSeed(accent),
+                              )
+                              : usesAppleGlass
+                              ? iosGlassTheme(
+                                Brightness.dark,
+                                accent: appAccentSeed(accent),
                               )
                               : darkTheme,
                           appFont,

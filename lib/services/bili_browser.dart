@@ -57,6 +57,10 @@ class _VerifiedBiliPage {
 /// Ordinary site rendering. Website sessions stay in the platform browser;
 /// this service receives only bounded public book data and visible chapter text.
 class BiliBrowserSession extends ChangeNotifier {
+  // Long chapters can legitimately exceed eight mobile website pages.
+  // Keep a finite ceiling, same-chapter validation and the shared deadline.
+  static const maxChapterPages = 64;
+
   BiliBrowserSession({
     this.operationTimeout = const Duration(seconds: 30),
     this.startupGrace = const Duration(seconds: 4),
@@ -651,7 +655,8 @@ class BiliBrowserSession extends ChangeNotifier {
     );
     final seen = <String>{};
     final chunks = <String>[];
-    for (var page = 0; page < 8; page++) {
+    var contentLength = 0;
+    for (var page = 0; page < maxChapterPages; page++) {
       if (!seen.add('$uri')) throw const BiliBrowserException('章节分页发生循环');
       var value = _verifiedProbe(uri, BiliProbeKind.chapter);
       if (value == null) {
@@ -671,7 +676,8 @@ class BiliBrowserSession extends ChangeNotifier {
       final content = '${value['content'] ?? ''}'.trim();
       if (content.isEmpty) throw const BiliBrowserException('原站正文为空');
       chunks.add(content);
-      if (chunks.fold<int>(0, (n, s) => n + s.length) > 2 * 1024 * 1024) {
+      contentLength += content.length;
+      if (contentLength > 2 * 1024 * 1024) {
         throw const BiliBrowserException('章节正文过大');
       }
       if (value['next'] == null) return SourceChapter(chunks.join('\n'));
@@ -686,7 +692,7 @@ class BiliBrowserSession extends ChangeNotifier {
       }
       uri = next;
     }
-    throw const BiliBrowserException('章节分页超过8页上限');
+    throw const BiliBrowserException('章节分页超过64页安全上限');
   });
 
   @override

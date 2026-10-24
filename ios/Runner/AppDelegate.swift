@@ -75,6 +75,12 @@ import MediaPlayer
     let volumeChannel = FlutterEventChannel(name: "volume_button", binaryMessenger: controller.binaryMessenger)
     volumeChannel.setStreamHandler(self)
 
+    if let registrar = registrar(forPlugin: "LiteTaleAppleGlass") {
+      registrar.register(
+        AppleGlassFactory(messenger: controller.binaryMessenger, parent: controller),
+        withId: "litetale/apple_glass"
+      )
+    }
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }

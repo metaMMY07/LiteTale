@@ -10,6 +10,7 @@ import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/pages/update_cubit.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/widgets/fluid_navigation_bar.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 
 import 'home/bookshelf_page.dart';
 import 'home/history_page.dart';
@@ -140,7 +141,7 @@ class _HomePageState extends State<HomePage> {
             ),
           ];
           return Scaffold(
-            extendBody: usesMaterialYou,
+            extendBody: usesMaterialYou || usesAppleGlass,
             body: IndexedStack(
               index: _currentIndex,
               children: [
@@ -175,7 +176,12 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
             bottomNavigationBar:
-                usesMaterialYou
+                usesAppleGlass
+                    ? AppleGlassBottomBar(
+                      index: _currentIndex,
+                      onSelect: _onDestinationSelected,
+                    )
+                    : usesMaterialYou
                     ? FluidNavigationBar(
                       destinations: destinations,
                       selectedIndex: _currentIndex,
