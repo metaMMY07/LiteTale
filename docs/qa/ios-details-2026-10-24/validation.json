@@ -1,0 +1,70 @@
+{
+  "app_source_commit": "3193272103db33ef4d8318b831ad6bb967821f99",
+  "acceptance_commit": "3193272103db33ef4d8318b831ad6bb967821f99",
+  "flutter_tests": {
+    "passed": 708,
+    "skipped": 8,
+    "failed": 0,
+    "log": "build/qa/ios-unified-final-tests.jsonl"
+  },
+  "targeted_tests": {
+    "passed": 17,
+    "failed": 0,
+    "log": "build/qa/ios-unified-target-tests.log"
+  },
+  "analysis": {
+    "targets": 62,
+    "errors": 0,
+    "warnings": 0,
+    "note": "Existing informational style lints are not counted as errors."
+  },
+  "android_build": 75,
+  "ios_build": 10,
+  "ios_device_build_run": 40102691583,
+  "ios_simulator_run": 40102691601,
+  "native_simulator_acceptance": "pending-current-run",
+  "software_mesh_visual_probe": "passed; inspected build/qa/ios-curl-software-probe.png",
+  "physical_device_tested": false,
+  "branding_asset_sha256": "30c62b4b2b98a2e96bf5fddda117d54676628b554310abc6eb5fc30f699f2c6a",
+  "local_epub_ios": "original EPUB system handoff to Apple Books; user chooses receiver",
+  "withdrawn_experiment": "iOS WebKit native rasterizer did not pass vertical text pixel validation; not in app target",
+  "previous_theme_finding": "Run 9 passed the real theme-change snapshot/presentation-mask pixel test. Current run repeats the test after full iOS control/color changes.",
+  "android_source_commit": "cd311193198c46062a487df926d303106688c50a",
+  "accepted_native_behaviors_from_previous_run": [
+    "system EPUB sheet presents",
+    "cancellation preserves exact original file",
+    "textured sheet and blank back render on iOS"
+  ],
+  "theme_validation_revision": "explicit mask viewport plus DEBUG-only presentation-path freeze for UIKit model-layer screenshot capture",
+  "native_attempts": [
+    {
+      "run": 40087874807,
+      "result": "experimental CSS failed; glass/curl ran; theme required visual follow-up"
+    },
+    {
+      "run": 40091448347,
+      "result": "Books handoff and curl passed; theme image assertion failed"
+    },
+    {
+      "run": 40094555222,
+      "result": "mask bounds/animation guards passed, capture stopped at missing DEBUG helper; Books and curl passed"
+    },
+    {
+      "run": 40095771152,
+      "result": "pending; explicit Xcode DEBUG flag for screenshot helper"
+    }
+  ],
+  "ios_followup_scope": {
+    "android_design_changed": false,
+    "startup_portrait_retired": true,
+    "loader": "ordinary theme-colored ring",
+    "colors": "UIKit resolved semantic/system colors, nine selectable accents",
+    "curl": "removed on iOS; Android unchanged",
+    "all_pages": "shared platform controls, native glass cards/menus/selectors, Cupertino forms/buttons/switches/sliders/dialogs/sheets"
+  },
+  "retired_ios_curl": {
+    "prototype": "docs/research/ios-curl-mesh-retired.dart.txt",
+    "historical_native_run": 40097836118,
+    "current_feature_enabled": false
+  }
+}

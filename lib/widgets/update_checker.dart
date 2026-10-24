@@ -1,3 +1,4 @@
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -34,7 +35,7 @@ class _UpdateCheckerState extends State<UpdateChecker> {
           (context) => Material(
             color: Colors.black54,
             child: Center(
-              child: Card(
+              child: AppleGlassCard(
                 margin: const EdgeInsets.symmetric(horizontal: 32),
                 child: Padding(
                   padding: const EdgeInsets.all(24),

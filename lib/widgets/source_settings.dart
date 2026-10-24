@@ -1,3 +1,4 @@
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -21,7 +22,7 @@ class SourceSettings extends StatelessWidget {
         (context, revision, __) => ValueListenableBuilder<SourceId>(
           valueListenable: activeSource,
           builder:
-              (context, source, _) => Card(
+              (context, source, _) => AppleGlassCard(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
