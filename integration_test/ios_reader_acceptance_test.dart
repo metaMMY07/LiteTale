@@ -117,10 +117,7 @@ void main() {
         builder:
             (_, value, __) => MaterialApp(
               themeAnimationDuration: Duration.zero,
-              theme: ThemeData(
-                brightness: value,
-                extensions: const [AppleGlassTheme(available: true)],
-              ),
+              theme: iosGlassTheme(value),
               home: Scaffold(
                 backgroundColor:
                     value == Brightness.light ? Colors.white : Colors.black,
