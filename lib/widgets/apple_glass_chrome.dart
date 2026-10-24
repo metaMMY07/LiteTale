@@ -216,7 +216,9 @@ class _AppleChromeState extends State<_AppleChrome> {
       creationParams: widget.parameters,
       creationParamsCodec: const StandardMessageCodec(),
       onPlatformViewCreated: _created,
-      hitTestBehavior: PlatformViewHitTestBehavior.translucent,
+      // The floating bar overlaps tappable book covers. Keep those recognizers
+      // out of its gesture arena so a tab press reaches UIKit immediately.
+      hitTestBehavior: PlatformViewHitTestBehavior.opaque,
     );
   }
 }

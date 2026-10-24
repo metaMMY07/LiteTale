@@ -194,11 +194,6 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     }
   }
 
-  override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-    if let tabs, !tabs.tabBar.frame.contains(tabs.view.convert(point, from: self)) { return nil }
-    return super.hitTest(point, with: event)
-  }
-
   func tabBarController(_ controller: UITabBarController, didSelect viewController: UIViewController) {
     guard !applyingSelection else { return }
     channel.invokeMethod("action", arguments: ["action": "select", "value": controller.selectedIndex])
