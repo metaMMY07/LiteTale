@@ -6,6 +6,20 @@ import MediaPlayer
 @main
 @objc class AppDelegate: FlutterAppDelegate {
 
+  private enum LauncherIcon: String, CaseIterable {
+    case iris, blue, rose, orange, teal, green
+
+    var assetName: String? {
+      self == .iris ? nil : "AppIcon" + rawValue.capitalized
+    }
+
+    static func selected(assetName: String?) -> LauncherIcon {
+      allCases.first { $0.assetName == assetName } ?? .iris
+    }
+  }
+
+  private var isChangingLauncherIcon = false
+
   private var volumeEventSink: FlutterEventSink?
   private var audioSession: AVAudioSession?
   private var volumeView: MPVolumeView?
@@ -25,7 +39,6 @@ import MediaPlayer
 
     let channel = FlutterMethodChannel(name: "methods", binaryMessenger: controller.binaryMessenger)
     channel.setMethodCallHandler { (call, result) in
-        Thread {
             if call.method == "dataRoot" {
                 result(applicationSupportsPath)
             } else if call.method == "documentRoot" {
@@ -46,7 +59,17 @@ import MediaPlayer
             } else {
                 result(FlutterMethodNotImplemented)
             }
-        }.start()
+    }
+
+    let iconChannel = FlutterMethodChannel(
+      name: "litetale/launcher_icon", binaryMessenger: controller.binaryMessenger
+    )
+    iconChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(FlutterError(code: "unavailable", message: "Application is unavailable", details: nil))
+        return
+      }
+      self.handleLauncherIcon(call, result: result)
     }
 
     let volumeChannel = FlutterEventChannel(name: "volume_button", binaryMessenger: controller.binaryMessenger)
@@ -54,6 +77,40 @@ import MediaPlayer
 
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  private func handleLauncherIcon(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    let application = UIApplication.shared
+    switch call.method {
+    case "getIcon":
+      result(LauncherIcon.selected(assetName: application.alternateIconName).rawValue)
+    case "setIcon":
+      guard let name = call.arguments as? String, let icon = LauncherIcon(rawValue: name) else {
+        result(FlutterError(code: "invalid_icon", message: "Unknown launcher icon", details: nil))
+        return
+      }
+      if application.alternateIconName == icon.assetName {
+        result(icon.rawValue)
+        return
+      }
+      guard application.supportsAlternateIcons, !isChangingLauncherIcon else {
+        result(FlutterError(code: "icon_unavailable", message: "Icon change is unavailable", details: nil))
+        return
+      }
+      isChangingLauncherIcon = true
+      application.setAlternateIconName(icon.assetName) { [weak self] error in
+        DispatchQueue.main.async {
+          self?.isChangingLauncherIcon = false
+          if let error {
+            result(FlutterError(code: "icon_change_failed", message: error.localizedDescription, details: nil))
+          } else {
+            result(icon.rawValue)
+          }
+        }
+      }
+    default:
+      result(FlutterMethodNotImplemented)
+    }
   }
 
   // 產生靜音 WAV 資料（0.1秒，8000Hz，8-bit mono）

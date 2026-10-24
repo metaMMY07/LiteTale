@@ -1,0 +1,105 @@
+name: iOS Preview IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'build/ios-preview-*'
+    paths:
+      - '.github/workflows/ios-preview.yml'
+      - 'ios/**'
+      - 'lib/**'
+      - 'assets/**'
+      - 'rust/**'
+      - 'rust_builder/**'
+      - 'pubspec.*'
+      - 'tools/prepare_ios_icons.py'
+      - 'tools/package_ios_preview.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: iPhone and iPad unsigned Release
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      FLUTTER_VERSION: '3.29.3'
+      RUST_VERSION: '1.90.0'
+      COCOAPODS_DISABLE_STATS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify Xcode and iPhoneOS SDK
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Install the pinned Rust device toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+          rustup target add aarch64-apple-ios --toolchain "$RUST_VERSION"
+          rustc --version
+          cargo --version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/Library/Caches/CocoaPods
+          key: ios-deps-macos15-xcode26.2-flutter3.29.3-rust1.90-${{ hashFiles('rust/Cargo.lock', 'pubspec.lock', 'ios/Podfile.lock') }}
+      - name: Resolve locked Dart dependencies and iOS engine
+        run: |
+          set -euo pipefail
+          flutter --version
+          flutter config --no-analytics
+          flutter precache --ios
+          flutter pub get --enforce-lockfile
+      - name: Resolve native plugins
+        working-directory: ios
+        run: pod install
+      - name: Build unsigned device Release
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios-preview
+          flutter build ios --release --no-codesign --build-number "$GITHUB_RUN_NUMBER" 2>&1 | tee build/ios-preview/build.log
+      - name: Validate and package the device IPA
+        run: |
+          set -euo pipefail
+          python3 tools/package_ios_preview.py --app build/ios/iphoneos/Runner.app --output build/ios-preview
+          cp ios/Podfile.lock build/ios-preview/Podfile.lock
+      - name: Upload install package and validation manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiteTale-iOS-preview-${{ github.run_number }}
+          path: |
+            build/ios-preview/*.ipa
+            build/ios-preview/*.json
+            build/ios-preview/*.txt
+            build/ios-preview/Podfile.lock
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiteTale-iOS-build-log-${{ github.run_number }}
+          path: build/ios-preview/build.log
+          if-no-files-found: ignore
+          retention-days: 7
