@@ -8,7 +8,7 @@
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
-> **开发公告（2026-10-25）**：因本人课业较为繁重，LiteTale 暂缓开发。感谢理解。
+> **开发公告（2026-10-25）**：因本人课业较为繁重，LiteTale 暂缓开发。欢迎使用者继续提出建议，帮助改进软件。
 
 ## 最新正式版（2026-10-24）
 
