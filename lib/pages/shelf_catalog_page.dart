@@ -7,6 +7,8 @@ import 'package:wild/widgets/novel_cover_card.dart';
 import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
 import 'package:wild/sources/rule_book_source.dart';
+import 'package:wild/sources/huanmeng_categories.dart';
+import 'package:wild/sources/huanmeng_source.dart' show HuanmengSourceException;
 import 'package:wild/widgets/apple_glass_chrome.dart';
 
 /// Uses the same card grid, tabs and color scheme as the Wenku8 catalogue.
@@ -56,6 +58,40 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
       if (!more) _page = null;
     });
     try {
+      if (_source == SourceId.huanmeng) {
+        if (widget.mode == 'category') _categories = huanmengCategories;
+        final result = await api.huanmengSource.list(
+          page: number,
+          tag: widget.mode == 'category' ? _category : null,
+          state: widget.mode == 'rank' ? 2 : null,
+        );
+        if (!mounted ||
+            request != _request ||
+            revision != sourceRevision.value ||
+            activeSource.value != _source) {
+          return;
+        }
+        final seen = <String>{};
+        final records = [...result.records];
+        if (more) {
+          records.insertAll(0, _page?.records ?? []);
+        }
+        final unique = records.where((book) => seen.add(book.aid)).toList();
+        if (more &&
+            result.records.isNotEmpty &&
+            unique.length == _page!.records.length) {
+          throw const HuanmengSourceException('原站续页未提供新书籍，请稍后刷新。');
+        }
+        setState(() {
+          _page = api.PageStatsNovelCover(
+            currentPage: result.currentPage,
+            maxPage: result.maxPage,
+            records: unique,
+          );
+          _loading = false;
+        });
+        return;
+      }
       if (_source == SourceId.bili) {
         if (widget.mode == 'category') {
           _categories =
@@ -138,7 +174,10 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
         if (_source == SourceId.bili && !currentBiliRequest()) return;
         setState(() {
           _loading = false;
-          _error = _source == SourceId.bili ? e : e.toString();
+          _error =
+              _source == SourceId.bili || _source == SourceId.huanmeng
+                  ? e
+                  : e.toString();
           _errorMore = more;
         });
       }

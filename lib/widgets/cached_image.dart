@@ -58,7 +58,7 @@ class CachedImageProvider extends ImageProvider<CachedImageProvider> {
                       'User-Agent': 'Mozilla/5.0',
                       'Referer': 'https://www.bilinovel.net/',
                     }
-                    : source.isRule
+                    : source.isRule || source == SourceId.huanmeng
                     ? ruleImageHeaders(source)
                     : {'Referer': 'https://www.lightnovel.app/'},
           )

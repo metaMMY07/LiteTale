@@ -241,6 +241,8 @@ class RuleSourceEngine {
         catalogUrl: _optionalUrlField(
           rule.field('catalogUrl'),
           _FieldContext(page, page.root),
+          sameOrigin: true,
+          allowFragment: true,
         ),
       );
     });
@@ -331,19 +333,15 @@ class RuleSourceEngine {
         pages.add(sanitized.html);
         images.addAll(sanitized.images);
         count++;
-        final nextValue = _nextValue(rule, page);
-        if (nextValue.isEmpty) break;
+        final next = _nextPageUrl(rule, page);
+        if (next == null) break;
         if (count >= limits.maxPages) {
           throw RuleSourceLimitException(
             definition.id,
             '正文超过 ${limits.maxPages} 页分页上限。',
           );
         }
-        current = _resolveSourceUrl(
-          nextValue,
-          base: page.finalUri,
-          sameOrigin: true,
-        );
+        current = next;
       }
       final uniqueImages = <String, RuleSourceImage>{};
       for (final image in images) {
@@ -379,8 +377,8 @@ class RuleSourceEngine {
         items.add(mapItem(page, item));
       }
       count++;
-      final nextValue = _nextValue(rule, page);
-      if (nextValue.isEmpty) {
+      final next = _nextPageUrl(rule, page);
+      if (next == null) {
         return RulePage(items: items, pagesFetched: count, reachedEnd: true);
       }
       if (count >= limits.maxPages) {
@@ -389,11 +387,7 @@ class RuleSourceEngine {
           '分页超过 ${limits.maxPages} 页上限。',
         );
       }
-      current = _resolveSourceUrl(
-        nextValue,
-        base: page.finalUri,
-        sameOrigin: true,
-      );
+      current = next;
     }
   }
 
@@ -411,18 +405,7 @@ class RuleSourceEngine {
       for (final item in _select(rule.items!.selector, page))
         mapItem(page, item),
     ];
-    final nextValue = _nextValue(rule, page);
-    final next =
-        nextValue.isEmpty
-            ? null
-            : _resolveSourceUrl(
-              nextValue,
-              base: page.finalUri,
-              sameOrigin: true,
-            );
-    if (next != null && next == page.finalUri) {
-      throw RuleSourcePaginationException(definition.id, '分页链接循环：$next');
-    }
+    final next = _nextPageUrl(rule, page);
     return RulePage(
       items: items,
       pagesFetched: 1,
@@ -608,7 +591,12 @@ class RuleSourceEngine {
     return _resolveSourceUrl(rendered, sameOrigin: true);
   }
 
-  Uri _resolveSourceUrl(String value, {Uri? base, required bool sameOrigin}) {
+  Uri _resolveSourceUrl(
+    String value, {
+    Uri? base,
+    required bool sameOrigin,
+    bool allowFragment = false,
+  }) {
     if (value.trim().isEmpty) {
       throw RuleSourceExtractionException(definition.id, 'URL 为空。');
     }
@@ -628,7 +616,7 @@ class RuleSourceEngine {
     if ((uri.scheme != 'https' && uri.scheme != 'http') ||
         uri.host.isEmpty ||
         uri.userInfo.isNotEmpty ||
-        uri.hasFragment ||
+        (uri.hasFragment && !allowFragment) ||
         _isLocalHost(uri.host)) {
       throw RuleSourceUnsupportedException(
         definition.id,
@@ -641,30 +629,54 @@ class RuleSourceEngine {
         '拒绝访问书源站点以外的 URL：$value',
       );
     }
-    return uri;
+    // Fragments select a location within a document, never a network resource.
+    // Only catalog and pagination navigation opt in; image/identity URLs retain
+    // the strict default policy above.
+    return allowFragment ? uri.removeFragment() : uri;
   }
 
   String _checkedResultUrl(String value) =>
       _resolveSourceUrl(value, sameOrigin: true).toString();
 
-  String _optionalUrlField(RuleField? field, _FieldContext context) {
+  String _optionalUrlField(
+    RuleField? field,
+    _FieldContext context, {
+    bool sameOrigin = false,
+    bool allowFragment = false,
+  }) {
     final value = _fieldValue(field, context, sourceId: definition.id);
     if (value.isEmpty) return '';
     return _resolveSourceUrl(
       value,
       base: context.page.finalUri,
-      sameOrigin: false,
+      sameOrigin: sameOrigin,
+      allowFragment: allowFragment,
     ).toString();
   }
 
-  String _nextValue(RuleOperation rule, _PageContext page) {
+  Uri? _nextPageUrl(RuleOperation rule, _PageContext page) {
     final field = rule.next;
-    if (field == null) return '';
-    return _fieldValue(
-      field,
-      _FieldContext(page, page.root),
-      sourceId: definition.id,
-    ).trim();
+    if (field == null) return null;
+    final value =
+        _fieldValue(
+          field,
+          _FieldContext(page, page.root),
+          sourceId: definition.id,
+        ).trim();
+    if (value.isEmpty) return null;
+    final next = _resolveSourceUrl(
+      value,
+      base: page.finalUri,
+      sameOrigin: true,
+      allowFragment: true,
+    );
+    if (next == page.finalUri) {
+      // A local anchor cannot advance pagination. End without fetching the
+      // same document again; a plain self-link remains an explicit loop error.
+      if (Uri.parse(value).hasFragment) return null;
+      throw RuleSourcePaginationException(definition.id, '分页链接循环：$next');
+    }
+    return next;
   }
 
   String _requiredField(

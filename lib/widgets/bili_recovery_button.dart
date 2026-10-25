@@ -1,4 +1,6 @@
 import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/services/huanmeng_api_session.dart';
+import 'package:wild/widgets/huanmeng_recovery_button.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/services/bili_browser.dart';
 import 'package:wild/sources/book_source.dart';
@@ -77,6 +79,13 @@ class _BiliRecoveryButtonState extends State<BiliRecoveryButton> {
   @override
   Widget build(BuildContext context) {
     final request = widget.error;
+    if (widget.source == SourceId.huanmeng &&
+        request is HuanmengVerificationRequired) {
+      return HuanmengRecoveryButton(
+        request: request,
+        onRecovered: widget.onRecovered,
+      );
+    }
     if (widget.source != SourceId.bili ||
         request is! BiliSiteVerificationRequired) {
       return const SizedBox.shrink();

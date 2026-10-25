@@ -14,6 +14,10 @@ import 'package:wild/services/bili_browser.dart';
 import 'rule_source_registry.dart';
 import 'rule_book_source.dart';
 import 'local_epub_source.dart';
+import 'huanmeng_source.dart';
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
+import 'package:wild/services/huanmeng_api_session.dart';
 import 'package:wild/services/epub/local_epub_library.dart';
 import 'package:wild/services/reading_progress.dart';
 import 'package:wild/services/wenku8_read_repository.dart';
@@ -281,12 +285,15 @@ final biliSource = BiliSiteSource(
   chapterLoader: BiliBrowserSession.instance.chapter,
   documentLoader: BiliBrowserSession.instance.document,
 );
+final huanmengSource = HuanmengSource(transport: HuanmengApiSession.instance);
 final Map<SourceId, BookSource> bookSources = {
   SourceId.wenku8: Wenku8Source(),
   SourceId.lightNovelShelf: shelfSource,
   SourceId.lnovel: lnovelSource,
   SourceId.bili: biliSource,
   SourceId.localEpub: LocalEpubSource(),
+  if (defaultTargetPlatform == TargetPlatform.iOS)
+    SourceId.huanmeng: huanmengSource,
 };
 
 BookSource sourceAdapter(SourceId source) =>
@@ -304,6 +311,9 @@ List<SourceId> get availableSources =>
 bool _ruleListenerAttached = false;
 bool _wenkuInvalidationAttached = false;
 Map<String, String> ruleImageHeaders(SourceId source) {
+  if (source == SourceId.huanmeng) {
+    return const {'Referer': 'https://www.huanmengacg.com/'};
+  }
   final entry = RuleSourceRegistry.instance[source.ruleId];
   return entry == null
       ? const {}
@@ -475,7 +485,13 @@ Future<w8.PageStatsNovelCover> search({
       );
     });
   }
-  return sourceAdapter(source).search(searchKey, searchType, page);
+  return sourceAdapter(source).search(
+    searchKey,
+    source == SourceId.huanmeng && searchType == 'articlename'
+        ? 'title'
+        : searchType,
+    page,
+  );
 }
 
 String _searchKey(SourceId source) =>

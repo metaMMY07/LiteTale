@@ -106,7 +106,7 @@ class _IndexPageState extends State<IndexPage>
       tabs: [
         const Tab(text: '推荐'),
         const Tab(text: '分类'),
-        const Tab(text: '排行'),
+        Tab(text: activeSource.value == SourceId.huanmeng ? '完结' : '排行'),
         Tab(text: activeSource.value == SourceId.wenku8 ? '完结' : '全部'),
       ],
     );
@@ -171,6 +171,10 @@ class _IndexPageState extends State<IndexPage>
                       ),
                       AppleGlassSegments(
                         index: _tabController.index,
+                        thirdLabel:
+                            activeSource.value == SourceId.huanmeng
+                                ? '完结'
+                                : '排行',
                         lastLabel:
                             activeSource.value == SourceId.wenku8 ? '完结' : '全部',
                         onSelect: _tabController.animateTo,

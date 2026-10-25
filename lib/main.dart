@@ -6,6 +6,7 @@ import 'package:wild/sources/book_source.dart' as book_sources;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:wild/widgets/bili_browser_host.dart';
+import 'package:wild/widgets/huanmeng_browser_host.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:wild/cubits/app_accent_cubit.dart';
@@ -168,7 +169,12 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                       builder:
                           (context, child) => Wenku8BrowserHost(
                             child: BiliBrowserHost(
-                              child: ThemeRevealHost(child: child!),
+                              child:
+                                  Platform.isIOS
+                                      ? HuanmengBrowserHost(
+                                        child: ThemeRevealHost(child: child!),
+                                      )
+                                      : ThemeRevealHost(child: child!),
                             ),
                           ),
                       themeMode: switch (theme.themeMode) {

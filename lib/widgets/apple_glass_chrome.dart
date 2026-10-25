@@ -358,10 +358,12 @@ class AppleGlassSegments extends StatelessWidget {
     super.key,
     required this.index,
     required this.lastLabel,
+    this.thirdLabel = '排行',
     required this.onSelect,
   });
   final int index;
   final String lastLabel;
+  final String thirdLabel;
   final ValueChanged<int> onSelect;
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -371,6 +373,7 @@ class AppleGlassSegments extends StatelessWidget {
         'kind': 'segments',
         'index': index,
         'lastLabel': lastLabel,
+        'labels': ['推荐', '分类', thirdLabel, lastLabel],
         'dark': Theme.of(context).brightness == Brightness.dark,
         'accent': Theme.of(context).colorScheme.primary.toARGB32(),
       },
@@ -382,7 +385,7 @@ class AppleGlassSegments extends StatelessWidget {
         children: {
           0: const Text('推荐'),
           1: const Text('分类'),
-          2: const Text('排行'),
+          2: Text(thirdLabel),
           3: Text(lastLabel),
         },
         onValueChanged: (value) {

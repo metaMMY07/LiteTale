@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'dart:ui' as ui;
 import 'package:path_provider/path_provider.dart';
 import '../test/support/epub_fixture.dart';
@@ -16,10 +17,129 @@ import 'package:wild/services/reader_page_controller.dart';
 import 'package:wild/services/source_import_file.dart';
 import 'package:wild/settings/rule_source_manager.dart';
 import 'package:wild/sources/rule_source_registry.dart';
+import 'package:wild/services/huanmeng_api_session.dart';
+import 'package:wild/widgets/wenku_webview.dart';
+import 'package:wild/sources/book_source.dart';
+import 'package:wild/sources/source_api.dart' as api;
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
+  testWidgets(
+    'native Huanmeng browser protocol handles JSON, 429 and byte bounds with offline fixtures',
+    (tester) async {
+      expect(api.availableSources, contains(SourceId.huanmeng));
+      final web = WenkuWebView();
+      try {
+        await web.initialize(
+          onLoaded: () {},
+          onError: (_) {},
+          normalBrowserUserAgent: true,
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: iosGlassTheme(Brightness.light),
+            home: Scaffold(body: web.build()),
+          ),
+        );
+        await web.loadUrl('about:blank');
+        await tester.pump(const Duration(milliseconds: 300));
+        final uri = Uri.parse(
+          'https://www.huanmengacg.com/index.php/bookapi/content?password=bookapi&bid=7&cid=11',
+        );
+        // Only the app-authored request/probe runs in real WebKit. Fetch is stubbed;
+        // no successful live-source request or Cloudflare clearance is implied.
+        Future<Map<String, dynamic>> readFixture(
+          String response,
+          String token,
+        ) async {
+          await web.executeScript(
+            'window.fetch=async(url,options)=>{window.__fixtureRequest={url,credentials:options.credentials,redirect:options.redirect};return $response;};true;',
+          );
+          await web.executeScript(HuanmengApiSession.fetchScript(uri, token));
+          for (var i = 0; i < 35; i++) {
+            final result = HuanmengApiSession.decodeProbe(
+              await web.executeScript(HuanmengApiSession.fetchProbe),
+            );
+            if (result['token'] == token && result['done'] == true) {
+              return result;
+            }
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+          }
+          throw StateError('Offline WebKit protocol fixture did not complete');
+        }
+
+        final data = {
+          'data': {'content': '<p>离线协议测试</p>'},
+        };
+        final normal = await readFixture(
+          'new Response(${jsonEncode(jsonEncode(data))},{status:200,headers:{"Content-Type":"application/json"}})',
+          'native_json',
+        );
+        expect(HuanmengApiSession.decodeEnvelope(normal['text']), data);
+        final request = HuanmengApiSession.decodeProbe(
+          await web.executeScript('JSON.stringify(window.__fixtureRequest)'),
+        );
+        expect(request, {
+          'url': uri.toString(),
+          'credentials': 'same-origin',
+          'redirect': 'error',
+        });
+        final limited = await readFixture(
+          'new Response(new ReadableStream({start(){}}),{status:429,headers:{"Retry-After":"240"}})',
+          'native_429',
+        );
+        expect(limited['status'], 429);
+        expect(limited['retryAfter'], '240');
+        final large = await readFixture(
+          'new Response(new Uint8Array(2097153),{status:200})',
+          'native_size',
+        );
+        expect(large['tooLarge'], isTrue);
+        expect(large['text'], isNull);
+        final text = jsonEncode({
+          'data': {
+            'content': 'Sorry, you have been blocked; 429 Too Many Requests',
+          },
+        });
+        await web.executeScript(
+          'document.body.textContent=${jsonEncode(text)};true;',
+        );
+        final document = HuanmengApiSession.decodeProbe(
+          await web.executeScript(HuanmengApiSession.documentProbe),
+        );
+        expect(document['challenge'], isFalse);
+        expect(document['rateLimited'], isFalse);
+        expect(
+          HuanmengApiSession.decodeEnvelope(document['text'])['data'],
+          isA<Map>(),
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: iosGlassTheme(Brightness.light),
+            home: Scaffold(
+              body: Column(
+                children: [
+                  AppleGlassSegments(
+                    index: 2,
+                    lastLabel: '全部',
+                    thirdLabel: '完结',
+                    onSelect: (_) {},
+                  ),
+                  const Text('幻梦：离线 WebKit 协议检查通过'),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await binding.takeScreenshot('huanmeng-offline-webkit-protocol');
+        expect(tester.takeException(), isNull);
+      } finally {
+        await web.dispose();
+      }
+    },
+  );
   testWidgets(
     'native JSON document picker imports original Huanmeng source and reloads',
     (tester) async {

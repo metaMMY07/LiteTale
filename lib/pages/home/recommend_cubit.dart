@@ -1,6 +1,7 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/services/light_novel_shelf_service.dart';
 import 'package:wild/sources/book_source.dart';
+import 'package:wild/sources/huanmeng_source.dart' show HuanmengSourceException;
 import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/src/rust/wenku8/models.dart' as w8;
 
@@ -18,6 +19,7 @@ class RecommendLoaded extends RecommendState {
   final int page;
   final bool hasMore, loadingMore;
   final String? moreError;
+  final Object? moreCause;
 
   RecommendLoaded(
     this.blocks, {
@@ -28,6 +30,7 @@ class RecommendLoaded extends RecommendState {
     this.hasMore = false,
     this.loadingMore = false,
     this.moreError,
+    this.moreCause,
   });
 
   RecommendLoaded more({
@@ -36,6 +39,7 @@ class RecommendLoaded extends RecommendState {
     bool? hasMore,
     bool loading = false,
     String? error,
+    Object? cause,
   }) => RecommendLoaded(
     blocks,
     lightNovelShelfBooks: lightNovelShelfBooks,
@@ -45,6 +49,7 @@ class RecommendLoaded extends RecommendState {
     hasMore: hasMore ?? this.hasMore,
     loadingMore: loading,
     moreError: error,
+    moreCause: cause,
   );
 }
 
@@ -77,6 +82,7 @@ class RecommendCubit extends Cubit<RecommendState> {
   bool _paging = false;
   final Future<w8.PageStatsNovelCover> Function(SourceId, int) _loadMore;
   static Future<w8.PageStatsNovelCover> _page(SourceId source, int page) {
+    if (source == SourceId.huanmeng) return w8.huanmengSource.list(page: page);
     if (source == SourceId.bili) {
       return w8.biliSource.listPage(page, mode: 'all');
     }
@@ -108,10 +114,14 @@ class RecommendCubit extends Cubit<RecommendState> {
           for (final book in block.list) book.aid,
         for (final book in before.moreBooks) book.aid,
       };
-      final books = [
-        ...before.moreBooks,
-        ...result.records.where((book) => seen.add(book.aid)),
-      ];
+      final additional =
+          result.records.where((book) => seen.add(book.aid)).toList();
+      if (source == SourceId.huanmeng &&
+          result.records.isNotEmpty &&
+          additional.isEmpty) {
+        throw const HuanmengSourceException('原站续页未提供新书籍，请稍后刷新。');
+      }
+      final books = [...before.moreBooks, ...additional];
       emit(
         before.more(
           books: books,
@@ -120,8 +130,8 @@ class RecommendCubit extends Cubit<RecommendState> {
               result.records.isNotEmpty && result.maxPage > result.currentPage,
         ),
       );
-    } catch (_) {
-      if (current()) emit(before.more(error: '更多书籍加载失败，点击重试'));
+    } catch (e) {
+      if (current()) emit(before.more(error: '更多书籍加载失败，点击重试', cause: e));
     } finally {
       if (current()) _paging = false;
     }
@@ -156,14 +166,31 @@ class RecommendCubit extends Cubit<RecommendState> {
         revision == sourceRevision.value;
     emit(RecommendLoading());
     // The optional feed must never prevent the existing Wenku8 page loading.
-    final shelfBooks = _loadOptionalShelf(forceRefresh);
+    final shelfBooks =
+        source == SourceId.huanmeng
+            ? Future.value(const <LightNovelShelfBook>[])
+            : _loadOptionalShelf(forceRefresh);
     try {
-      final blocks = await _loadWenku8();
+      final first =
+          source == SourceId.huanmeng ? await _loadMore(source, 1) : null;
+      final blocks =
+          first == null
+              ? await _loadWenku8()
+              : [
+                w8.HomeBlock(
+                  title: '${source.label} · 最新更新',
+                  list: first.records,
+                ),
+              ];
       if (!current()) return;
       emit(
         RecommendLoaded(
           blocks,
-          hasMore: source != SourceId.wenku8 && !source.isRule,
+          page: first?.currentPage ?? 0,
+          hasMore:
+              first == null
+                  ? source != SourceId.wenku8 && !source.isRule
+                  : first.currentPage < first.maxPage,
         ),
       );
       final books = await shelfBooks;

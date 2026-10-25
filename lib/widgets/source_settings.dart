@@ -44,7 +44,11 @@ class SourceSettings extends StatelessWidget {
                                 .map(
                                   (s) => DropdownMenuItem(
                                     value: s,
-                                    child: Text(s.label),
+                                    child: Text(
+                                      usesAppleGlass && s.isRule
+                                          ? '${s.label}（导入）'
+                                          : s.label,
+                                    ),
                                   ),
                                 )
                                 .toList(),
@@ -91,6 +95,8 @@ class SourceSettings extends StatelessWidget {
                             ),
                           ],
                         )
+                      else if (source == SourceId.huanmeng)
+                        const Text('使用原站公开 API\n收藏与阅读记录保存在本机，原站验证按提示完成。')
                       else if (source == SourceId.lnovel || source.isRule)
                         Text('公开书源 · 无需登录\n收藏与阅读记录保存在本机')
                       else

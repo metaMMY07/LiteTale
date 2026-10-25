@@ -16,6 +16,8 @@ import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/bili_api_source.dart';
 import 'package:wild/sources/bili_site_source.dart';
 import 'package:wild/services/bili_browser.dart';
+import 'package:wild/services/huanmeng_api_session.dart';
+import 'package:wild/sources/huanmeng_source.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
 import 'package:wild/widgets/wenku8_verification_page.dart';
@@ -64,7 +66,10 @@ class RecommendPage extends StatelessWidget {
                               : state.cause is ShelfApiException ||
                                   state.cause is BiliApiException ||
                                   state.cause is BiliSiteException ||
-                                  state.cause is BiliBrowserException
+                                  state.cause is BiliBrowserException ||
+                                  state.cause is HuanmengVerificationRequired ||
+                                  state.cause is HuanmengApiException ||
+                                  state.cause is HuanmengSourceException
                               ? state.message
                               : '当前书源暂时无法加载推荐，请检查网络后重试。',
                           textAlign: TextAlign.center,
@@ -149,6 +154,7 @@ class RecommendPage extends StatelessWidget {
                   hasMore: state.hasMore,
                   loadingMore: state.loadingMore,
                   moreError: state.moreError,
+                  moreCause: state.moreCause,
                 ),
               );
             }
@@ -182,7 +188,7 @@ class SearchOnlySourceNotice extends StatelessWidget {
             const SizedBox(height: 12),
             const Text('此书源通过搜索查找书籍，未提供首页推荐。'),
             const SizedBox(height: 16),
-              AppButton.filledIcon(
+            AppButton.filledIcon(
               onPressed: onSearch,
               icon: const Icon(Icons.search),
               label: const Text('搜索书名或作者'),
@@ -220,6 +226,7 @@ class RecommendationFeed extends StatelessWidget {
     this.hasMore = false,
     this.loadingMore = false,
     this.moreError,
+    this.moreCause,
   });
 
   final List<w8.HomeBlock> blocks;
@@ -228,6 +235,7 @@ class RecommendationFeed extends StatelessWidget {
   final List<w8.NovelCover> moreBooks;
   final bool hasMore, loadingMore;
   final String? moreError;
+  final Object? moreCause;
 
   @override
   Widget build(BuildContext context) {
@@ -304,11 +312,28 @@ class RecommendationFeed extends StatelessWidget {
                             ),
                           )
                           : Center(
-                            child: AppButton.text(
-                              onPressed:
-                                  () =>
-                                      context.read<RecommendCubit>().loadMore(),
-                              child: Text(moreError!),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                AppButton.text(
+                                  onPressed:
+                                      () =>
+                                          context
+                                              .read<RecommendCubit>()
+                                              .loadMore(),
+                                  child: Text(moreError!),
+                                ),
+                                if (activeSource.value == SourceId.huanmeng)
+                                  BiliRecoveryButton(
+                                    error: moreCause,
+                                    source: SourceId.huanmeng,
+                                    onRecovered:
+                                        () =>
+                                            context
+                                                .read<RecommendCubit>()
+                                                .loadMore(),
+                                  ),
+                              ],
                             ),
                           ),
                 ),
