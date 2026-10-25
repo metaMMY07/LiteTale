@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:path_provider/path_provider.dart';
 import '../test/support/epub_fixture.dart';
+import '../test/support/huanmeng_source.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,10 +13,98 @@ import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/app_launch_screen.dart';
 import 'package:wild/theme/ios_system_colors.dart';
 import 'package:wild/services/reader_page_controller.dart';
+import 'package:wild/services/source_import_file.dart';
+import 'package:wild/settings/rule_source_manager.dart';
+import 'package:wild/sources/rule_source_registry.dart';
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
+  testWidgets(
+    'native JSON document picker imports original Huanmeng source and reloads',
+    (tester) async {
+      var saved = '';
+      final registry = RuleSourceRegistry(
+        read: () async => saved,
+        write: (value) async => saved = value,
+      );
+      addTearDown(registry.dispose);
+      await registry.load(builtIns: []);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: iosGlassTheme(Brightness.light),
+          home: RuleSourceManager(registry: registry),
+        ),
+      );
+      final root = await getApplicationSupportDirectory();
+      final file = File('${root.path}/ios-source-import-fixture.json');
+      await file.writeAsString(huanmengSourceJson);
+      addTearDown(() async {
+        if (await file.exists()) await file.delete();
+      });
+      await tester.tap(find.text('本地文件'));
+      await tester.pump();
+      const methods = MethodChannel('methods');
+      var visible = false;
+      for (var i = 0; i < 40; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        visible =
+            await methods.invokeMethod<bool>('testSourceDocumentPicker') ??
+            false;
+        if (visible) break;
+      }
+      expect(visible, isTrue);
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await binding.takeScreenshot('ios-source-json-native-picker');
+      expect(
+        await methods.invokeMethod<bool>('testSourceDocumentPicker', {
+          'selectPath': file.path,
+        }),
+        isTrue,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('确认导入书源'), findsOneWidget);
+      expect(find.text('幻梦轻小说'), findsOneWidget);
+      expect(saved, isEmpty);
+      await binding.takeScreenshot('ios-source-import-preview');
+      await tester.ensureVisible(find.text('导入所选书源'));
+      await tester.tap(find.text('导入所选书源'));
+      await tester.pumpAndSettle();
+      expect(registry.entries.single.definition.name, '幻梦轻小说');
+      final reload = RuleSourceRegistry(
+        read: () async => saved,
+        write: (_) async {},
+      );
+      addTearDown(reload.dispose);
+      await reload.load(builtIns: []);
+      expect(
+        reload.entries.single.definition.importKey,
+        'https://www.huanmengacg.com',
+      );
+      expect(
+        reload.entries.single.definition.catalogRule?.next?.legado,
+        isNotNull,
+      );
+      await binding.takeScreenshot('ios-source-installed');
+      final canceled = pickSourceImportFile();
+      visible = false;
+      for (var i = 0; i < 40; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        visible =
+            await methods.invokeMethod<bool>('testSourceDocumentPicker') ??
+            false;
+        if (visible) break;
+      }
+      expect(visible, isTrue);
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await methods.invokeMethod<bool>('testSourceDocumentPicker', {
+        'cancel': true,
+      });
+      expect(await canceled, isNull);
+      expect(reload.entries, hasLength(1));
+      expect(tester.takeException(), isNull);
+    },
+  );
   testWidgets('native glass and theme overlay survive a real theme change', (
     tester,
   ) async {
@@ -207,8 +296,9 @@ void main() {
         final offset = (y * frame.image.width + x) * 4;
         if (rgba[offset] < 100 &&
             rgba[offset + 1] < 100 &&
-            rgba[offset + 2] < 100)
+            rgba[offset + 2] < 100) {
           labelPixels++;
+        }
       }
     }
     frame.image.dispose();

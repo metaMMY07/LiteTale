@@ -77,6 +77,32 @@ import MediaPlayer
                 result(applicationSupportsPath)
             } else if call.method == "documentRoot" {
                result(documentsPath)
+            } else if call.method == "testSourceDocumentPicker" {
+                #if targetEnvironment(simulator)
+                // Simulator acceptance drives the real file_selector picker;
+                // this bridge is absent from the device IPA.
+                guard let picker = controller.presentedViewController as? UIDocumentPickerViewController else {
+                    result(false)
+                    return
+                }
+                let args = call.arguments as? [String: Any]
+                if let path = args?["selectPath"] as? String {
+                    let url = URL(fileURLWithPath: path).standardizedFileURL
+                    let root = URL(fileURLWithPath: applicationSupportsPath).standardizedFileURL.path + "/"
+                    guard url.path.hasPrefix(root), FileManager.default.fileExists(atPath: url.path) else {
+                        result(FlutterError(code: "invalid_fixture", message: "Expected an app-owned source fixture", details: nil))
+                        return
+                    }
+                    picker.delegate?.documentPicker?(picker, didPickDocumentsAt: [url])
+                    picker.dismiss(animated: true)
+                } else if args?["cancel"] as? Bool == true {
+                    picker.delegate?.documentPickerWasCancelled?(picker)
+                    picker.dismiss(animated: true)
+                }
+                result(true)
+                #else
+                result(FlutterMethodNotImplemented)
+                #endif
             } else if call.method == "getKeepScreenOn" {
                 result(application.isIdleTimerDisabled)
             }

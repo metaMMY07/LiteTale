@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
@@ -9,6 +10,7 @@ import 'package:http/http.dart' as http;
 
 import 'rule_source_definition.dart';
 import 'rule_source_models.dart';
+import 'scoped_rule_transport.dart';
 
 class RuleSourceLimits {
   const RuleSourceLimits({
@@ -69,7 +71,8 @@ abstract interface class RuleSourceTransport {
 /// Default transport disables automatic redirects and reads the body as a
 /// bounded stream. One client per request means a timeout closes that socket.
 class IoRuleSourceTransport implements RuleSourceTransport {
-  const IoRuleSourceTransport();
+  const IoRuleSourceTransport({this.userAgent});
+  final String? userAgent;
 
   @override
   Future<RuleSourceHttpResponse> get(
@@ -84,6 +87,7 @@ class IoRuleSourceTransport implements RuleSourceTransport {
             ..followRedirects = false
             ..headers['accept'] = 'text/html,application/json;q=0.9,*/*;q=0.5'
             ..headers['accept-encoding'] = 'gzip';
+      if (userAgent != null) request.headers['user-agent'] = userAgent!;
       final response = await client.send(request);
       final headers = <String, String>{
         for (final entry in response.headers.entries)
@@ -133,7 +137,15 @@ class RuleSourceEngine {
     this.definition, {
     RuleSourceTransport? transport,
     this.limits = const RuleSourceLimits(),
-  }) : transport = transport ?? const IoRuleSourceTransport() {
+  }) : transport =
+           transport ??
+           (Platform.isIOS && definition.importKey != null
+               ? ScopedRuleSourceTransport(
+                 origin: definition.baseUrl,
+                 userAgent: definition.userAgent,
+                 cookiesEnabled: definition.cookieJar,
+               )
+               : IoRuleSourceTransport(userAgent: definition.userAgent)) {
     limits.validate(definition.id);
   }
 
@@ -304,7 +316,18 @@ class RuleSourceEngine {
           page.root,
           '正文内容',
         );
-        final sanitized = _sanitizeContent(rawHtml, page.finalUri);
+        final contentField = rule.field('content')!;
+        // Extended Legado @text is already plain text. Do not parse text that
+        // happens to contain angle brackets as executable or structural HTML.
+        final input =
+            contentField.legado != null &&
+                    contentField.kind == RuleValueKind.text
+                ? rawHtml
+                    .split('\n')
+                    .map((line) => '<p>${const HtmlEscape().convert(line)}</p>')
+                    .join()
+                : rawHtml;
+        final sanitized = _sanitizeContent(input, page.finalUri);
         pages.add(sanitized.html);
         images.addAll(sanitized.images);
         count++;
@@ -674,6 +697,12 @@ class RuleSourceEngine {
     required String sourceId,
   }) {
     if (field == null) return '';
+    if (field.legado != null) {
+      final root = context.item ?? context.page.root;
+      return root is dom.Node
+          ? field.legado!.extract(root, first: field.asUrl)
+          : '';
+    }
     final nodes =
         _select(field.selector, context.page, context.item)
             .where(
@@ -713,6 +742,9 @@ class RuleSourceEngine {
       return _selectJsonPath(target, selector.expression);
     }
     final target = item ?? page.root;
+    if (selector.legado != null) {
+      return target is dom.Node ? selector.legado!.select(target) : const [];
+    }
     if (selector.expression == ':scope') {
       if (target is dom.Element) return [target];
       if (target is dom.Document && target.documentElement != null) {

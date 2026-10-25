@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:html/parser.dart' as html_parser;
 
 import 'rule_source_models.dart';
+import 'legado_compatibility.dart';
 
 const _schemaName = 'litetale-rule-source';
 const _schemaVersion = 1;
@@ -22,6 +23,9 @@ class RuleSourceDefinition {
     required this.detailRule,
     required this.catalogRule,
     required this.contentRule,
+    this.userAgent,
+    this.cookieJar = false,
+    this.importKey,
   });
 
   final String id;
@@ -34,6 +38,9 @@ class RuleSourceDefinition {
   final RuleOperation? detailRule;
   final RuleOperation? catalogRule;
   final RuleOperation? contentRule;
+  final String? userAgent;
+  final bool cookieJar;
+  final String? importKey;
 
   RuleSourceCapabilities get capabilities {
     final cover = [
@@ -74,6 +81,9 @@ class RuleSourceDefinition {
         'baseUrl': baseUrl.toString(),
         'version': savedVersion,
         'charset': charset,
+        if (userAgent != null) 'userAgent': userAgent,
+        if (cookieJar) 'cookieJar': true,
+        if (importKey != null) 'importKey': importKey,
       },
       'rules': {
         if (discoverRule != null) 'discover': _operationToJson(discoverRule!),
@@ -105,6 +115,9 @@ class RuleSourceDefinition {
       detailRule: detailRule,
       catalogRule: catalogRule,
       contentRule: contentRule,
+      userAgent: userAgent,
+      cookieJar: cookieJar,
+      importKey: importKey,
     );
   }
 
@@ -134,6 +147,9 @@ class RuleSourceDefinition {
       'baseUrl',
       'version',
       'charset',
+      'userAgent',
+      'cookieJar',
+      'importKey',
     }, 'source');
     final id = _requiredString(source, 'id', 'source');
     if (!RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$').hasMatch(id)) {
@@ -143,6 +159,28 @@ class RuleSourceDefinition {
     final sourceVersion = _requiredString(source, 'version', 'source');
     final baseUrlText = _requiredString(source, 'baseUrl', 'source');
     final baseUrl = _parseBaseUrl(id, baseUrlText);
+    final userAgent = source['userAgent'];
+    if (userAgent != null &&
+        (userAgent is! String ||
+            userAgent.isEmpty ||
+            userAgent.length > 1024 ||
+            userAgent.codeUnits.any((c) => c < 32 || c > 126))) {
+      throw RuleSourceSchemaException(id, 'source.userAgent 必须是有效的静态请求头。');
+    }
+    final cookieJar = source['cookieJar'];
+    if (cookieJar != null && cookieJar is! bool) {
+      throw RuleSourceSchemaException(id, 'source.cookieJar 必须是布尔值。');
+    }
+    final importKey = source['importKey'];
+    if (importKey != null) {
+      if (importKey is! String || importKey.length > 2048) {
+        throw RuleSourceSchemaException(id, 'source.importKey 无效。');
+      }
+      final importUri = _parseBaseUrl(id, importKey);
+      if (importUri.origin != baseUrl.origin) {
+        throw RuleSourceSchemaException(id, '书源导入身份必须与站点同源。');
+      }
+    }
     final rawCharset = source['charset'];
     if (rawCharset != null && rawCharset is! String) {
       throw RuleSourceSchemaException(id, 'source.charset 必须是字符串。');
@@ -176,6 +214,9 @@ class RuleSourceDefinition {
       detailRule: _optionalOperation(id, 'detail', rules['detail']),
       catalogRule: _optionalOperation(id, 'catalog', rules['catalog']),
       contentRule: _optionalOperation(id, 'content', rules['content']),
+      userAgent: userAgent as String?,
+      cookieJar: cookieJar == true,
+      importKey: importKey as String?,
     );
   }
 
@@ -431,10 +472,12 @@ Map<String, dynamic> _fieldToJson(RuleField field) => {
   },
   if (field.attribute != null) 'attribute': field.attribute,
   if (field.matchText != null) 'matchText': field.matchText,
+  if (field.legado != null) 'legado': field.legado!.expression,
+  if (field.asUrl) 'asUrl': true,
 };
 
 String _selectorToJson(RuleSelector selector) =>
-    '${selector.kind == RuleSelectorKind.css ? 'css' : 'json'}:${selector.expression}';
+    '${selector.kind.name}:${selector.expression}';
 
 class RuleItemSet {
   const RuleItemSet({required this.selector, required this.fields});
@@ -448,24 +491,37 @@ class RuleField {
     required this.kind,
     this.attribute,
     this.matchText,
+    this.legado,
+    this.asUrl = false,
   });
 
   final RuleSelector selector;
   final RuleValueKind kind;
   final String? attribute;
   final String? matchText;
+  final LegadoTextRule? legado;
+  final bool asUrl;
 }
 
 enum RuleValueKind { text, html, attribute }
 
 class RuleSelector {
-  const RuleSelector._(this.kind, this.expression);
+  const RuleSelector._(this.kind, this.expression, [this.legado]);
 
   final RuleSelectorKind kind;
   final String expression;
+  final LegadoSelector? legado;
 
   factory RuleSelector.parse(String input, String sourceId, String where) {
     final value = input.trim();
+    if (value.startsWith('legado:')) {
+      final expression = value.substring(7).trim();
+      return RuleSelector._(
+        RuleSelectorKind.legado,
+        expression,
+        LegadoSelector.parse(expression),
+      );
+    }
     if (value.startsWith('css:')) {
       final css = value.substring(4).trim();
       if (css.isEmpty) {
@@ -504,7 +560,7 @@ class RuleSelector {
   }
 }
 
-enum RuleSelectorKind { css, json }
+enum RuleSelectorKind { css, json, legado }
 
 class RuleSourceValidation {
   const RuleSourceValidation.success(this.index, this.definition)
@@ -659,7 +715,14 @@ RuleOperation? _optionalOperation(String sourceId, String name, dynamic raw) {
       ...items.fields.values.map((field) => field.selector.kind),
     if (next != null) next.selector.kind,
   };
-  if (selectorKinds.length > 1) {
+  final responseKinds =
+      selectorKinds
+          .map(
+            (kind) =>
+                kind == RuleSelectorKind.legado ? RuleSelectorKind.css : kind,
+          )
+          .toSet();
+  if (responseKinds.length > 1) {
     throw RuleSourceUnsupportedException(
       sourceId,
       'rules.$name 不能混用 HTML/CSS 与 JSON 响应规则。',
@@ -695,7 +758,14 @@ Map<String, RuleField> _parseFields(
 
 RuleField _parseField(String sourceId, dynamic raw, String where) {
   final map = _asMap(raw, where);
-  _onlyKeys(map, const {'selector', 'value', 'attribute', 'matchText'}, where);
+  _onlyKeys(map, const {
+    'selector',
+    'value',
+    'attribute',
+    'matchText',
+    'legado',
+    'asUrl',
+  }, where);
   final selector = RuleSelector.parse(
     _requiredString(map, 'selector', where),
     sourceId,
@@ -736,11 +806,24 @@ RuleField _parseField(String sourceId, dynamic raw, String where) {
       '$where.matchText 必须是 1–100 字符的 CSS 文本过滤条件。',
     );
   }
+  final legado = map['legado'];
+  final asUrl = map['asUrl'];
+  if (legado != null &&
+      (legado is! String ||
+          selector.kind != RuleSelectorKind.css ||
+          matchText != null)) {
+    throw RuleSourceSchemaException(sourceId, '$where.legado 必须是 HTML 字段规则。');
+  }
+  if (asUrl != null && asUrl is! bool) {
+    throw RuleSourceSchemaException(sourceId, '$where.asUrl 必须是布尔值。');
+  }
   return RuleField(
     selector: selector,
     kind: kind,
     attribute: attribute as String?,
     matchText: matchText as String?,
+    legado: legado is String ? LegadoTextRule.parse(legado) : null,
+    asUrl: asUrl == true,
   );
 }
 

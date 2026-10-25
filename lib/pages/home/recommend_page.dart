@@ -20,6 +20,8 @@ import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
 import 'package:wild/widgets/wenku8_verification_page.dart';
 import 'package:wild/settings/source_settings_page.dart';
+import 'package:wild/sources/rule_source_registry.dart';
+import 'package:wild/pages/search_page.dart';
 
 import 'recommend_cubit.dart';
 
@@ -117,6 +119,24 @@ class RecommendPage extends StatelessWidget {
               );
             }
             if (state is RecommendLoaded) {
+              final rule =
+                  RuleSourceRegistry
+                      .instance[activeSource.value.ruleId]
+                      ?.definition;
+              if (usesAppleGlass &&
+                  rule != null &&
+                  !rule.capabilities.discover &&
+                  rule.capabilities.search) {
+                return SearchOnlySourceNotice(
+                  name: rule.name,
+                  onSearch:
+                      () => Navigator.of(context).push(
+                        HorizontalCoverPageRoute(
+                          builder: (_) => const SearchPage(),
+                        ),
+                      ),
+                );
+              }
               return RefreshIndicator(
                 onRefresh:
                     () =>
@@ -138,6 +158,40 @@ class RecommendPage extends StatelessWidget {
       ),
     );
   }
+}
+
+class SearchOnlySourceNotice extends StatelessWidget {
+  const SearchOnlySourceNotice({
+    super.key,
+    required this.name,
+    required this.onSearch,
+  });
+  final String name;
+  final VoidCallback onSearch;
+  @override
+  Widget build(BuildContext context) => SingleChildScrollView(
+    physics: const AlwaysScrollableScrollPhysics(),
+    padding: const EdgeInsets.all(16),
+    child: AppleGlassCard(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(name, style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            const Text('此书源通过搜索查找书籍，未提供首页推荐。'),
+            const SizedBox(height: 16),
+              AppButton.filledIcon(
+              onPressed: onSearch,
+              icon: const Icon(Icons.search),
+              label: const Text('搜索书名或作者'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 Future<void> _openWenku8Site(BuildContext context) async {

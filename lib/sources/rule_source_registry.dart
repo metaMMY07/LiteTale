@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:wild/src/rust/api/database.dart' as db;
 import 'rules/rule_source.dart';
+import 'rules/legado_compatibility.dart';
 
 class InstalledRuleSource {
   const InstalledRuleSource(
@@ -25,27 +26,66 @@ class InstalledRuleSource {
 }
 
 class SourceImportItem {
-  const SourceImportItem({this.definition, this.error});
+  const SourceImportItem({
+    this.definition,
+    this.error,
+    this.notices = const [],
+    this.name,
+  });
   final RuleSourceDefinition? definition;
   final String? error;
+  final List<String> notices;
+  final String? name;
 }
 
-List<SourceImportItem> inspectSourceImport(String raw) {
+List<SourceImportItem> inspectSourceImport(
+  String raw, {
+  TargetPlatform? platform,
+  Iterable<InstalledRuleSource> installedSources = const [],
+}) {
+  final ios = (platform ?? defaultTargetPlatform) == TargetPlatform.iOS;
   if (utf8.encode(raw).length > 2 * 1024 * 1024) {
     throw const FormatException('书源文件不能超过 2 MB');
   }
-  final decoded = jsonDecode(raw);
+  final decoded = jsonDecode(raw.startsWith('\uFEFF') ? raw.substring(1) : raw);
   final list = decoded is List ? decoded : [decoded];
+  if (ios && list.isEmpty) throw const FormatException('文件中没有书源');
   if (list.length > 100) throw const FormatException('一次最多导入 100 个书源');
   final ids = <String>{};
   return list.map((value) {
     try {
       if (value is! Map) throw const FormatException('书源必须是 JSON 对象');
       final map = Map<String, dynamic>.from(value);
-      final definition =
-          map.containsKey('bookSourceUrl')
-              ? RuleSourceDefinition.fromLegadoJson(map)
-              : RuleSourceDefinition.fromJson(map);
+      RuleSourceDefinition definition;
+      var notices = <String>[];
+      if (map.containsKey('bookSourceUrl')) {
+        try {
+          definition = RuleSourceDefinition.fromLegadoJson(map);
+        } on RuleSourceException {
+          if (!ios) rethrow;
+          final converted = convertLegadoSource(map);
+          definition = RuleSourceDefinition.fromJson(converted.definition);
+          notices = converted.notices;
+        }
+      } else {
+        definition = RuleSourceDefinition.fromJson(map);
+      }
+      if (ios && map['bookSourceUrl'] is String) {
+        final key =
+            Uri.parse((map['bookSourceUrl'] as String).trim()).toString();
+        final matches =
+            installedSources
+                .where((entry) => entry.definition.importKey == key)
+                .toList();
+        final exact =
+            matches
+                .where((entry) => entry.definition.id == definition.id)
+                .firstOrNull;
+        final existing = exact ?? (matches.length == 1 ? matches.single : null);
+        final canonical = definition.toJson(id: existing?.definition.id);
+        (canonical['source'] as Map<String, dynamic>)['importKey'] = key;
+        definition = RuleSourceDefinition.fromJson(canonical);
+      }
       if (!definition.capabilities.detail ||
           !definition.capabilities.catalog ||
           !definition.capabilities.content) {
@@ -58,9 +98,21 @@ List<SourceImportItem> inspectSourceImport(String raw) {
       if (!ids.add(definition.id)) {
         throw FormatException('同一文件出现重复书源 ID：${definition.id}');
       }
-      return SourceImportItem(definition: definition);
+      return SourceImportItem(
+        definition: definition,
+        notices: List.unmodifiable(notices),
+        name: definition.name,
+      );
     } catch (error) {
-      return SourceImportItem(error: '$error');
+      final name =
+          value is Map
+              ? value['bookSourceName'] ??
+                  (value['source'] is Map ? value['source']['name'] : null)
+              : null;
+      return SourceImportItem(
+        error: '$error',
+        name: name is String ? name : null,
+      );
     }
   }).toList();
 }
