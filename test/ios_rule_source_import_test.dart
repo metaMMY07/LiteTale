@@ -273,13 +273,17 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: iosGlassTheme(Brightness.light),
-          home: RuleSourceManager(
-            registry: registry,
-            pickFile:
-                () async => XFile.fromData(
-                  Uint8List.fromList(utf8.encode(huanmengSourceJson)),
-                  name: '幻梦轻小说.json',
-                ),
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: RuleSourceManager(
+                registry: registry,
+                pickFile:
+                    () async => XFile.fromData(
+                      Uint8List.fromList(utf8.encode(huanmengSourceJson)),
+                      name: '幻梦轻小说.json',
+                    ),
+              ),
+            ),
           ),
         ),
       );
@@ -287,6 +291,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('确认导入书源'), findsOneWidget);
       expect(find.text('幻梦轻小说'), findsOneWidget);
+      expect(find.text('此书源通过搜索使用，未提供首页推荐。'), findsOneWidget);
+      expect(find.textContaining('JSON.stringify'), findsNothing);
       expect(writes, 0);
       expect(registry.entries, isEmpty);
       await tester.ensureVisible(find.text('导入所选书源'));

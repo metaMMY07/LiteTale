@@ -382,6 +382,18 @@ class _RuleImportPreviewPageState extends State<RuleImportPreviewPage> {
       );
     }
     final existing = registry[source.id];
+    final notices =
+        usesAppleGlass
+            ? <String>[
+              if (!source.capabilities.discover && source.capabilities.search)
+                '此书源通过搜索使用，未提供首页推荐。',
+              if (!source.capabilities.images) '当前规则仅提供文字阅读，不包含插图。',
+              if (item.notices.any(
+                (notice) => notice.contains('kind') && notice.contains('跳过'),
+              ))
+                '部分分类信息未导入，目录与正文规则已保留。',
+            ]
+            : item.notices;
     return AppleGlassCard(
       child: Column(
         children: [
@@ -402,13 +414,13 @@ class _RuleImportPreviewPageState extends State<RuleImportPreviewPage> {
               '${source.baseUrl.host} · ${source.version}\n${source.capabilities.search ? '支持站内搜索' : '按目录逐页查找'} · 目录与正文 · ${source.capabilities.images ? '支持插图' : '文字阅读'}',
             ),
           ),
-          if (item.notices.isNotEmpty)
+          if (notices.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (final notice in item.notices)
+                  for (final notice in notices)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Text(

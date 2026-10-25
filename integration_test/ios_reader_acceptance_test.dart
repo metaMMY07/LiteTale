@@ -33,7 +33,12 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: iosGlassTheme(Brightness.light),
-          home: RuleSourceManager(registry: registry),
+          home: Scaffold(
+            appBar: AppBar(title: const Text('书源与账号')),
+            body: SingleChildScrollView(
+              child: RuleSourceManager(registry: registry),
+            ),
+          ),
         ),
       );
       final root = await getApplicationSupportDirectory();
@@ -54,7 +59,7 @@ void main() {
         if (visible) break;
       }
       expect(visible, isTrue);
-      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await Future<void>.delayed(const Duration(seconds: 2));
       await binding.takeScreenshot('ios-source-json-native-picker');
       expect(
         await methods.invokeMethod<bool>('testSourceDocumentPicker', {
