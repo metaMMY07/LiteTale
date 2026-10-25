@@ -24,15 +24,20 @@ LiteTale 1.0.0 提供 Android ARM64 手机／平板版、x86_64 模拟器版和 
 
 完整功能和安装包校验值见 [1.0.0 发布记录](docs/releases/1.0.0.md)。
 
-### iOS 界面预览
+### 界面预览
 
-以下为 iOS 端界面。
+展示 iOS 与 Android 端的主要界面。
 
 <table>
   <tr>
     <td align="center"><img src="assets/screenshots/ios-1.0.0/01-discover-ios.png" width="230" alt="iOS 文库8发现页"><br>发现</td>
     <td align="center"><img src="assets/screenshots/ios-1.0.0/02-history-ios.png" width="230" alt="iOS 阅读历史页"><br>阅读历史</td>
     <td align="center"><img src="assets/screenshots/ios-1.0.0/03-my-ios.png" width="230" alt="iOS 我的页面"><br>我的</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="assets/screenshots/v1.0.0/01-discover.png" width="230" alt="Android 发现首页"><br>发现 · Android</td>
+    <td align="center"><img src="assets/screenshots/v1.0.0/02-bookshelf.png" width="230" alt="Android 在线书架"><br>书架 · Android</td>
+    <td align="center"><img src="assets/screenshots/v1.0.0/03-my.png" width="230" alt="Android 我的页面"><br>我的 · Android</td>
   </tr>
 </table>
 
