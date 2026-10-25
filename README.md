@@ -8,6 +8,8 @@
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
+> **开发公告（2026-10-25）**：因本人课业较为繁重，LiteTale 暂缓开发。感谢理解。
+
 ## 最新正式版（2026-10-24）
 
 [Android build75：ARM64](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-build75/LiteTale-1.0.0-build75-arm64-v8a.apk) · [x86_64](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-build75/LiteTale-1.0.0-build75-x86_64.apk) · [iOS build13 IPA（未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-build75/LiteTale-1.0.0-ios-13-unsigned.ipa) · [发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v1.0.0-build75)
@@ -22,20 +24,15 @@ LiteTale 1.0.0 提供 Android ARM64 手机／平板版、x86_64 模拟器版和 
 
 完整功能和安装包校验值见 [1.0.0 发布记录](docs/releases/1.0.0.md)。
 
-### 界面预览
+### iOS 界面预览
 
-以下截图均为 v1.0.0 的竖屏界面，包含首页、书架、设置与真实 EPUB 原书样式。
+以下为 iOS 端界面。
 
 <table>
   <tr>
-    <td align="center"><img src="assets/screenshots/v1.0.0/01-discover.png" width="230" alt="发现首页"><br>发现首页</td>
-    <td align="center"><img src="assets/screenshots/v1.0.0/02-bookshelf.png" width="230" alt="在线书架"><br>在线书架</td>
-    <td align="center"><img src="assets/screenshots/v1.0.0/03-my.png" width="230" alt="我的页面"><br>我的页面</td>
-  </tr>
-  <tr>
-    <td align="center"><img src="assets/screenshots/v1.0.0/04-display.png" width="230" alt="显示设置"><br>显示设置</td>
-    <td align="center"><img src="assets/screenshots/v1.0.0/05-font-settings.png" width="230" alt="全局与阅读字体设置"><br>字体设置</td>
-    <td align="center"><img src="assets/screenshots/v1.0.0/06-real-epub-css.png" width="230" alt="真实 EPUB 原书标题页与 CSS 样式"><br>真实 EPUB 原书样式</td>
+    <td align="center"><img src="assets/screenshots/ios-1.0.0/01-discover-ios.png" width="230" alt="iOS 文库8发现页"><br>发现</td>
+    <td align="center"><img src="assets/screenshots/ios-1.0.0/02-history-ios.png" width="230" alt="iOS 阅读历史页"><br>阅读历史</td>
+    <td align="center"><img src="assets/screenshots/ios-1.0.0/03-my-ios.png" width="230" alt="iOS 我的页面"><br>我的</td>
   </tr>
 </table>
 
