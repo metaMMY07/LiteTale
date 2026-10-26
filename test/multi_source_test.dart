@@ -26,6 +26,15 @@ void main() {
   tearDown(() => activeSource.value = SourceId.wenku8);
 
   test(
+    'retired ESJ stays out of choices without invalidating existing IDs',
+    () {
+      expect(api.availableSources, isNot(contains(SourceId.esj)));
+      expect(sourceOf('esj:1788983302'), SourceId.esj);
+      expect(api.sourceAdapter(SourceId.esj).id, SourceId.esj);
+    },
+  );
+
+  test(
     'live native adapter loads anonymous book cards',
     () async {
       final original = HttpOverrides.current;

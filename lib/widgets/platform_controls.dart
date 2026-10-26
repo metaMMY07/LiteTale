@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/theme/ios_system_colors.dart';
+import 'package:wild/theme/material_you.dart';
+import 'package:wild/widgets/material_choice_controls.dart';
 
 enum _ButtonKind { filled, tonal, outlined, text, elevated }
 
@@ -456,6 +458,17 @@ class AppSegmentedButton<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!usesAppleGlass) {
+      if (usesMaterialYou) {
+        return MaterialChoiceBar<T>(
+          segments: segments,
+          selected: selected,
+          onSelectionChanged: onSelectionChanged,
+          showSelectedIcon: showSelectedIcon,
+          multiSelectionEnabled: multiSelectionEnabled,
+          emptySelectionAllowed: emptySelectionAllowed,
+          style: style,
+        );
+      }
       return SegmentedButton<T>(
         segments: segments,
         selected: selected,
@@ -779,16 +792,19 @@ class AppPopupMenuButton<T> extends StatelessWidget {
     this.child,
     this.tooltip,
     this.enabled = true,
+    this.constraints,
   });
   final PopupMenuItemBuilder<T> itemBuilder;
   final PopupMenuItemSelected<T>? onSelected;
   final Widget? icon, child;
   final String? tooltip;
   final bool enabled;
+  final BoxConstraints? constraints;
   @override
   Widget build(BuildContext context) {
     if (!usesAppleGlass) {
       return PopupMenuButton<T>(
+        constraints: constraints,
         itemBuilder: itemBuilder,
         onSelected: onSelected,
         icon: icon,

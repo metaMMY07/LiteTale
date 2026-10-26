@@ -37,10 +37,70 @@ Map<String, dynamic> _chapters({int bid = 794, int cid = 763}) => _data({
 Uri _target(String operation, [Map<String, String> query = const {}]) =>
     HuanmengSource.origin
         .resolve('/index.php/bookapi/$operation')
-        .replace(queryParameters: {'password': 'bookapi', ...query});
+        .replace(queryParameters: {'password': 'chiyu666', ...query});
 
 void main() {
+  test(
+    'password-change announcement is rejected as content and as verification',
+    () async {
+      final envelope = _data({
+        'content':
+            '<p>由于有人恶意倒卖此书源，目前已修改端口密码</p><p>接口密码错误，无法获取数据，请联系开发者获取新的接口密码</p>',
+      });
+      final source = HuanmengSource(
+        transport: _Transport((_) async => envelope),
+      );
+      await expectLater(
+        source.chapter('hm:794', 'hm:794:763'),
+        throwsA(isA<HuanmengSourceException>()),
+      );
+      expect(
+        HuanmengSource.canVerifyResponse(
+          _target('content', {'bid': '794', 'cid': '763'}),
+          envelope,
+        ),
+        isFalse,
+      );
+    },
+  );
   group('Huanmeng public API declarations with artificial fixtures', () {
+    test(
+      '9.0 page-local counters do not truncate the library after page one',
+      () async {
+        final source = HuanmengSource(
+          transport: _Transport((uri) async {
+            final page = int.parse(uri.queryParameters['page']!);
+            return _data({
+              'list': List.generate(20, (i) => _book(page * 100 + i)),
+              'total': 20,
+              'page': page,
+              'size': 20,
+              'pages': 1,
+            });
+          }),
+        );
+        expect((await source.list()).maxPage, 2);
+        expect((await source.list(page: 2)).maxPage, 3);
+      },
+    );
+
+    test(
+      'an ignored requested page is rejected before appending records',
+      () async {
+        final source = HuanmengSource(
+          transport: _Transport(
+            (_) async => _data({
+              'list': [_book()],
+              'total': 1,
+              'page': 1,
+              'size': 20,
+              'pages': 1,
+            }),
+          ),
+        );
+        await expectLater(source.list(page: 2), throwsFormatException);
+      },
+    );
     test(
       'discovery uses the unfiltered latest search and keeps a local stable id',
       () async {
@@ -48,7 +108,7 @@ void main() {
           expect(uri.origin, HuanmengSource.origin.origin);
           expect(uri.path, '/index.php/bookapi/search');
           expect(uri.queryParameters, {
-            'password': 'bookapi',
+            'password': 'chiyu666',
             'page': '1',
             'size': '20',
           });
@@ -73,7 +133,7 @@ void main() {
     test('list only uses the declared tags and state parameters', () async {
       final transport = _Transport((uri) async {
         expect(uri.queryParameters, {
-          'password': 'bookapi',
+          'password': 'chiyu666',
           'page': '2',
           'size': '20',
           'tags': '17',
@@ -225,11 +285,11 @@ void main() {
           '/index.php/bookapi/chapters',
         ]);
         expect(transport.visited.first.queryParameters, {
-          'password': 'bookapi',
+          'password': 'chiyu666',
           'id': '794',
         });
         expect(transport.visited.last.queryParameters, {
-          'password': 'bookapi',
+          'password': 'chiyu666',
           'id': '794',
           'size': '5000',
         });
@@ -414,7 +474,7 @@ void main() {
         final transport = _Transport((uri) async {
           expect(uri.path, '/index.php/bookapi/content');
           expect(uri.queryParameters, {
-            'password': 'bookapi',
+            'password': 'chiyu666',
             'bid': '794',
             'cid': '763',
           });

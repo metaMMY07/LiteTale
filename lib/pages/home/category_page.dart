@@ -9,6 +9,7 @@ import 'package:wild/sources/source_api.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
 import 'package:wild/widgets/app_loading_indicator.dart';
+import 'package:wild/theme/material_you.dart';
 
 class CategoryPage extends StatefulWidget {
   final String? initialTag;
@@ -230,33 +231,72 @@ class _CategoryPageState extends State<CategoryPage> {
                           )
                           : AppPopupMenuButton<String>(
                             tooltip: '分类',
+                            constraints:
+                                usesMaterialYou
+                                    ? BoxConstraints.tightFor(
+                                      width: (MediaQuery.sizeOf(context).width -
+                                              32)
+                                          .clamp(0.0, 320.0),
+                                    )
+                                    : null,
                             child: Container(
+                              constraints:
+                                  usesMaterialYou
+                                      ? BoxConstraints(
+                                        minHeight: 56,
+                                        maxWidth:
+                                            MediaQuery.sizeOf(context).width <
+                                                    600
+                                                ? 120
+                                                : 200,
+                                      )
+                                      : null,
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
+                                horizontal: 16,
                                 vertical: 8,
                               ),
                               decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: Theme.of(context).dividerColor,
+                                color:
+                                    usesMaterialYou
+                                        ? materialSurface(
+                                          Theme.of(context).colorScheme,
+                                          Theme.of(
+                                            context,
+                                          ).colorScheme.surfaceContainerHigh,
+                                          .08,
+                                        )
+                                        : null,
+                                border:
+                                    usesMaterialYou
+                                        ? null
+                                        : Border.all(
+                                          color: Theme.of(context).dividerColor,
+                                        ),
+                                borderRadius: BorderRadius.circular(
+                                  usesMaterialYou ? 20 : 8,
                                 ),
-                                borderRadius: BorderRadius.circular(8),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Text(
-                                    _selectedTag ?? '分类',
-                                    style: TextStyle(
-                                      color:
-                                          _selectedTag != null
-                                              ? Theme.of(
-                                                context,
-                                              ).colorScheme.primary
-                                              : null,
-                                      fontWeight:
-                                          _selectedTag != null
-                                              ? FontWeight.bold
-                                              : FontWeight.normal,
+                                  Flexible(
+                                    child: Text(
+                                      _selectedTag ?? '分类',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color:
+                                            _selectedTag != null
+                                                ? Theme.of(
+                                                  context,
+                                                ).colorScheme.primary
+                                                : null,
+                                        fontWeight:
+                                            _selectedTag != null
+                                                ? FontWeight.bold
+                                                : FontWeight.normal,
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(width: 4),

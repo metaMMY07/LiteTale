@@ -68,7 +68,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/ios-acceptance
-          flutter drive --driver=test_driver/ios_reader_acceptance.dart --target=integration_test/ios_reader_acceptance_test.dart -d "$SIMULATOR_ID" --no-pub 2>&1 | tee build/ios-acceptance/acceptance.log
+          flutter drive --driver=test_driver/ios_reader_acceptance.dart --target=integration_test/ios_reader_acceptance_test.dart -d "$SIMULATOR_ID" --no-pub --dart-define=HUANMENG_LIVE_TEST=true 2>&1 | tee build/ios-acceptance/acceptance.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

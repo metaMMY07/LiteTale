@@ -58,7 +58,8 @@ class HuanmengBudget {
   }
 }
 
-/// Native adapter for the four public endpoints in the author's 8.1 rule.
+/// Public API contract confirmed against timyang2005/HuanmengPlugin's 9.0
+/// adapter. The published integration key is not a user account credential.
 /// These declarations are not evidence that the current network is reachable.
 class HuanmengSource implements BookSource {
   HuanmengSource({
@@ -69,6 +70,8 @@ class HuanmengSource implements BookSource {
   }
 
   static final Uri origin = Uri.parse('https://www.huanmengacg.com/');
+  // https://github.com/timyang2005/HuanmengPlugin/blob/d285de64fdc6092d012f245619d759468ca31278/README.md
+  static const publicApiKey = 'chiyu666';
   static const _pageSize = 20;
   static const _catalogPageSize = 5000;
   final HuanmengTransport transport;
@@ -125,9 +128,11 @@ class HuanmengSource implements BookSource {
                 _numeric(data['cid'], '正文章节编号') != cid)) {
           return false;
         }
-        return _readerText(
+        final content = _readerText(
           _text(data['content'], '正文', required: true),
-        ).isNotEmpty;
+        );
+        _rejectAccessNotice(content);
+        return content.isNotEmpty;
       }
       final catalog = operation == 'chapters';
       final bid = catalog ? parameter('id') : null;
@@ -227,7 +232,10 @@ class HuanmengSource implements BookSource {
         ),
       );
     }
-    final total = _total(data);
+    if (data.containsKey('page') && '${data['page']}' != '$page') {
+      throw const FormatException('幻梦书目分页未前进');
+    }
+    final total = _pageTotal(data, rows.length, page, _pageSize);
     int maxPage;
     if (total != null) {
       if (total > budget.maxListPages * _pageSize) {
@@ -305,7 +313,7 @@ class HuanmengSource implements BookSource {
         if (page > 1) 'page': '$page',
       }, clock);
       final rows = _rows(data, '章节列表', _catalogPageSize);
-      final total = _total(data);
+      final total = _pageTotal(data, rows.length, page, _catalogPageSize);
       if (total != null) {
         if (total > budget.maxChapters) {
           throw HuanmengSourceException('幻梦目录超过 ${budget.maxChapters} 章上限');
@@ -377,6 +385,7 @@ class HuanmengSource implements BookSource {
         maxCharacters: budget.maxContentCharacters,
       );
       clock.check();
+      _rejectAccessNotice(content);
       if (content.isEmpty) throw const HuanmengSourceException('幻梦章节正文为空');
       return SourceChapter(content);
     });
@@ -390,7 +399,7 @@ class HuanmengSource implements BookSource {
     clock.check();
     final uri = origin
         .resolve('/index.php/bookapi/$endpoint')
-        .replace(queryParameters: {'password': 'bookapi', ...query});
+        .replace(queryParameters: {'password': publicApiKey, ...query});
     final remaining = clock.remaining;
     final timeout =
         remaining < budget.requestTimeout ? remaining : budget.requestTimeout;
@@ -403,6 +412,24 @@ class HuanmengSource implements BookSource {
     clock.check();
     _checkFailure(envelope);
     return _map(envelope['data'], 'API data');
+  }
+
+  static int? _pageTotal(
+    Map<String, dynamic> data,
+    int rows,
+    int page,
+    int size,
+  ) {
+    // The current published API reports total=rows and pages=1 on EVERY page,
+    // even page two. Those are page-local counters, not the library's size.
+    // Preserve strict global-total checks for envelopes without this signature.
+    if ('${data['page']}' == '$page' &&
+        '${data['size']}' == '$size' &&
+        '${data['pages']}' == '1' &&
+        '${data['total']}' == '$rows') {
+      return null;
+    }
+    return _total(data);
   }
 
   Future<T> _operation<T>(Future<T> Function(_Clock) run) {
@@ -609,6 +636,18 @@ void _checkFailure(Map<String, dynamic> envelope) {
   }
   // Success code values have not been observed on the live API. Valid required
   // data, not a guessed code=0/1/200 convention, determines successful parsing.
+}
+
+void _rejectAccessNotice(String text) {
+  final normalized = text.replaceAll(RegExp(r'\s+'), '');
+  if (normalized.length <= 4096 &&
+      (normalized.contains('接口密码错误') || normalized.contains('接口密碼錯誤')) &&
+      (normalized.contains('无法获取数据') ||
+          normalized.contains('無法獲取數據') ||
+          normalized.contains('新的接口密码') ||
+          normalized.contains('新的接口密碼'))) {
+    throw const HuanmengSourceException('幻梦原站已更换接口密码，当前接口暂不可用，请切换其他书源。');
+  }
 }
 
 String? _imageUrl(String raw) {

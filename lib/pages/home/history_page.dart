@@ -7,6 +7,7 @@ import 'package:wild/widgets/cached_image.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:intl/intl.dart';
 import 'package:wild/widgets/app_loading_indicator.dart';
+import 'package:wild/theme/material_you.dart';
 
 import 'history_cubit.dart';
 
@@ -53,7 +54,7 @@ class HistoryPage extends StatelessWidget {
           ),
         ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(56),
+          preferredSize: Size.fromHeight(usesMaterialYou ? 64 : 56),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child:

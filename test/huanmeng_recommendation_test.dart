@@ -21,6 +21,38 @@ void main() {
     sourceRevision.value = revision;
   });
   test(
+    'ESJ native feed starts at page one and continues at page two',
+    () async {
+      activeSource.value = SourceId.esj;
+      final pages = <int>[];
+      final cubit = RecommendCubit(
+        loadWenku8: () async => throw StateError('Wrong source'),
+        loadShelf: (_) async => throw StateError('Wrong source'),
+        loadMore: (source, page) async {
+          expect(source, SourceId.esj);
+          pages.add(page);
+          return PageStatsNovelCover(
+            currentPage: page,
+            maxPage: 2,
+            records: [
+              NovelCover(
+                aid: 'esj:$page',
+                detailUrl: '',
+                title: '测试 $page',
+                img: '',
+              ),
+            ],
+          );
+        },
+      );
+      addTearDown(cubit.close);
+      await cubit.load();
+      await cubit.loadMore();
+      expect(pages, [1, 2]);
+      expect((cubit.state as RecommendLoaded).moreBooks.single.aid, 'esj:2');
+    },
+  );
+  test(
     'Huanmeng home starts on page one and loads page two without repeating page one',
     () async {
       final requests = <int>[];
@@ -116,7 +148,7 @@ void main() {
       var calls = 0;
       final challenge = HuanmengVerificationRequired(
         Uri.parse(
-          'https://www.huanmengacg.com/index.php/bookapi/search?password=bookapi&page=2&size=20',
+          'https://www.huanmengacg.com/index.php/bookapi/search?password=chiyu666&page=2&size=20',
         ),
         sourceRevision.value,
       );

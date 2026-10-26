@@ -15,9 +15,10 @@ import 'rule_source_registry.dart';
 import 'rule_book_source.dart';
 import 'local_epub_source.dart';
 import 'huanmeng_source.dart';
+import 'esj_source.dart';
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, TargetPlatform;
-import 'package:wild/services/huanmeng_api_session.dart';
+import 'package:wild/services/huanmeng_http_transport.dart';
 import 'package:wild/services/epub/local_epub_library.dart';
 import 'package:wild/services/reading_progress.dart';
 import 'package:wild/services/wenku8_read_repository.dart';
@@ -285,15 +286,25 @@ final biliSource = BiliSiteSource(
   chapterLoader: BiliBrowserSession.instance.chapter,
   documentLoader: BiliBrowserSession.instance.document,
 );
-final huanmengSource = HuanmengSource(transport: HuanmengApiSession.instance);
+final huanmengSource = HuanmengSource(
+  // The published 9.0 API is anonymous on both mobile platforms. The iOS
+  // reader should not wait for an offstage WebKit renderer before every read.
+  transport: HuanmengHttpTransport(
+    userAgent:
+        defaultTargetPlatform == TargetPlatform.iOS
+            ? HuanmengHttpTransport.iosUserAgent
+            : null,
+  ),
+);
+final esjSource = EsjSource();
 final Map<SourceId, BookSource> bookSources = {
   SourceId.wenku8: Wenku8Source(),
   SourceId.lightNovelShelf: shelfSource,
   SourceId.lnovel: lnovelSource,
   SourceId.bili: biliSource,
+  SourceId.esj: esjSource,
   SourceId.localEpub: LocalEpubSource(),
-  if (defaultTargetPlatform == TargetPlatform.iOS)
-    SourceId.huanmeng: huanmengSource,
+  SourceId.huanmeng: huanmengSource,
 };
 
 BookSource sourceAdapter(SourceId source) =>
@@ -303,14 +314,26 @@ bool sourceUsesCatalogSearch(SourceId source) =>
     (bookSources[source] is RuleBookSource &&
         !(bookSources[source] as RuleBookSource).hasSearch);
 bool sourceSupportsAuthorSearch(SourceId source) =>
-    source == SourceId.wenku8 || source == SourceId.lightNovelShelf;
+    source == SourceId.wenku8 ||
+    source == SourceId.lightNovelShelf ||
+    source == SourceId.esj;
 List<SourceId> get availableSources =>
     SourceId.values
-        .where((s) => s != SourceId.localEpub && bookSources.containsKey(s))
+        // ESJ is retired from discovery choices. Keep its adapter and stable IDs
+        // so this never deletes or rewrites an existing book or reading record.
+        .where(
+          (s) =>
+              s != SourceId.localEpub &&
+              s != SourceId.esj &&
+              bookSources.containsKey(s),
+        )
         .toList();
 bool _ruleListenerAttached = false;
 bool _wenkuInvalidationAttached = false;
 Map<String, String> ruleImageHeaders(SourceId source) {
+  if (source == SourceId.esj) {
+    return const {'Referer': 'https://www.esjzone.cc/'};
+  }
   if (source == SourceId.huanmeng) {
     return const {'Referer': 'https://www.huanmengacg.com/'};
   }

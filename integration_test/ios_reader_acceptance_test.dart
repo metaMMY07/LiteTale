@@ -18,6 +18,8 @@ import 'package:wild/services/source_import_file.dart';
 import 'package:wild/settings/rule_source_manager.dart';
 import 'package:wild/sources/rule_source_registry.dart';
 import 'package:wild/services/huanmeng_api_session.dart';
+import 'package:wild/services/huanmeng_http_transport.dart';
+import 'package:wild/sources/huanmeng_source.dart';
 import 'package:wild/widgets/wenku_webview.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' as api;
@@ -25,6 +27,67 @@ import 'package:wild/sources/source_api.dart' as api;
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
+  testWidgets(
+    'built-in Huanmeng uses direct HTTP on iOS and reads real public chapters',
+    (tester) async {
+      expect(Platform.isIOS, isTrue);
+      expect(api.availableSources, contains(SourceId.huanmeng));
+      expect(api.availableSources, isNot(contains(SourceId.esj)));
+      final source = api.huanmengSource;
+      expect(source.transport, isA<HuanmengHttpTransport>());
+      final stopwatch = Stopwatch()..start();
+      final first = await source.list();
+      final second = await source.list(page: 2);
+      expect(first.records, isNotEmpty);
+      expect(
+        second.records.any(
+          (book) => !first.records.any((a) => a.aid == book.aid),
+        ),
+        isTrue,
+      );
+      final search = await source.search('败北', 'title', 1);
+      expect(search.records.any((book) => book.aid == 'hm:4799'), isTrue);
+      final detail = await source.detail('hm:4799');
+      final chapters = detail.volumes.expand((volume) => volume.chapters);
+      expect(chapters.any((chapter) => chapter.cid == 'hm:4799:1841'), isTrue);
+      final chapter = await source.chapter('hm:4799', 'hm:4799:1841');
+      expect(chapter.content.length, greaterThan(200));
+      expect(chapter.content, isNot(contains('接口密码错误')));
+      expect(chapter.content, isNot(contains('书籍下架通知')));
+      final result = {
+        'platform': 'iOS simulator native Dart HTTP',
+        'list': first.records.length,
+        'next': second.records.length,
+        'search': search.records.length,
+        'chapters': chapters.length,
+        'chapterCharacters': chapter.content.length,
+        'elapsedMs': stopwatch.elapsedMilliseconds,
+      };
+      stdout.writeln('HUANMENG_IOS_LIVE_RESULT=${jsonEncode(result)}');
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: iosGlassTheme(Brightness.light),
+          home: Scaffold(
+            appBar: AppBar(title: const Text('幻梦轻小说')),
+            body: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('原站公开接口：搜索、目录、正文通过'),
+                Text('书名：${detail.info.title}'),
+                Text('目录：${chapters.length}章'),
+                Text('正文：${chapter.content.length}字符'),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await binding.takeScreenshot('huanmeng-ios-direct-api-live');
+      expect(tester.takeException(), isNull);
+    },
+    skip: !const bool.fromEnvironment('HUANMENG_LIVE_TEST'),
+    timeout: const Timeout(Duration(seconds: 90)),
+  );
   testWidgets(
     'native Huanmeng browser protocol handles JSON, 429 and byte bounds with offline fixtures',
     (tester) async {
@@ -45,7 +108,7 @@ void main() {
         await web.loadUrl('about:blank');
         await tester.pump(const Duration(milliseconds: 300));
         final uri = Uri.parse(
-          'https://www.huanmengacg.com/index.php/bookapi/content?password=bookapi&bid=7&cid=11',
+          'https://www.huanmengacg.com/index.php/bookapi/content?password=${HuanmengSource.publicApiKey}&bid=7&cid=11',
         );
         // Only the app-authored request/probe runs in real WebKit. Fetch is stubbed;
         // no successful live-source request or Cloudflare clearance is implied.
