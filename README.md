@@ -8,6 +8,8 @@
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
+> **开发公告（2026-10-25）**：因本人课业较为繁重，LiteTale 暂缓开发。欢迎使用者继续提出建议，帮助改进软件。
+
 ## 最新正式版 LiteTale 1.1.0（2026-10-26）
 
 [下载 Android ARM64 APK（build 77）](https://github.com/metaMMY07/LiteTale/releases/download/v1.1.0/LiteTale-1.1.0%2B77-arm64-v8a.apk) · [下载 iOS IPA（build 18，未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.1.0/LiteTale-1.1.0-ios-18-unsigned.ipa) · [发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v1.1.0)
