@@ -48,6 +48,8 @@ jobs:
           flutter precache --ios
           flutter pub get --enforce-lockfile
           cd ios && pod install
+      - name: Check Dart dependencies before native compilation
+        run: dart analyze --no-fatal-warnings lib integration_test
       - name: Boot an iOS 26 phone
         run: |
           python3 - <<'PY'

@@ -83,6 +83,7 @@ class RecommendCubit extends Cubit<RecommendState> {
   final Future<w8.PageStatsNovelCover> Function(SourceId, int) _loadMore;
   static Future<w8.PageStatsNovelCover> _page(SourceId source, int page) {
     if (source == SourceId.huanmeng) return w8.huanmengSource.list(page: page);
+    if (source == SourceId.esj) return w8.esjSource.list(page: page);
     if (source == SourceId.bili) {
       return w8.biliSource.listPage(page, mode: 'all');
     }
@@ -116,7 +117,7 @@ class RecommendCubit extends Cubit<RecommendState> {
       };
       final additional =
           result.records.where((book) => seen.add(book.aid)).toList();
-      if (source == SourceId.huanmeng &&
+      if ((source == SourceId.huanmeng || source == SourceId.esj) &&
           result.records.isNotEmpty &&
           additional.isEmpty) {
         throw const HuanmengSourceException('原站续页未提供新书籍，请稍后刷新。');
@@ -167,12 +168,14 @@ class RecommendCubit extends Cubit<RecommendState> {
     emit(RecommendLoading());
     // The optional feed must never prevent the existing Wenku8 page loading.
     final shelfBooks =
-        source == SourceId.huanmeng
+        source == SourceId.huanmeng || source == SourceId.esj
             ? Future.value(const <LightNovelShelfBook>[])
             : _loadOptionalShelf(forceRefresh);
     try {
       final first =
-          source == SourceId.huanmeng ? await _loadMore(source, 1) : null;
+          source == SourceId.huanmeng || source == SourceId.esj
+              ? await _loadMore(source, 1)
+              : null;
       final blocks =
           first == null
               ? await _loadWenku8()

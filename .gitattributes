@@ -1,0 +1,2 @@
+# Preserve the original byte fixture used by source import checksum tests.
+test/fixtures/huanmeng-source.json -text
