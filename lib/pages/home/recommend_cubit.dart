@@ -1,4 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:wild/services/read_request.dart';
 import 'package:wild/services/light_novel_shelf_service.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/huanmeng_source.dart' show HuanmengSourceException;
@@ -79,6 +80,7 @@ class RecommendCubit extends Cubit<RecommendState> {
   final Future<List<LightNovelShelfBook>> Function(bool forceRefresh)
   _loadShelf;
   int _loadGeneration = 0;
+  ReadRequest? _readRequest, _moreRequest;
   bool _paging = false;
   final Future<w8.PageStatsNovelCover> Function(SourceId, int) _loadMore;
   static Future<w8.PageStatsNovelCover> _page(SourceId source, int page) {
@@ -94,7 +96,17 @@ class RecommendCubit extends Cubit<RecommendState> {
     throw UnsupportedError('此书源未提供首页续页，请从全部页面浏览');
   }
 
-  Future<void> loadMore() async {
+  Future<void> loadMore() {
+    final before = state;
+    if (_paging || before is! RecommendLoaded || !before.hasMore) {
+      return Future.value();
+    }
+    _moreRequest?.cancel();
+    final request = _moreRequest = ReadRequest();
+    return ReadRequest.run(request, _loadMorePage);
+  }
+
+  Future<void> _loadMorePage() async {
     final before = state;
     if (_paging || before is! RecommendLoaded || !before.hasMore) return;
     final generation = _loadGeneration,
@@ -156,6 +168,13 @@ class RecommendCubit extends Cubit<RecommendState> {
   }
 
   Future<void> load({bool forceRefresh = false}) async {
+    _readRequest?.cancel();
+    _moreRequest?.cancel();
+    final request = _readRequest = ReadRequest();
+    await ReadRequest.run(request, () => _load(forceRefresh: forceRefresh));
+  }
+
+  Future<void> _load({bool forceRefresh = false}) async {
     final generation = ++_loadGeneration;
     _paging = false;
     final source = activeSource.value;
@@ -230,5 +249,13 @@ class RecommendCubit extends Cubit<RecommendState> {
     } catch (_) {
       return const [];
     }
+  }
+
+  @override
+  Future<void> close() {
+    _loadGeneration++;
+    _readRequest?.cancel();
+    _moreRequest?.cancel();
+    return super.close();
   }
 }

@@ -1,4 +1,5 @@
 import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/services/read_request.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/source_api.dart' as api;
@@ -9,6 +10,7 @@ import 'package:wild/widgets/bili_recovery_button.dart';
 import 'package:wild/sources/rule_book_source.dart';
 import 'package:wild/sources/huanmeng_categories.dart';
 import 'package:wild/sources/huanmeng_source.dart' show HuanmengSourceException;
+import 'package:wild/sources/esj_source.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 
 /// Uses the same card grid, tabs and color scheme as the Wenku8 catalogue.
@@ -28,6 +30,7 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
   Object? _error;
   bool _errorMore = false;
   int _request = 0;
+  ReadRequest? _readRequest;
   final _source = activeSource.value;
   @override
   void initState() {
@@ -39,10 +42,18 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
   @override
   void dispose() {
     _request++;
+    _readRequest?.cancel();
     super.dispose();
   }
 
-  Future<void> _load({bool more = false}) async {
+  Future<void> _load({bool more = false}) {
+    if (more && _loading) return Future.value();
+    _readRequest?.cancel();
+    final request = _readRequest = ReadRequest();
+    return ReadRequest.run(request, () => _loadPage(more: more));
+  }
+
+  Future<void> _loadPage({bool more = false}) async {
     final request = ++_request;
     final revision = sourceRevision.value;
     bool currentBiliRequest() =>
@@ -58,13 +69,31 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
       if (!more) _page = null;
     });
     try {
-      if (_source == SourceId.huanmeng) {
-        if (widget.mode == 'category') _categories = huanmengCategories;
-        final result = await api.huanmengSource.list(
-          page: number,
-          tag: widget.mode == 'category' ? _category : null,
-          state: widget.mode == 'rank' ? 2 : null,
-        );
+      if (_source == SourceId.huanmeng || _source == SourceId.esj) {
+        if (widget.mode == 'category') {
+          _categories =
+              _source == SourceId.esj
+                  ? EsjSource.categories
+                  : huanmengCategories;
+        }
+        final result =
+            _source == SourceId.esj
+                ? await api.esjSource.list(
+                  page: number,
+                  keyword:
+                      widget.mode == 'category' && _category != null
+                          ? EsjSource.categories.firstWhere(
+                                (c) => c['Id'] == _category,
+                              )['Name']
+                              as String
+                          : null,
+                  popular: widget.mode == 'rank',
+                )
+                : await api.huanmengSource.list(
+                  page: number,
+                  tag: widget.mode == 'category' ? _category : null,
+                  state: widget.mode == 'rank' ? 2 : null,
+                );
         if (!mounted ||
             request != _request ||
             revision != sourceRevision.value ||

@@ -5,6 +5,8 @@ import 'package:wild/sources/book_source.dart';
 import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/utils/bili_site_dom.dart';
+import 'package:wild/services/read_request.dart';
+import 'package:wild/services/read_diagnostics.dart';
 
 abstract interface class BiliBrowserPort {
   Future<void> loadUrl(String url);
@@ -317,15 +319,23 @@ class BiliBrowserSession extends ChangeNotifier {
   }) {
     final totalLimit = timeout ?? operationTimeout;
     final clock = Stopwatch()..start();
+    final request = ReadRequest.current;
+    final predecessor = _queue;
     int? activeGeneration;
+    var finished = false;
     void invalidateActive() {
-      if (activeGeneration == rendererGeneration) _invalidate();
+      if (!finished && activeGeneration == rendererGeneration) _invalidate();
     }
 
-    final work = _queue.then<T>((_) async {
+    final removeCancel = request?.onCancel((_) => invalidateActive());
+
+    final work = predecessor.then<T>((_) async {
+      request?.check();
+      ReadDiagnostics.record('bili', 'queue', clock.elapsed);
       final generation = rendererGeneration;
       activeGeneration = generation;
       void check() {
+        request?.check();
         if (_disposed ||
             generation != rendererGeneration ||
             clock.elapsed >= totalLimit) {
@@ -355,7 +365,8 @@ class BiliBrowserSession extends ChangeNotifier {
       // Give attachment the remaining operation budget; real platform calls
       // below still have their separate five-second limit.
       check();
-      final port = await _renderer().timeout(
+      final attaching = _renderer();
+      final port = await (request?.wait(attaching) ?? attaching).timeout(
         totalLimit - clock.elapsed,
         onTimeout: () {
           invalidateActive();
@@ -372,7 +383,11 @@ class BiliBrowserSession extends ChangeNotifier {
             if (!allowsNavigation(url)) {
               throw const BiliBrowserException('哔哩页面跳转地址无效');
             }
-            await command(() => port.loadUrl(url));
+            await ReadDiagnostics.measure(
+              'bili',
+              'navigation',
+              () => command(() => port.loadUrl(url)),
+            );
           },
           (enabled) => command(() => port.setDesktopSite(enabled)),
           clock,
@@ -389,17 +404,49 @@ class BiliBrowserSession extends ChangeNotifier {
         }
       }
     });
-    _queue = work.then<void>((_) {}, onError: (Object _) {});
-    return work.timeout(
+    final result = (request?.wait(work) ?? work).timeout(
       totalLimit,
       onTimeout: () {
         invalidateActive();
-        throw BiliBrowserException(timeoutMessage);
+        final error = BiliBrowserException(timeoutMessage);
+        request?.cancel(error);
+        throw error;
       },
     );
+    // A queued cancellation cannot release its predecessor's slot. An active
+    // cancellation invalidates only its own renderer; late commands/finally
+    // cannot blank or reset the replacement renderer.
+    final settled = result.whenComplete(() {
+      finished = true;
+      removeCancel?.call();
+    });
+    _queue = predecessor.then<void>(
+      (_) => settled.then<void>((_) {}, onError: (Object _) {}),
+    );
+    return settled;
   }
 
   Future<Map<String, dynamic>> _poll(
+    Future<dynamic> Function(String) js,
+    String script,
+    Stopwatch clock, {
+    bool Function(Map<String, dynamic>)? accepts,
+    Uri? verificationTarget,
+    bool desktopSite = false,
+  }) => ReadDiagnostics.measure(
+    'bili',
+    'page_ready',
+    () => _pollReady(
+      js,
+      script,
+      clock,
+      accepts: accepts,
+      verificationTarget: verificationTarget,
+      desktopSite: desktopSite,
+    ),
+  );
+
+  Future<Map<String, dynamic>> _pollReady(
     Future<dynamic> Function(String) js,
     String script,
     Stopwatch clock, {
@@ -479,51 +526,73 @@ class BiliBrowserSession extends ChangeNotifier {
   }
 
   Future<String> document(Uri uri) => _operation(
-    (port, js, load, mode, clock) async {
-      final cached = _verifiedProbe(uri, BiliProbeKind.document);
-      if (cached != null) return '${cached['html']}';
-      await load('$uri');
-      var desktopFallback = false;
-      Future<Map<String, dynamic>> read() => _poll(
-        js,
-        biliDocumentProbeScript,
-        clock,
-        verificationTarget:
-            desktopFallback ? uri.replace(host: 'www.linovelib.com') : uri,
-        desktopSite: desktopFallback,
-        accepts: (value) {
-          final page = Uri.parse('${value['url']}');
-          return page.path == uri.path &&
-              (!desktopFallback ||
-                  const {
-                    'www.linovelib.com',
-                    'linovelib.com',
-                  }.contains(page.host));
-        },
-      );
-      Map<String, dynamic> value;
-      try {
-        value = await read();
-      } on BiliSiteVerificationRequired {
-        // Both hosts are the site's own observed mobile/desktop entry points.
-        // Only a blocked full catalogue gets one desktop-site fallback.
-        if (!uri.host.endsWith('bilinovel.net') ||
-            !uri.path.endsWith('/catalog')) {
-          rethrow;
-        }
-        await mode(true);
-        desktopFallback = true;
-        await load('${uri.replace(host: 'www.linovelib.com')}');
-        value = await read();
-      }
-      if (Uri.parse('${value['url']}').path != uri.path) {
-        throw const BiliBrowserException('原站返回的页面不匹配');
-      }
-      return '${value['html']}';
-    },
+    (port, js, load, mode, clock) => _readDocument(uri, js, load, mode, clock),
     timeout: const Duration(seconds: 15),
     timeoutMessage: '哔哩页面读取超时，请重试',
   );
+
+  /// Metadata and the complete catalogue share one queue slot, attachment,
+  /// deadline and final cleanup. Neither page is fetched per volume.
+  Future<List<String>> documents(List<Uri> uris) =>
+      _operation((port, js, load, mode, clock) async {
+        if (uris.isEmpty ||
+            uris.length > 2 ||
+            uris.any((uri) => !allowsNavigation('$uri'))) {
+          throw const BiliBrowserException('哔哩页面请求无效');
+        }
+        final results = <String>[];
+        for (final uri in uris) {
+          results.add(await _readDocument(uri, js, load, mode, clock));
+        }
+        return results;
+      }, timeoutMessage: '哔哩详情与目录读取超时，请重试');
+
+  Future<String> _readDocument(
+    Uri uri,
+    Future<dynamic> Function(String) js,
+    Future<void> Function(String) load,
+    Future<void> Function(bool) mode,
+    Stopwatch clock,
+  ) async {
+    final cached = _verifiedProbe(uri, BiliProbeKind.document);
+    if (cached != null) return '${cached['html']}';
+    await load('$uri');
+    var desktopFallback = false;
+    Future<Map<String, dynamic>> read() => _poll(
+      js,
+      biliDocumentProbeScript,
+      clock,
+      verificationTarget:
+          desktopFallback ? uri.replace(host: 'www.linovelib.com') : uri,
+      desktopSite: desktopFallback,
+      accepts: (value) {
+        final page = Uri.parse('${value['url']}');
+        return _samePage(
+          page,
+          desktopFallback ? uri.replace(host: 'www.linovelib.com') : uri,
+        );
+      },
+    );
+    Map<String, dynamic> value;
+    try {
+      value = await read();
+    } on BiliSiteVerificationRequired {
+      // Both hosts are the site's own observed mobile/desktop entry points.
+      // Only a blocked full catalogue gets one desktop-site fallback.
+      if (!uri.host.endsWith('bilinovel.net') ||
+          !uri.path.endsWith('/catalog')) {
+        rethrow;
+      }
+      await mode(true);
+      desktopFallback = true;
+      await load('${uri.replace(host: 'www.linovelib.com')}');
+      value = await read();
+    }
+    if (Uri.parse('${value['url']}').path != uri.path) {
+      throw const BiliBrowserException('原站返回的页面不匹配');
+    }
+    return '${value['html']}';
+  }
 
   Future<PageStatsNovelCover> search(String keyword, int page) => _operation((
     port,
@@ -556,7 +625,11 @@ class BiliBrowserSession extends ChangeNotifier {
       );
       // The ordinary site's asynchronous resource initialization must finish
       // before submitting its own form. No guard tokens are forged or read.
-      await Future<void>.delayed(startupGrace);
+      await ReadDiagnostics.measure(
+        'bili',
+        'site_initialization',
+        () => Future<void>.delayed(startupGrace),
+      );
       if (await js(biliSubmitSearchScript(query)) != true) {
         throw const BiliBrowserException('原站搜索表单已变化');
       }

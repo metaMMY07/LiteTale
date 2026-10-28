@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/widgets/cached_image.dart';
 import 'package:wild/sources/book_source.dart';
+import 'package:wild/services/read_request.dart';
 import 'package:intl/intl.dart';
 import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/theme/material_you.dart';
@@ -245,12 +246,11 @@ class _HistoryItem extends StatelessWidget {
                       onTap: () async {
                         try {
                           // 获取小说信息和章节信息
-                          final novelInfo = await w8.novelInfo(
-                            aid: history.novelId,
+                          final detail = await historyCubit.loadDetail(
+                            history.novelId,
                           );
-                          final volumes = await w8.novelReader(
-                            aid: history.novelId,
-                          );
+                          final novelInfo = detail.info,
+                              volumes = detail.volumes;
 
                           if (!context.mounted) return;
 
@@ -273,6 +273,7 @@ class _HistoryItem extends StatelessWidget {
                             historyCubit.load();
                           }
                         } catch (e) {
+                          if (e is ReadCancelled) return;
                           if (!context.mounted) return;
                           // 显示错误提示
                           ScaffoldMessenger.of(context).showSnackBar(

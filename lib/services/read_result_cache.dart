@@ -71,7 +71,9 @@ class ReadResultCache<K, V> {
     // loader or one that clears the cache and immediately starts another load.
     pending = Future<V>.microtask(load)
         .then((value) {
-          if (generation == _generation) _retain(key, value, generation);
+          if (generation == _generation && identical(_inFlight[key], pending)) {
+            _retain(key, value, generation);
+          }
           return value;
         })
         .whenComplete(() {
@@ -91,6 +93,14 @@ class ReadResultCache<K, V> {
     _entries.clear();
     _inFlight.clear();
     _retainedWeight = 0;
+  }
+
+  /// Detaches one abandoned load without disturbing unrelated cached reads.
+  /// A late completion cannot retain its value or remove a replacement load.
+  void invalidate(K key) {
+    final entry = _entries.remove(key);
+    if (entry != null) _retainedWeight -= entry.weight;
+    _inFlight.remove(key);
   }
 
   _ReadResultEntry<V>? _find(K key) {

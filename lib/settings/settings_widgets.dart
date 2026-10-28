@@ -3,6 +3,36 @@ import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/settings/app_logs.dart';
+import 'package:wild/theme/material_you.dart';
+
+/// Connected, opaque Android tiles. iOS keeps its existing glass grouping.
+class SettingsTileGroup extends StatelessWidget {
+  const SettingsTileGroup({super.key, required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (var i = 0; i < children.length; i++) ...[
+        if (i > 0 && usesMaterialYou) const SizedBox(height: 2),
+        if (usesMaterialYou)
+          ClipRRect(
+            borderRadius: BorderRadius.vertical(
+              top: Radius.circular(i == 0 ? 24 : 6),
+              bottom: Radius.circular(i == children.length - 1 ? 24 : 6),
+            ),
+            child: Material(
+              color: Theme.of(context).colorScheme.surfaceContainerHigh,
+              child: children[i],
+            ),
+          )
+        else
+          children[i],
+      ],
+    ],
+  );
+}
 
 Color settingsSurfaceLayer(ColorScheme colors, Color role, double contrast) {
   if (usesAppleGlass) return Colors.transparent;
@@ -164,7 +194,7 @@ class SettingsEntry extends StatelessWidget {
           usesAppleGlass
               ? Colors.transparent
               : filled
-              ? settingsSurfaceLayer(colors, colors.surfaceContainer, 0.07)
+              ? settingsSurfaceLayer(colors, colors.surfaceContainerHigh, 0.07)
               : colors.surface,
       child: ListTile(
         leading: Icon(icon, color: colors.onSurfaceVariant, size: 22),

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:wild/services/read_request.dart';
+import 'package:wild/services/read_diagnostics.dart';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -12,10 +14,12 @@ class ScopedRuleSourceTransport implements RuleSourceTransport {
     required this.origin,
     this.userAgent,
     this.cookiesEnabled = false,
+    this.diagnosticSource = 'rule',
   });
   final Uri origin;
   final String? userAgent;
   final bool cookiesEnabled;
+  final String diagnosticSource;
   final _cookies = <(String, String), _SessionCookie>{};
   DateTime? _cooldown;
 
@@ -32,9 +36,18 @@ class ScopedRuleSourceTransport implements RuleSourceTransport {
     if (cooldown != null && cooldown.isAfter(DateTime.now())) {
       throw StateError('原站请求过于频繁，请稍后重试');
     }
+    final scope = ReadRequest.current;
+    scope?.check();
     final client = HttpClient()..connectionTimeout = timeout;
+    StreamIterator<List<int>>? iterator;
+    final removeCancel = scope?.onCancel((_) => client.close(force: true));
     Future<RuleSourceHttpResponse> read() async {
-      final request = await client.getUrl(uri);
+      final request = await ReadDiagnostics.measure(
+        diagnosticSource,
+        'open_url',
+        () => client.getUrl(uri),
+      );
+      scope?.check();
       request.followRedirects = false;
       request.headers.set(
         HttpHeaders.acceptHeader,
@@ -53,7 +66,11 @@ class ScopedRuleSourceTransport implements RuleSourceTransport {
               ..sort((a, b) => b.path.length.compareTo(a.path.length));
         request.cookies.addAll(values.map((c) => Cookie(c.name, c.value)));
       }
-      final response = await request.close();
+      final response = await ReadDiagnostics.measure(
+        diagnosticSource,
+        'headers_wait',
+        request.close,
+      );
       if (cookiesEnabled) _remember(response.cookies, uri);
       final headers = <String, String>{};
       response.headers.forEach(
@@ -91,13 +108,19 @@ class ScopedRuleSourceTransport implements RuleSourceTransport {
           bytes: Uint8List(0),
         );
       }
+      scope?.check();
       final body = BytesBuilder(copy: false);
       var size = 0;
-      await for (final chunk in response) {
-        size += chunk.length;
-        if (size > maxBytes) throw const FormatException('书源响应超过大小上限');
-        body.add(chunk);
-      }
+      final chunks = iterator = StreamIterator(response);
+      await ReadDiagnostics.measure(diagnosticSource, 'body_read', () async {
+        while (await chunks.moveNext()) {
+          scope?.check();
+          final chunk = chunks.current;
+          size += chunk.length;
+          if (size > maxBytes) throw const FormatException('书源响应超过大小上限');
+          body.add(chunk);
+        }
+      });
       return RuleSourceHttpResponse(
         statusCode: response.statusCode,
         headers: headers,
@@ -105,16 +128,30 @@ class ScopedRuleSourceTransport implements RuleSourceTransport {
       );
     }
 
+    var failed = false;
     try {
-      return await read().timeout(
+      final reading = read();
+      return await (scope?.wait(reading) ?? reading).timeout(
         timeout,
         onTimeout: () {
           client.close(force: true);
           throw TimeoutException('书源请求超时', timeout);
         },
       );
+    } catch (_) {
+      failed = true;
+      scope?.check();
+      rethrow;
     } finally {
-      client.close(force: true);
+      removeCancel?.call();
+      try {
+        client.close(force: true);
+        await iterator?.cancel();
+      } catch (_) {
+        // Closing a cancelled socket may fail the iterator as well. Preserve
+        // the primary cancellation/timeout instead of presenting a network error.
+        if (!failed) rethrow;
+      }
     }
   }
 

@@ -24,6 +24,10 @@ import 'package:wild/services/reading_progress.dart';
 import 'package:wild/services/wenku8_read_repository.dart';
 import 'package:wild/services/reader_pagination_cache.dart';
 import 'package:wild/services/epub_reader_position.dart';
+import 'package:wild/services/bounded_detail_cache.dart';
+import 'package:wild/services/read_diagnostics.dart';
+import 'package:wild/services/read_request.dart';
+import 'package:wild/services/read_result_cache.dart';
 
 export 'package:wild/src/rust/api/wenku8.dart'
     hide
@@ -60,7 +64,7 @@ void invalidateWenku8ReadingCache() {
   _wenkuBrowser.invalidateBookshelfSnapshot();
   final source = bookSources[SourceId.wenku8];
   if (source is Wenku8Source) source._reads.clear();
-  _detailCache.removeWhere((key, _) => sourceOf(key) == SourceId.wenku8);
+  _detailCache.removeWhere((key, _) => sourceOf(key.$1) == SourceId.wenku8);
 }
 
 Future<void> cleanAllWebCache() async {
@@ -76,6 +80,8 @@ int readerSessionGeneration(String aid) =>
         ? ShelfSession.instance.generation
         : sourceOf(aid) == SourceId.wenku8
         ? _wenkuSessionGeneration + _wenkuBrowser.readingSessionRevision
+        : sourceOf(aid) == SourceId.bili
+        ? sourceRevision.value
         : sourceOf(aid).isRule
         ? RuleSourceRegistry.instance.revision(sourceOf(aid).ruleId)
         : 0;
@@ -285,6 +291,7 @@ final biliSource = BiliSiteSource(
   searcher: BiliBrowserSession.instance.search,
   chapterLoader: BiliBrowserSession.instance.chapter,
   documentLoader: BiliBrowserSession.instance.document,
+  documentsLoader: BiliBrowserSession.instance.documents,
 );
 final huanmengSource = HuanmengSource(
   // The published 9.0 API is anonymous on both mobile platforms. The iOS
@@ -356,18 +363,29 @@ void _refreshRuleSources() {
     final adapter = RuleBookSource(entry.definition);
     bookSources[adapter.id] = adapter;
   }
-  _detailCache.removeWhere((id, _) => sourceOf(id).isRule);
+  _detailCache.removeWhere((id, _) => sourceOf(id.$1).isRule);
   if (!bookSources.containsKey(activeSource.value)) {
     activeSource.value = SourceId.wenku8;
   }
   sourceRevision.value++;
 }
 
-final _detailCache = <String, SourceBookDetail>{};
+final _detailCache = BoundedDetailCache<(String, int)>();
+final _detailLoads = SharedReadPool<(String, int), SourceBookDetail>();
+final _chapterLoads = SharedReadPool<(String, String, int), SourceChapter>();
+final _chapterCache = ReadResultCache<(String, String, int), SourceChapter>(
+  maxEntries: 4,
+  maxWeight: 4 * 1024 * 1024,
+  ttl: const Duration(minutes: 5),
+  weightOf: (chapter) => chapter.content.length * 2 + 128,
+  cacheable: (chapter) => chapter.content.trim().isNotEmpty,
+);
 final _chapterFonts = <String, String?>{};
 final _shelfCovers = <String, String>{};
 String coverForBook(String aid) =>
-    _detailCache[aid]?.info.imgUrl ?? _shelfCovers[aid] ?? '';
+    _detailCache.peek((aid, readerSessionGeneration(aid)))?.info.imgUrl ??
+    _shelfCovers[aid] ??
+    '';
 String? chapterFont(String aid, String cid) => _chapterFonts['$aid/$cid'];
 Future<void> _writes = Future.value();
 
@@ -406,30 +424,63 @@ Future<void> selectSource(SourceId source) async {
 }
 
 void clearShelfSessionCache() {
-  _detailCache.removeWhere((k, _) => sourceOf(k) == SourceId.lightNovelShelf);
+  _detailCache.removeWhere(
+    (k, _) => sourceOf(k.$1) == SourceId.lightNovelShelf,
+  );
   shelfSource.clearSessionCache();
 }
 
 Future<List<HomeBlock>> index() => sourceAdapter(activeSource.value).discover();
-Future<NovelInfo> novelInfo({required String aid}) async {
+
+/// The caller owns this complete result, even if its directory exceeds cache
+/// limits. Opening a detail still refreshes through the source's own policy.
+Future<SourceBookDetail> loadBookDetail({
+  required String aid,
+  bool reuse = false,
+}) {
   final generation = readerSessionGeneration(aid);
-  final detail = await sourceAdapter(sourceOf(aid)).detail(aid);
-  if (generation != readerSessionGeneration(aid)) {
-    throw StateError('书源或账号已变化，请重试。');
+  final key = (aid, generation);
+  ReadRequest.current?.check();
+  final cached = reuse ? _detailCache[key] : null;
+  if (cached != null) {
+    ReadDiagnostics.record(
+      sourceOf(aid).name,
+      'detail_cache_hit',
+      Duration.zero,
+    );
+    return Future.value(cached);
   }
-  _detailCache[aid] = detail;
-  while (_detailCache.length > 32) {
-    _detailCache.remove(_detailCache.keys.first);
+  if (_detailLoads.contains(key)) {
+    ReadDiagnostics.record(
+      sourceOf(aid).name,
+      'detail_shared_join',
+      Duration.zero,
+    );
   }
-  return detail.info;
+  return _detailLoads.run(key, () async {
+    final detail = await ReadDiagnostics.measure(
+      sourceOf(aid).name,
+      'detail',
+      () => sourceAdapter(sourceOf(aid)).detail(aid),
+    );
+    ReadRequest.current?.check();
+    if (generation != readerSessionGeneration(aid)) {
+      throw StateError('书源或账号已变化，请重试。');
+    }
+    _detailCache[key] = detail;
+    return detail;
+  });
 }
+
+Future<NovelInfo> novelInfo({required String aid}) async =>
+    (await loadBookDetail(aid: aid)).info;
 
 Future<List<Volume>> novelReader({required String aid}) async {
   final generation = readerSessionGeneration(aid);
   final detail =
       sourceOf(aid) == SourceId.wenku8
           ? await sourceAdapter(SourceId.wenku8).detail(aid)
-          : _detailCache[aid] ?? await sourceAdapter(sourceOf(aid)).detail(aid);
+          : await loadBookDetail(aid: aid, reuse: true);
   if (generation != readerSessionGeneration(aid)) {
     throw StateError('书源或账号已变化，请重试。');
   }
@@ -440,7 +491,7 @@ Future<String> chapterContent({
   required String aid,
   required String cid,
 }) async {
-  final chapter = await sourceAdapter(sourceOf(aid)).chapter(aid, cid);
+  final chapter = await readerChapter(aid: aid, cid: cid);
   _chapterFonts['$aid/$cid'] = chapter.fontFamily;
   return chapter.content;
 }
@@ -453,10 +504,52 @@ Future<SourceChapter> readerChapter({
   final generation = readerSessionGeneration(aid);
   if (isCurrent?.call() == false) throw const Wenku8PrefetchDeferred();
   final adapter = sourceAdapter(sourceOf(aid));
+  ReadRequest.current?.check();
+  if (ReadDiagnostics.enabled &&
+      sourceOf(aid) != SourceId.wenku8 &&
+      sourceOf(aid) != SourceId.localEpub &&
+      _chapterCache.peek((aid, cid, generation)) != null) {
+    ReadDiagnostics.record(
+      sourceOf(aid).name,
+      'chapter_cache_hit',
+      Duration.zero,
+    );
+  }
   final chapter =
       adapter is Wenku8Source
           ? await adapter.chapter(aid, cid, isCurrent: isCurrent)
-          : await adapter.chapter(aid, cid);
+          : sourceOf(aid) == SourceId.localEpub
+          ? await adapter.chapter(aid, cid)
+          : await _chapterLoads.run(
+            (aid, cid, generation),
+            () => _chapterCache.getOrLoad((aid, cid, generation), () async {
+              final request = ReadRequest.current;
+              final remove = request?.onCancel(
+                (_) => _chapterCache.invalidate((aid, cid, generation)),
+              );
+              try {
+                final value = await ReadDiagnostics.measure(
+                  sourceOf(aid).name,
+                  'chapter',
+                  () => adapter.chapter(aid, cid),
+                ).timeout(
+                  const Duration(seconds: 45),
+                  onTimeout: () {
+                    final error = StateError('章节请求超时，请稍后重试');
+                    request?.cancel(error);
+                    throw error;
+                  },
+                );
+                request?.check();
+                if (generation != readerSessionGeneration(aid)) {
+                  throw StateError('书源或账号已变化，请重试。');
+                }
+                return value;
+              } finally {
+                remove?.call();
+              }
+            }),
+          );
   if (generation != readerSessionGeneration(aid)) {
     throw StateError('书源或账号已变化，请重试。');
   }
@@ -492,28 +585,37 @@ Future<w8.PageStatsNovelCover> search({
 }) async {
   final source = activeSource.value;
   if (page == 1) {
-    await _serial(() async {
-      final history = await _jsonList(_searchKey(source));
-      history.removeWhere(
-        (h) => h['key'] == searchKey && h['type'] == searchType,
-      );
-      history.insert(0, {
-        'key': searchKey,
-        'type': searchType,
-        'time': DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      });
-      await db.saveProperty(
-        key: _searchKey(source),
-        value: jsonEncode(history.take(100).toList()),
-      );
-    });
+    await ReadDiagnostics.measure(
+      source.name,
+      'search_history',
+      () => _serial(() async {
+        final history = await _jsonList(_searchKey(source));
+        history.removeWhere(
+          (h) => h['key'] == searchKey && h['type'] == searchType,
+        );
+        history.insert(0, {
+          'key': searchKey,
+          'type': searchType,
+          'time': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        });
+        await db.saveProperty(
+          key: _searchKey(source),
+          value: jsonEncode(history.take(100).toList()),
+        );
+      }),
+    );
   }
-  return sourceAdapter(source).search(
-    searchKey,
-    source == SourceId.huanmeng && searchType == 'articlename'
-        ? 'title'
-        : searchType,
-    page,
+  ReadRequest.current?.check();
+  return ReadDiagnostics.measure(
+    source.name,
+    'search',
+    () => sourceAdapter(source).search(
+      searchKey,
+      source == SourceId.huanmeng && searchType == 'articlename'
+          ? 'title'
+          : searchType,
+      page,
+    ),
   );
 }
 
@@ -660,7 +762,7 @@ Future<void> addBookshelf({required String aid}) async {
   if (sourceOf(aid) == SourceId.wenku8) return w8.addBookshelf(aid: aid);
   final source = sourceOf(aid);
   final shelfKey = _shelfKeyFor(source);
-  final detail = _detailCache[aid] ?? await sourceAdapter(source).detail(aid);
+  final detail = await loadBookDetail(aid: aid, reuse: true);
   await _serial(() async {
     final items = await _jsonList(shelfKey);
     if (items.any((b) => b['id'] == aid)) return;
@@ -720,7 +822,7 @@ Future<void> removeLocalEpub(String bookId) async {
     await w8.deleteHistoryByNovelId(novelId: bookId);
     await EpubReaderPositionStore.instance.clear(bookId);
   } finally {
-    _detailCache.remove(bookId);
+    _detailCache.removeWhere((key, _) => key.$1 == bookId);
     _chapterFonts.removeWhere((key, _) => key.startsWith('$bookId/'));
     _shelfCovers.remove(bookId);
     ReaderPaginationCache.instance.evictBook(bookId);
@@ -729,7 +831,7 @@ Future<void> removeLocalEpub(String bookId) async {
 
 void invalidateLocalEpubPresentation(String bookId) {
   if (sourceOf(bookId) != SourceId.localEpub) return;
-  _detailCache.remove(bookId);
+  _detailCache.removeWhere((key, _) => key.$1 == bookId);
   _chapterFonts.removeWhere((key, _) => key.startsWith('$bookId/'));
   _shelfCovers.remove(bookId);
   ReaderPaginationCache.instance.evictBook(bookId);

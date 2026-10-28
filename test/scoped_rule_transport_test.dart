@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/sources/rules/scoped_rule_transport.dart';
+import 'package:wild/services/read_request.dart';
 
 void main() {
   late HttpServer server;
@@ -106,6 +107,36 @@ void main() {
     await get(enabled, '/');
     await get(enabled, '/');
   });
+
+  test(
+    'cancelling streamed body closes the request and leaves next read usable',
+    () async {
+      final body = Completer<void>(), finish = Completer<void>();
+      respond = (request) async {
+        request.response.bufferOutput = false;
+        request.response.write('start');
+        await request.response.flush();
+        if (request.uri.path == '/slow') {
+          if (!body.isCompleted) body.complete();
+          await finish.future;
+        }
+        try {
+          await request.response.close();
+        } catch (_) {
+          /* cancelled socket */
+        }
+      };
+      final session = ScopedRuleSourceTransport(origin: base);
+      final request = ReadRequest();
+      final pending = ReadRequest.run(request, () => get(session, '/slow'));
+      final checked = expectLater(pending, throwsA(isA<ReadCancelled>()));
+      await body.future;
+      request.cancel();
+      await checked.timeout(const Duration(seconds: 1));
+      expect((await get(session, '/next')).statusCode, 200);
+      finish.complete();
+    },
+  );
 
   test('429 respects Retry-After without retries or redirects', () async {
     var requests = 0;

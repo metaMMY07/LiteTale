@@ -4,6 +4,7 @@ import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/sources/source_api.dart';
+import 'package:wild/services/read_request.dart';
 import '../widgets/novel_cover_card.dart';
 import '../widgets/wenku8_recovery_button.dart';
 import '../widgets/bili_recovery_button.dart';
@@ -41,6 +42,7 @@ class _SearchPageState extends State<SearchPage> {
   bool _loading = false;
   Object? _error;
   int _request = 0;
+  ReadRequest? _readRequest;
   String _submittedKey = '';
   String _submittedType = '';
 
@@ -64,6 +66,7 @@ class _SearchPageState extends State<SearchPage> {
     activeSource.removeListener(_sourceChanged);
     sourceRevision.removeListener(_sourceChanged);
     _request++;
+    _readRequest?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -91,6 +94,7 @@ class _SearchPageState extends State<SearchPage> {
 
   void _resetQuery() {
     _request++;
+    _readRequest?.cancel();
     setState(() {
       _loading = false;
       _results = null;
@@ -118,6 +122,8 @@ class _SearchPageState extends State<SearchPage> {
     }
     final page = more ? _results!.currentPage + 1 : 1;
     final request = ++_request;
+    _readRequest?.cancel();
+    final readRequest = _readRequest = ReadRequest();
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _loading = true;
@@ -127,15 +133,25 @@ class _SearchPageState extends State<SearchPage> {
       _submittedType = type;
     });
     try {
-      final result = await (widget.searcher ?? search)(
-            searchType: type,
-            searchKey: key,
-            page: page,
-          )
-          .timeout(
-            const Duration(seconds: 135),
-            onTimeout: () => throw Exception('搜索超时，请检查网络后重试'),
-          );
+      final result = await ReadRequest.run(
+        readRequest,
+        () => readRequest
+            .wait(
+              (widget.searcher ?? search)(
+                searchType: type,
+                searchKey: key,
+                page: page,
+              ),
+            )
+            .timeout(
+              const Duration(seconds: 135),
+              onTimeout: () {
+                final error = Exception('搜索超时，请检查网络后重试');
+                readRequest.cancel(error);
+                throw error;
+              },
+            ),
+      );
       if (!mounted || request != _request) return;
       setState(() {
         final records =

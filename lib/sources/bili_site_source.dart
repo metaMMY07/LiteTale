@@ -9,6 +9,8 @@ import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
 import 'package:wild/src/rust/wenku8/models.dart';
 
 import 'book_source.dart';
+import 'package:wild/services/read_request.dart';
+import 'package:wild/services/read_diagnostics.dart';
 
 const _siteOrigin = 'https://www.bilinovel.net';
 const _pageSize = 30;
@@ -74,16 +76,19 @@ class BiliSiteSource implements BookSource {
     required BiliSiteSearcher searcher,
     required BiliSiteChapterLoader chapterLoader,
     Future<String> Function(Uri uri)? documentLoader,
+    Future<List<String>> Function(List<Uri> uris)? documentsLoader,
     http.Client? client,
     this.budget = const BiliSiteBudget(),
   }) : _searcher = searcher,
        _chapterLoader = chapterLoader,
        _documentLoader = documentLoader,
+       _documentsLoader = documentsLoader,
        _injectedClient = client;
 
   final BiliSiteSearcher _searcher;
   final BiliSiteChapterLoader _chapterLoader;
   final Future<String> Function(Uri uri)? _documentLoader;
+  final Future<List<String>> Function(List<Uri> uris)? _documentsLoader;
   final http.Client? _injectedClient;
   final BiliSiteBudget budget;
 
@@ -237,10 +242,27 @@ class BiliSiteSource implements BookSource {
       final catalogUri = Uri.parse('$_siteOrigin/novel/$nid/catalog');
       // Both public pages are independent. Fetch the entire chapter tree once,
       // rather than issuing one request per volume.
-      final pages = await Future.wait([
-        _getDocument(session, detailUri),
-        _getDocument(session, catalogUri),
-      ]);
+      final List<dom.Document> pages;
+      if (_documentsLoader case final load?) {
+        final markup = await load([detailUri, catalogUri]);
+        ReadRequest.current?.check();
+        if (markup.length != 2 ||
+            markup.any(
+              (text) => utf8.encode(text).length > budget.maxResponseBytes,
+            )) {
+          throw const BiliSiteException('哔哩详情与目录数据无效或过大');
+        }
+        pages = ReadDiagnostics.measureSync(
+          'bili',
+          'html_parse',
+          () => markup.map(html_parser.parse).toList(),
+        );
+      } else {
+        pages = await Future.wait([
+          _getDocument(session, detailUri),
+          _getDocument(session, catalogUri),
+        ]);
+      }
       final detailDocument = pages[0];
       final catalogDocument = pages[1];
       final titleNode =
@@ -360,10 +382,16 @@ class BiliSiteSource implements BookSource {
     String timeoutMessage = '哔哩轻小说请求超时',
   }) async {
     final ownsClient = _injectedClient == null;
+    final request = ReadRequest.current;
+    request?.check();
     final session = _SiteSession(
       ownsClient ? http.Client() : _injectedClient,
       budget,
     );
+    final removeCancel = request?.onCancel((error) {
+      session.cancel(error);
+      if (ownsClient) session.client.close();
+    });
     final operationLimit =
         operationTimeout ??
         Duration(
@@ -374,6 +402,7 @@ class BiliSiteSource implements BookSource {
     final timer = Timer(operationLimit, () {
       final error = BiliSiteException(timeoutMessage);
       session.cancel(error);
+      request?.cancel(error);
       timedOut.completeError(error, StackTrace.current);
     });
     final operation = Future<T>.sync(() => run(session));
@@ -383,6 +412,7 @@ class BiliSiteSource implements BookSource {
       session.cancel(error);
       rethrow;
     } finally {
+      removeCancel?.call();
       timer.cancel();
       session.close(ownsClient);
     }
@@ -397,10 +427,15 @@ class BiliSiteSource implements BookSource {
       final markup = await _documentLoader(
         initialUri,
       ).timeout(budget.requestTimeout);
+      ReadRequest.current?.check();
       if (utf8.encode(markup).length > budget.maxResponseBytes) {
         throw const BiliSiteException('哔哩页面数据过大');
       }
-      return html_parser.parse(markup);
+      return ReadDiagnostics.measureSync(
+        'bili',
+        'html_parse',
+        () => html_parser.parse(markup),
+      );
     }
     var uri = initialUri;
     for (var redirectCount = 0; ; redirectCount++) {

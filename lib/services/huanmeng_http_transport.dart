@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:collection';
 import 'dart:io';
 
 import 'package:wild/sources/huanmeng_source.dart';
 import 'package:wild/sources/rules/rule_source_engine.dart';
 import 'package:wild/sources/rules/scoped_rule_transport.dart';
+import 'package:wild/services/read_request.dart';
+import 'package:wild/services/read_diagnostics.dart';
 
 /// Anonymous, fixed-origin public API. No account cookies, automatic retries
 /// or alternate hosts. Queue time counts towards the caller's request budget.
@@ -19,6 +22,7 @@ class HuanmengHttpTransport implements HuanmengTransport {
            ScopedRuleSourceTransport(
              origin: HuanmengSource.origin,
              userAgent: userAgent ?? androidUserAgent,
+             diagnosticSource: 'huanmeng',
            );
 
   static const androidUserAgent =
@@ -28,10 +32,12 @@ class HuanmengHttpTransport implements HuanmengTransport {
 
   final RuleSourceTransport _transport;
   final Duration requestBudget, spacing;
-  Future<void> _tail = Future.value();
-  final _pending = <Uri, Future<Map<String, dynamic>>>{};
-  DateTime _next = DateTime.fromMillisecondsSinceEpoch(0);
-  DateTime? _retryAt;
+  final _pending = SharedReadPool<Uri, Map<String, dynamic>>();
+  final _queue = Queue<_HuanmengRead>();
+  final _clock = Stopwatch()..start();
+  Duration _next = Duration.zero;
+  Duration _retryAt = Duration.zero;
+  bool _draining = false;
 
   @override
   Future<Map<String, dynamic>> read(Uri uri) {
@@ -46,51 +52,76 @@ class HuanmengHttpTransport implements HuanmengTransport {
         }.any((operation) => uri.path == '/index.php/bookapi/$operation')) {
       return Future.error(const FormatException('幻梦只能请求原站公开接口'));
     }
-    final existing = _pending[uri];
-    if (existing != null) return existing;
-    if (_pending.length >= 16) {
+    if (!_pending.contains(uri) && _pending.length >= 16) {
       return Future.error(const HuanmengSourceException('幻梦请求排队已满，请稍后重试'));
     }
-    final deadline = DateTime.now().add(requestBudget);
-    final task = _tail
-        .then((_) async {
-          var remaining = deadline.difference(DateTime.now());
-          if (remaining <= Duration.zero) throw TimeoutException('幻梦请求排队超时');
-          final wait = _next.difference(DateTime.now());
+    return _pending.run(uri, () => _enqueue(uri));
+  }
+
+  Future<Map<String, dynamic>> _enqueue(Uri uri) {
+    final scope = ReadRequest.current!;
+    scope.check();
+    final work = _HuanmengRead(uri, scope);
+    work.timer = Timer(requestBudget, () {
+      scope.cancel(TimeoutException('幻梦请求超时', requestBudget));
+    });
+    work.removeCancel = scope.onCancel((error) {
+      _queue.remove(work);
+      if (!work.result.isCompleted) work.result.completeError(error);
+      work.timer?.cancel();
+    });
+    _queue.add(work);
+    if (!_draining) unawaited(_drain());
+    return work.result.future;
+  }
+
+  Future<void> _drain() async {
+    _draining = true;
+    try {
+      while (_queue.isNotEmpty) {
+        final work = _queue.removeFirst();
+        try {
+          work.scope.check();
+          ReadDiagnostics.record('huanmeng', 'queue', work.clock.elapsed);
+          final wait = _next - _clock.elapsed;
           if (wait > Duration.zero) {
-            if (wait >= remaining) throw TimeoutException('幻梦请求排队超时');
-            await Future<void>.delayed(wait);
-          }
-          remaining = deadline.difference(DateTime.now());
-          if (remaining <= Duration.zero) throw TimeoutException('幻梦请求排队超时');
-          if (_retryAt?.isAfter(DateTime.now()) == true) {
-            throw const HuanmengSourceException('幻梦原站正在限流，请稍后重试');
-          }
-          _next = DateTime.now().add(spacing);
-          final response = await _transport
-              .get(uri, timeout: remaining, maxBytes: 2 * 1024 * 1024)
-              .timeout(remaining);
-          if (response.statusCode == 429) {
-            final now = DateTime.now();
-            final retry = response.headers['retry-after'];
-            final seconds = int.tryParse(retry ?? '');
-            DateTime? until;
-            if (seconds != null) {
-              until = now.add(Duration(seconds: seconds.clamp(1, 604800)));
-            } else if (retry != null) {
-              try {
-                until = HttpDate.parse(retry);
-              } on HttpException {
-                /* default below */
-              }
+            if (wait >= requestBudget - work.clock.elapsed) {
+              throw TimeoutException('幻梦请求排队超时');
             }
-            final cap = now.add(const Duration(days: 7));
-            _retryAt =
-                until == null || !until.isAfter(now)
-                    ? now.add(const Duration(seconds: 30))
-                    : (until.isAfter(cap) ? cap : until);
+            await ReadDiagnostics.measure(
+              'huanmeng',
+              'spacing',
+              () => work.scope.wait(Future<void>.delayed(wait)),
+            );
+          }
+          work.scope.check();
+          final remaining = requestBudget - work.clock.elapsed;
+          if (remaining <= Duration.zero) throw TimeoutException('幻梦请求排队超时');
+          if (_retryAt > _clock.elapsed) {
             throw const HuanmengSourceException('幻梦原站正在限流，请稍后重试');
           }
+          _next = _clock.elapsed + spacing;
+          final response = await ReadRequest.run(
+            work.scope,
+            () => _transport.get(
+              work.uri,
+              timeout: remaining,
+              maxBytes: 2 * 1024 * 1024,
+            ),
+          ).timeout(
+            remaining,
+            onTimeout: () {
+              final error = TimeoutException('幻梦请求超时', requestBudget);
+              work.scope.cancel(error);
+              throw error;
+            },
+          );
+          // Retain a received Retry-After even if the caller just left.
+          if (response.statusCode == 429) {
+            _rememberCooldown(response.headers['retry-after']);
+            throw const HuanmengSourceException('幻梦原站正在限流，请稍后重试');
+          }
+          work.scope.check();
           if (response.statusCode != 200) {
             throw HuanmengSourceException(
               '幻梦接口暂不可用（HTTP ${response.statusCode}）',
@@ -99,21 +130,65 @@ class HuanmengHttpTransport implements HuanmengTransport {
           if (response.bytes.length > 2 * 1024 * 1024) {
             throw const FormatException('幻梦响应超过大小上限');
           }
+          Map<String, dynamic>? result;
           try {
-            final data = jsonDecode(utf8.decode(response.bytes));
-            if (data is Map<String, dynamic>) return data;
+            final text = ReadDiagnostics.measureSync(
+              'huanmeng',
+              'utf8_decode',
+              () => utf8.decode(response.bytes),
+            );
+            final data = ReadDiagnostics.measureSync(
+              'huanmeng',
+              'json_decode',
+              () => jsonDecode(text),
+            );
+            if (data is Map<String, dynamic>) result = data;
           } on FormatException {
             throw const HuanmengSourceException('幻梦返回了验证或非 JSON 页面，请稍后重试');
           }
-          throw const HuanmengSourceException('幻梦接口返回格式异常');
-        })
-        .timeout(requestBudget);
-    _pending[uri] = task;
-    void clear() {
-      if (identical(_pending[uri], task)) _pending.remove(uri);
+          if (result == null) throw const HuanmengSourceException('幻梦接口返回格式异常');
+          if (!work.result.isCompleted) work.result.complete(result);
+        } catch (error, stack) {
+          if (!work.result.isCompleted) work.result.completeError(error, stack);
+        } finally {
+          work.timer?.cancel();
+          work.removeCancel();
+        }
+      }
+    } finally {
+      _draining = false;
     }
-
-    _tail = task.then<void>((_) => clear(), onError: (Object _) => clear());
-    return task;
   }
+
+  void _rememberCooldown(String? retry) {
+    final seconds = int.tryParse(retry ?? '');
+    var delay = const Duration(seconds: 30);
+    if (seconds != null) {
+      delay = Duration(seconds: seconds.clamp(1, 604800));
+    } else if (retry != null) {
+      try {
+        final candidate = HttpDate.parse(retry).difference(DateTime.now());
+        if (candidate > Duration.zero) {
+          delay =
+              candidate > const Duration(days: 7)
+                  ? const Duration(days: 7)
+                  : candidate;
+        }
+      } on HttpException {
+        /* bounded default */
+      }
+    }
+    final until = _clock.elapsed + delay;
+    if (until > _retryAt) _retryAt = until;
+  }
+}
+
+class _HuanmengRead {
+  _HuanmengRead(this.uri, this.scope);
+  final Uri uri;
+  final ReadRequest scope;
+  final clock = Stopwatch()..start();
+  final result = Completer<Map<String, dynamic>>();
+  Timer? timer;
+  void Function() removeCancel = () {};
 }

@@ -7,6 +7,7 @@ import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
 import 'package:wild/src/rust/wenku8/models.dart';
 
 import 'book_source.dart';
+import 'package:wild/services/read_request.dart';
 import 'rule_book_source.dart' show readerTextFromHtml;
 
 /// The caller owns HTTP, redirect, byte, Cookie and verification policies.
@@ -405,7 +406,16 @@ class HuanmengSource implements BookSource {
         remaining < budget.requestTimeout ? remaining : budget.requestTimeout;
     Map<String, dynamic> envelope;
     try {
-      envelope = await transport.read(uri).timeout(timeout);
+      envelope = await transport
+          .read(uri)
+          .timeout(
+            timeout,
+            onTimeout: () {
+              const error = HuanmengSourceException('幻梦 API 请求超时');
+              clock.request.cancel(error);
+              throw error;
+            },
+          );
     } on TimeoutException {
       throw const HuanmengSourceException('幻梦 API 请求超时');
     }
@@ -433,11 +443,22 @@ class HuanmengSource implements BookSource {
   }
 
   Future<T> _operation<T>(Future<T> Function(_Clock) run) {
-    final clock = _Clock(budget.operationTimeout);
-    return Future<T>.sync(() => run(clock)).timeout(
-      budget.operationTimeout,
-      onTimeout: () => throw const HuanmengSourceException('幻梦 API 操作超过总时限'),
-    );
+    final request = ReadRequest();
+    final remove = ReadRequest.current?.onCancel(request.cancel);
+    final clock = _Clock(budget.operationTimeout, request);
+    return ReadRequest.run(
+          request,
+          () => request.wait(Future<T>.sync(() => run(clock))),
+        )
+        .timeout(
+          budget.operationTimeout,
+          onTimeout: () {
+            const error = HuanmengSourceException('幻梦 API 操作超过总时限');
+            request.cancel(error);
+            throw error;
+          },
+        )
+        .whenComplete(() => remove?.call());
   }
 
   void _page(int page) {
@@ -527,10 +548,13 @@ class HuanmengSource implements BookSource {
 }
 
 class _Clock {
-  _Clock(Duration limit) : deadline = DateTime.now().add(limit);
-  final DateTime deadline;
-  Duration get remaining => deadline.difference(DateTime.now());
+  _Clock(this.limit, this.request);
+  final Duration limit;
+  final ReadRequest request;
+  final clock = Stopwatch()..start();
+  Duration get remaining => limit - clock.elapsed;
   void check() {
+    request.check();
     if (remaining <= Duration.zero) {
       throw const HuanmengSourceException('幻梦 API 操作超过总时限');
     }
