@@ -8,7 +8,7 @@ import 'package:wild/src/rust/api/database.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
-import 'package:wild/widgets/app_loading_indicator.dart';
+import 'package:wild/widgets/source_website.dart';
 import 'package:wild/theme/material_you.dart';
 
 class CategoryPage extends StatefulWidget {
@@ -390,7 +390,16 @@ class _CategoryPageState extends State<CategoryPage> {
         Expanded(
           child:
               _selectedTag == null
-                  ? const Center(child: Text('请选择分类'))
+                  ? _tagError != null
+                      ? const Center(
+                        child: SourceWebsiteLink(source: SourceId.wenku8),
+                      )
+                      : _tagGroups == null
+                      ? SourceLoadingIndicator(
+                        source: SourceId.wenku8,
+                        requestKey: ('tags', _tagRequest),
+                      )
+                      : const Center(child: Text('请选择分类'))
                   : _pageError != null && _currentPage == null
                   ? RefreshIndicator(
                     onRefresh: () => _loadTagPage(_selectedTag!, refresh: true),
@@ -418,6 +427,7 @@ class _CategoryPageState extends State<CategoryPage> {
                                 style: Theme.of(context).textTheme.bodyMedium,
                                 textAlign: TextAlign.start,
                               ),
+                              const SourceWebsiteLink(source: SourceId.wenku8),
                               Wenku8RecoveryButton(
                                 error: _pageError,
                                 source: SourceId.wenku8,
@@ -442,7 +452,10 @@ class _CategoryPageState extends State<CategoryPage> {
                     ),
                   )
                   : _currentPage == null
-                  ? const CenteredLoadingIndicator()
+                  ? SourceLoadingIndicator(
+                    source: SourceId.wenku8,
+                    requestKey: _pageRequest,
+                  )
                   : NotificationListener<ScrollNotification>(
                     onNotification: (notification) {
                       if (notification is ScrollEndNotification &&
@@ -470,11 +483,26 @@ class _CategoryPageState extends State<CategoryPage> {
                       itemBuilder: (context, index) {
                         if (index >= _currentPage!.records.length) {
                           if (_pageError != null) {
-                            return Center(
-                              child: AppButton.text(
-                                onPressed: () => _loadTagPage(_selectedTag!),
-                                child: const Text('加载失败，点击重试'),
+                            return SingleChildScrollView(
+                              child: Column(
+                                children: [
+                                  AppButton.text(
+                                    onPressed:
+                                        () => _loadTagPage(_selectedTag!),
+                                    child: const Text('加载失败，点击重试'),
+                                  ),
+                                  const SourceWebsiteLink(
+                                    source: SourceId.wenku8,
+                                  ),
+                                ],
                               ),
+                            );
+                          }
+                          if (_isLoading) {
+                            return SourceLoadingIndicator(
+                              source: SourceId.wenku8,
+                              requestKey: _pageRequest,
+                              size: 24,
                             );
                           }
                           return const Center(

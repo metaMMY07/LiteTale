@@ -1,6 +1,6 @@
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
-import 'package:wild/widgets/app_loading_indicator.dart';
+import 'package:wild/widgets/source_website.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/sources/source_api.dart';
@@ -176,17 +176,10 @@ class _SearchPageState extends State<SearchPage> {
 
   Widget _body() {
     if (_loading && _results == null) {
-      return const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AppLoadingIndicator(),
-            SizedBox(height: 20),
-            Text('正在搜索，请稍候…'),
-            SizedBox(height: 8),
-            Text('首次搜索可能需要较长时间'),
-          ],
-        ),
+      return SourceLoadingIndicator(
+        source: activeSource.value,
+        requestKey: _request,
+        message: '正在搜索，请稍候…',
       );
     }
     if (_error != null && _results == null) {
@@ -201,6 +194,7 @@ class _SearchPageState extends State<SearchPage> {
               const Text('搜索未完成'),
               const SizedBox(height: 8),
               Text(_error.toString(), textAlign: TextAlign.center),
+              SourceWebsiteLink(source: activeSource.value),
               const SizedBox(height: 16),
               AppButton.filledIcon(
                 onPressed: _search,
@@ -263,7 +257,13 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
           ),
-          if (_loading) const LinearProgressIndicator(),
+          if (_loading)
+            SourceLoadingIndicator(
+              source: activeSource.value,
+              requestKey: _request,
+              size: 24,
+              centered: false,
+            ),
           if (_error != null)
             Wenku8RecoveryButton(
               error: _error,

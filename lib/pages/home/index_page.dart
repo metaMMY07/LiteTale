@@ -13,9 +13,9 @@ import 'package:wild/theme/material_you.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
-import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/widgets/theme_reveal_host.dart';
 import 'package:wild/widgets/discovery_tab.dart';
+import 'package:wild/widgets/source_website.dart';
 
 import '../../src/rust/api/database.dart';
 import 'package:wild/sources/source_api.dart';
@@ -176,6 +176,24 @@ class _IndexPageState extends State<IndexPage>
                 ),
               )
               : AppBar(
+                leadingWidth:
+                    MediaQuery.sizeOf(context).width.clamp(0, 400) * .42,
+                leading: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 0, 4),
+                  child: Tooltip(
+                    message: '切换书源：${activeSource.value.label}',
+                    child: AppButton.tonalIcon(
+                      key: const ValueKey('discovery-source-switch'),
+                      onPressed: _openSources,
+                      icon: const Icon(Icons.local_library_outlined, size: 20),
+                      label: Text(
+                        activeSource.value.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ),
                 title: Text(usesMaterialYou ? '发现' : '轻小说文库'),
                 actions: [
                   if (usesMaterialYou)
@@ -512,6 +530,7 @@ class _ToplistPageState extends State<ToplistPage> {
                                 style: Theme.of(context).textTheme.bodyMedium,
                                 textAlign: TextAlign.start,
                               ),
+                              const SourceWebsiteLink(source: SourceId.wenku8),
                             ],
                           ),
                         ),
@@ -519,7 +538,10 @@ class _ToplistPageState extends State<ToplistPage> {
                     ),
                   )
                   : _currentPage == null
-                  ? const CenteredLoadingIndicator()
+                  ? SourceLoadingIndicator(
+                    source: SourceId.wenku8,
+                    requestKey: _request,
+                  )
                   : NotificationListener<ScrollNotification>(
                     onNotification: (notification) {
                       if (notification is ScrollEndNotification &&
@@ -545,6 +567,13 @@ class _ToplistPageState extends State<ToplistPage> {
                               : 0),
                       itemBuilder: (context, index) {
                         if (index >= _currentPage!.records.length) {
+                          if (_isLoading) {
+                            return SourceLoadingIndicator(
+                              source: SourceId.wenku8,
+                              requestKey: _request,
+                              size: 24,
+                            );
+                          }
                           return const Center(
                             child: Padding(
                               padding: EdgeInsets.all(16.0),
@@ -662,6 +691,7 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
                       style: Theme.of(context).textTheme.bodyMedium,
                       textAlign: TextAlign.start,
                     ),
+                    const SourceWebsiteLink(source: SourceId.wenku8),
                   ],
                 ),
               ),
@@ -669,7 +699,7 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
           ),
         )
         : _currentPage == null
-        ? const CenteredLoadingIndicator()
+        ? SourceLoadingIndicator(source: SourceId.wenku8, requestKey: _request)
         : NotificationListener<ScrollNotification>(
           onNotification: (notification) {
             if (notification is ScrollEndNotification &&
@@ -693,6 +723,13 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
                 (_currentPage!.currentPage < _currentPage!.maxPage ? 1 : 0),
             itemBuilder: (context, index) {
               if (index >= _currentPage!.records.length) {
+                if (_isLoading) {
+                  return SourceLoadingIndicator(
+                    source: SourceId.wenku8,
+                    requestKey: _request,
+                    size: 24,
+                  );
+                }
                 return const Center(
                   child: Padding(
                     padding: EdgeInsets.all(16.0),

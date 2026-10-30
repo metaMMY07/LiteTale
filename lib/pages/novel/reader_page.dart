@@ -4,6 +4,7 @@ import 'package:wild/services/hardware_turn_buffer.dart';
 import 'package:wild/cubits/volume_control_cubit.dart';
 import 'package:wild/widgets/wenku8_recovery_button.dart';
 import 'package:wild/widgets/app_loading_indicator.dart';
+import 'package:wild/widgets/source_website.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
@@ -111,7 +112,12 @@ class ReaderPage extends StatelessWidget {
           child: BlocBuilder<ReaderCubit, ReaderState>(
             builder: (context, state) {
               if (state is ReaderLoading) {
-                return const Scaffold(body: CenteredLoadingIndicator());
+                return Scaffold(
+                  body: SourceLoadingIndicator(
+                    source: sourceOf(aid),
+                    requestKey: state,
+                  ),
+                );
               }
               if (state is ReaderError) {
                 return Scaffold(
@@ -123,6 +129,7 @@ class ReaderPage extends StatelessWidget {
                         children: [
                           Text(state.error),
                           const SizedBox(height: 16),
+                          SourceWebsiteLink(source: sourceOf(aid)),
                           AppButton.elevated(
                             onPressed:
                                 () => context.read<ReaderCubit>().loadChapter(),

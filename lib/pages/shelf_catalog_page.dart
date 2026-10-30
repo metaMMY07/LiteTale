@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:wild/sources/source_api.dart' as api;
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
-import 'package:wild/widgets/app_loading_indicator.dart';
+import 'package:wild/widgets/source_website.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
 import 'package:wild/sources/rule_book_source.dart';
 import 'package:wild/sources/huanmeng_categories.dart';
@@ -328,28 +328,19 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
           padding: EdgeInsets.all(12),
           child: Text('轻书架按分卷收录，此处展示全部书籍'),
         ),
-      if (_error != null)
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              Text(_error!.toString(), textAlign: TextAlign.center),
-              BiliRecoveryButton(
-                error: _error,
-                source: _source,
-                onRecovered: () => _load(more: _errorMore),
-              ),
-              AppButton.text(
-                onPressed: () => _load(more: _page != null),
-                child: const Text('重试'),
-              ),
-            ],
+      if (_error != null && _page != null)
+        ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * .35,
           ),
+          child: _errorView(context),
         ),
       Expanded(
         child:
-            _loading && _page == null
-                ? const CenteredLoadingIndicator()
+            _error != null && _page == null
+                ? Center(child: _errorView(context))
+                : _loading && _page == null
+                ? SourceLoadingIndicator(source: _source, requestKey: _request)
                 : _page == null
                 ? const SizedBox.shrink()
                 : _page!.records.isEmpty
@@ -371,9 +362,11 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
                 ),
       ),
       if (_loading && _page != null)
-        const SizedBox(
-          height: 48,
-          child: Center(child: AppLoadingIndicator(size: 24)),
+        SourceLoadingIndicator(
+          source: _source,
+          requestKey: _request,
+          size: 24,
+          centered: false,
         ),
       if (!_loading && _page != null && _page!.currentPage < _page!.maxPage)
         AppButton.text(
@@ -381,5 +374,25 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
           child: const Text('加载更多'),
         ),
     ],
+  );
+
+  Widget _errorView(BuildContext context) => SingleChildScrollView(
+    padding: const EdgeInsets.all(16),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(_error!.toString(), textAlign: TextAlign.center),
+        SourceWebsiteLink(source: _source),
+        BiliRecoveryButton(
+          error: _error,
+          source: _source,
+          onRecovered: () => _load(more: _errorMore),
+        ),
+        AppButton.text(
+          onPressed: () => _load(more: _page != null),
+          child: const Text('重试'),
+        ),
+      ],
+    ),
   );
 }

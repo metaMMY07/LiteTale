@@ -1,5 +1,7 @@
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:wild/widgets/source_website.dart';
+import 'package:wild/sources/source_website.dart';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:file_selector/file_selector.dart';
@@ -89,6 +91,12 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
     try {
       final id = entry.definition.id;
       switch (action) {
+        case 'website':
+          final uri = sourceWebsite(
+            SourceId.rule(id),
+            ruleBaseUrl: entry.definition.baseUrl,
+          );
+          if (uri != null && mounted) await openSourceWebsite(context, uri);
         case 'use':
           await api.selectSource(SourceId.rule(id));
         case 'rename':
@@ -192,7 +200,7 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
                   ),
                   title: Text(entry.definition.name),
                   subtitle: Text(
-                    '${entry.builtIn ? '内置' : '导入'} · ${entry.definition.version} · ${entry.enabled ? '已启用' : '已停用'}\n${entry.definition.baseUrl.host}',
+                    '${entry.builtIn ? '内置' : '导入'} · ${entry.definition.version} · ${entry.enabled ? '已启用' : '已停用'}\n${entry.definition.baseUrl.origin}/',
                   ),
                   isThreeLine: true,
                   onTap: entry.enabled ? () => _action(entry, 'use') : null,
@@ -200,6 +208,10 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
                     onSelected: (value) => _action(entry, value),
                     itemBuilder:
                         (_) => [
+                          const PopupMenuItem(
+                            value: 'website',
+                            child: Text('打开原网站'),
+                          ),
                           if (entry.enabled)
                             const PopupMenuItem(
                               value: 'use',

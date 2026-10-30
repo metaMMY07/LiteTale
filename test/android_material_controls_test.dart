@@ -133,6 +133,7 @@ void main() {
         find.byKey(const ValueKey('source-option-esj')),
         300,
       );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('source-option-esj')));
       await tester.pumpAndSettle();
       expect(changes, [SourceId.esj]);

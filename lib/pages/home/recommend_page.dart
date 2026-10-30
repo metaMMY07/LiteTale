@@ -11,7 +11,7 @@ import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
 import 'package:wild/widgets/novel_card.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
-import 'package:wild/widgets/app_loading_indicator.dart';
+import 'package:wild/widgets/source_website.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/bili_api_source.dart';
 import 'package:wild/sources/bili_site_source.dart';
@@ -38,7 +38,10 @@ class RecommendPage extends StatelessWidget {
         body: BlocBuilder<RecommendCubit, RecommendState>(
           builder: (context, state) {
             if (state is RecommendLoading) {
-              return const CenteredLoadingIndicator();
+              return SourceLoadingIndicator(
+                source: activeSource.value,
+                requestKey: state,
+              );
             }
             if (state is RecommendError) {
               final isWenku8 = activeSource.value == SourceId.wenku8;
@@ -76,6 +79,7 @@ class RecommendPage extends StatelessWidget {
                           style: Theme.of(context).textTheme.bodyLarge,
                         ),
                         const SizedBox(height: 20),
+                        SourceWebsiteLink(source: activeSource.value),
                         Wrap(
                           alignment: WrapAlignment.center,
                           spacing: 12,
@@ -304,13 +308,22 @@ class RecommendationFeed extends StatelessWidget {
                   padding: const EdgeInsets.all(20),
                   child:
                       moreError == null
-                          ? const Center(
-                            child: SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          )
+                          ? loadingMore
+                              ? SourceLoadingIndicator(
+                                source: activeSource.value,
+                                requestKey: moreBooks.length,
+                                size: 24,
+                                centered: false,
+                              )
+                              : const Center(
+                                child: SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              )
                           : Center(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
@@ -323,6 +336,7 @@ class RecommendationFeed extends StatelessWidget {
                                               .loadMore(),
                                   child: Text(moreError!),
                                 ),
+                                SourceWebsiteLink(source: activeSource.value),
                                 if (activeSource.value == SourceId.huanmeng)
                                   BiliRecoveryButton(
                                     error: moreCause,
