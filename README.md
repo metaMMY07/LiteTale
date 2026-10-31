@@ -8,13 +8,11 @@
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
-> **开发公告（2026-10-25）**：因本人课业较为繁重，LiteTale 暂缓开发。欢迎使用者继续提出建议，帮助改进软件。
+## 最新正式版 LiteTale 1.1.1（2026-10-31）
 
-## 最新正式版 LiteTale 1.1.0（2026-10-26）
+[Android ARM64 APK（build79）](https://github.com/metaMMY07/LiteTale/releases/download/v1.1.1/LiteTale-1.1.1%2B79-arm64-v8a.apk) · [Android x86_64 APK（build79）](https://github.com/metaMMY07/LiteTale/releases/download/v1.1.1/LiteTale-1.1.1%2B79-x86_64.apk) · [iOS IPA（build21，未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.1.1/LiteTale-1.1.1-ios-21-unsigned.ipa) · [校验值](https://github.com/metaMMY07/LiteTale/releases/download/v1.1.1/SHA256SUMS-v1.1.1.txt) · [发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v1.1.1)
 
-[下载 Android ARM64 APK（build 77）](https://github.com/metaMMY07/LiteTale/releases/download/v1.1.0/LiteTale-1.1.0%2B77-arm64-v8a.apk) · [下载 iOS IPA（build 18，未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.1.0/LiteTale-1.1.0-ios-18-unsigned.ipa) · [发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v1.1.0)
-
-本版内置幻梦轻小说书源，更新 Android Material You 卡片与底部毛玻璃栏，并更新 iOS 原生配色、液态玻璃和书源导入体验。iOS IPA 需自行签名后侧载；本次 Android 仅提供 ARM64 包。
+本版加入幻梦轻小说书源，提供 Android 书源快捷切换和原网站访问入口，并保留 iOS 原生液态玻璃选源菜单。Android 安装包沿用现有签名；iOS IPA 需自行签名后侧载。
 
 ## LiteTale 1.0.0
 
