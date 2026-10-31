@@ -1,9 +1,10 @@
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
-import 'package:wild/widgets/app_loading_indicator.dart';
+import 'package:wild/widgets/source_website.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/sources/source_api.dart';
+import 'package:wild/services/read_request.dart';
 import '../widgets/novel_cover_card.dart';
 import '../widgets/wenku8_recovery_button.dart';
 import '../widgets/bili_recovery_button.dart';
@@ -41,6 +42,7 @@ class _SearchPageState extends State<SearchPage> {
   bool _loading = false;
   Object? _error;
   int _request = 0;
+  ReadRequest? _readRequest;
   String _submittedKey = '';
   String _submittedType = '';
 
@@ -64,6 +66,7 @@ class _SearchPageState extends State<SearchPage> {
     activeSource.removeListener(_sourceChanged);
     sourceRevision.removeListener(_sourceChanged);
     _request++;
+    _readRequest?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -91,6 +94,7 @@ class _SearchPageState extends State<SearchPage> {
 
   void _resetQuery() {
     _request++;
+    _readRequest?.cancel();
     setState(() {
       _loading = false;
       _results = null;
@@ -118,6 +122,8 @@ class _SearchPageState extends State<SearchPage> {
     }
     final page = more ? _results!.currentPage + 1 : 1;
     final request = ++_request;
+    _readRequest?.cancel();
+    final readRequest = _readRequest = ReadRequest();
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _loading = true;
@@ -127,15 +133,25 @@ class _SearchPageState extends State<SearchPage> {
       _submittedType = type;
     });
     try {
-      final result = await (widget.searcher ?? search)(
-            searchType: type,
-            searchKey: key,
-            page: page,
-          )
-          .timeout(
-            const Duration(seconds: 135),
-            onTimeout: () => throw Exception('搜索超时，请检查网络后重试'),
-          );
+      final result = await ReadRequest.run(
+        readRequest,
+        () => readRequest
+            .wait(
+              (widget.searcher ?? search)(
+                searchType: type,
+                searchKey: key,
+                page: page,
+              ),
+            )
+            .timeout(
+              const Duration(seconds: 135),
+              onTimeout: () {
+                final error = Exception('搜索超时，请检查网络后重试');
+                readRequest.cancel(error);
+                throw error;
+              },
+            ),
+      );
       if (!mounted || request != _request) return;
       setState(() {
         final records =
@@ -160,17 +176,10 @@ class _SearchPageState extends State<SearchPage> {
 
   Widget _body() {
     if (_loading && _results == null) {
-      return const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AppLoadingIndicator(),
-            SizedBox(height: 20),
-            Text('正在搜索，请稍候…'),
-            SizedBox(height: 8),
-            Text('首次搜索可能需要较长时间'),
-          ],
-        ),
+      return SourceLoadingIndicator(
+        source: activeSource.value,
+        requestKey: _request,
+        message: '正在搜索，请稍候…',
       );
     }
     if (_error != null && _results == null) {
@@ -185,6 +194,7 @@ class _SearchPageState extends State<SearchPage> {
               const Text('搜索未完成'),
               const SizedBox(height: 8),
               Text(_error.toString(), textAlign: TextAlign.center),
+              SourceWebsiteLink(source: activeSource.value),
               const SizedBox(height: 16),
               AppButton.filledIcon(
                 onPressed: _search,
@@ -247,7 +257,13 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
           ),
-          if (_loading) const LinearProgressIndicator(),
+          if (_loading)
+            SourceLoadingIndicator(
+              source: activeSource.value,
+              requestKey: _request,
+              size: 24,
+              centered: false,
+            ),
           if (_error != null)
             Wenku8RecoveryButton(
               error: _error,

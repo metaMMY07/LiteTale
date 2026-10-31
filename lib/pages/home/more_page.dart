@@ -2,6 +2,7 @@ import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/theme/material_you.dart';
+import 'package:wild/settings/settings_widgets.dart' show SettingsTileGroup;
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/pages/auth_cubit.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -273,24 +274,8 @@ class MorePage extends StatelessWidget {
                     key: const ValueKey('more-navigation-card'),
                     margin: EdgeInsets.zero,
                     clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      children: [
-                        for (
-                          var index = 0;
-                          index < entries.length;
-                          index++
-                        ) ...[
-                          if (index > 0 && !usesAppleGlass)
-                            Divider(
-                              height: 1,
-                              indent: 76,
-                              endIndent: 16,
-                              color: colors.outlineVariant,
-                            ),
-                          entries[index],
-                        ],
-                      ],
-                    ),
+                    color: usesMaterialYou ? colors.surfaceContainerLow : null,
+                    child: SettingsTileGroup(children: entries),
                   ),
                 ],
               ),

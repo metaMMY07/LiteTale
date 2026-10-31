@@ -8,6 +8,7 @@ import 'package:wild/src/rust/api/font.dart';
 import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'book_source.dart';
+import 'package:wild/services/bounded_detail_cache.dart';
 import 'shelf_session.dart';
 
 typedef ShelfInvoke =
@@ -133,12 +134,16 @@ class LightNovelShelfSource implements BookSource {
     ShelfInvoke? invoke,
     ShelfSession? session,
     LightNovelShelfService? service,
+    int detailCacheBytes = 4 * 1024 * 1024,
   }) : _invoke =
            invoke ??
            ((method, args) =>
-               _call(method, args, session: session, service: service));
+               _call(method, args, session: session, service: service)),
+       _details = BoundedDetailCache<String>(maxWeight: detailCacheBytes);
   final ShelfInvoke _invoke;
-  final _details = <String, SourceBookDetail>{};
+  final BoundedDetailCache<String> _details;
+  String? _activeBook;
+  SourceBookDetail? _activeCatalog;
   final _pendingDetails = <String, Future<SourceBookDetail>>{};
   final _fonts = <String, String>{};
   int _fontSequence = 0;
@@ -180,6 +185,8 @@ class LightNovelShelfSource implements BookSource {
   void clearSessionCache() {
     _sessionGeneration++;
     _details.clear();
+    _activeBook = null;
+    _activeCatalog = null;
     _pendingDetails.clear();
   }
 
@@ -278,13 +285,27 @@ class LightNovelShelfSource implements BookSource {
     final result = shelfDetail(
       await _invoke('GetBookInfo', {'Id': remoteShelfId(bookId)}) as Map,
     );
-    if (generation == _sessionGeneration) _details[bookId] = result;
+    if (generation == _sessionGeneration) {
+      _details[bookId] = result;
+      if (_activeBook == bookId) _activeCatalog = result;
+    }
     return result;
   }
 
   @override
   Future<SourceChapter> chapter(String bookId, String chapterId) async {
-    final book = _details[bookId] ?? await detail(bookId);
+    final generation = _sessionGeneration;
+    // One active reader directory is a working set, independent of admission
+    // to the cold cache. Oversized books must not fetch the catalogue per page.
+    final book =
+        (_activeBook == bookId ? _activeCatalog : null) ??
+        _details[bookId] ??
+        await detail(bookId);
+    if (generation != _sessionGeneration) {
+      throw const ShelfApiException('轻书架账号状态已变化，请重试。');
+    }
+    _activeBook = bookId;
+    _activeCatalog = book;
     final index = book.volumes
         .expand((v) => v.chapters)
         .toList()

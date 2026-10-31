@@ -11,10 +11,27 @@ import 'package:wild/sources/source_api.dart' as api;
 import 'package:wild/services/bili_browser.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
+import 'package:wild/theme/material_you.dart';
+import 'package:wild/widgets/material_source_picker.dart';
+import 'package:wild/widgets/source_website.dart';
 
 /// Kept within settings; the rest of the app shows exactly one provider.
 class SourceSettings extends StatelessWidget {
   const SourceSettings({super.key});
+
+  Future<void> _selectSource(BuildContext context, SourceId? value) async {
+    if (value == null || value == activeSource.value) return;
+    try {
+      await api.selectSource(value);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('书源选择未能保存，请重试')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<int>(
     valueListenable: sourceRevision,
@@ -36,32 +53,36 @@ class SourceSettings extends StatelessWidget {
                       const SizedBox(height: 8),
                       const Text('一次使用一个书源。切换后保留各自的登录状态。'),
                       const SizedBox(height: 12),
-                      AppDropdownButtonFormField<SourceId>(
-                        value: source,
-                        decoration: const InputDecoration(labelText: '当前书源'),
-                        items:
-                            api.availableSources
-                                .map(
-                                  (s) => DropdownMenuItem(
-                                    value: s,
-                                    child: Text(s.label),
-                                  ),
-                                )
-                                .toList(),
-                        onChanged: (value) async {
-                          if (value == null || value == activeSource.value) {
-                            return;
-                          }
-                          try {
-                            await api.selectSource(value);
-                          } catch (_) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('书源选择未能保存，请重试')),
-                              );
-                            }
-                          }
-                        },
+                      if (usesMaterialYou)
+                        MaterialSourcePicker(
+                          value: source,
+                          sources: api.availableSources,
+                          onChanged: (value) => _selectSource(context, value),
+                        )
+                      else
+                        AppDropdownButtonFormField<SourceId>(
+                          key: const ValueKey('source-picker-button'),
+                          value: source,
+                          decoration: const InputDecoration(labelText: '当前书源'),
+                          items:
+                              api.availableSources
+                                  .map(
+                                    (s) => DropdownMenuItem(
+                                      value: s,
+                                      child: Text(
+                                        usesAppleGlass && s.isRule
+                                            ? '${s.label}（导入）'
+                                            : s.label,
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                          onChanged: (value) => _selectSource(context, value),
+                        ),
+                      const SizedBox(height: 12),
+                      SourceWebsiteLink(
+                        source: source,
+                        textAlign: TextAlign.start,
                       ),
                       const SizedBox(height: 12),
                       if (source == SourceId.bili)
@@ -91,6 +112,12 @@ class SourceSettings extends StatelessWidget {
                             ),
                           ],
                         )
+                      else if (source == SourceId.huanmeng)
+                        const Text(
+                          '幻梦原站公开接口 · 无需登录\n支持搜索、分类、目录与正文；下架或受限书籍以原站返回为准。\n收藏与阅读记录保留在本机。',
+                        )
+                      else if (source == SourceId.esj)
+                        const Text('此书源已从内置列表撤下，请切换其他书源。\n原有收藏与阅读记录保留在本机。')
                       else if (source == SourceId.lnovel || source.isRule)
                         Text('公开书源 · 无需登录\n收藏与阅读记录保存在本机')
                       else

@@ -13,8 +13,9 @@ import 'package:wild/theme/material_you.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
-import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/widgets/theme_reveal_host.dart';
+import 'package:wild/widgets/discovery_tab.dart';
+import 'package:wild/widgets/source_website.dart';
 
 import '../../src/rust/api/database.dart';
 import 'package:wild/sources/source_api.dart';
@@ -101,50 +102,40 @@ class _IndexPageState extends State<IndexPage>
     final colors = Theme.of(context).colorScheme;
     final tabs = TabBar(
       controller: _tabController,
+      indicator:
+          usesMaterialYou
+              ? BoxDecoration(
+                color: colors.secondaryContainer,
+                borderRadius: BorderRadius.circular(24),
+              )
+              : null,
+      indicatorSize: usesMaterialYou ? TabBarIndicatorSize.tab : null,
       indicatorPadding:
-          usesMaterialYou ? const EdgeInsets.only(bottom: 5) : EdgeInsets.zero,
+          usesMaterialYou ? const EdgeInsets.all(4) : EdgeInsets.zero,
+      labelColor: usesMaterialYou ? colors.onSecondaryContainer : null,
+      unselectedLabelColor: usesMaterialYou ? colors.onSurfaceVariant : null,
+      labelStyle:
+          usesMaterialYou
+              ? Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700)
+              : null,
+      dividerColor: usesMaterialYou ? Colors.transparent : null,
       tabs: [
         const Tab(text: '推荐'),
         const Tab(text: '分类'),
-        const Tab(text: '排行'),
+        Tab(text: activeSource.value == SourceId.huanmeng ? '完结' : '排行'),
         Tab(text: activeSource.value == SourceId.wenku8 ? '完结' : '全部'),
       ],
     );
     if (!usesMaterialYou) return tabs;
-
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: colors.surfaceContainer,
-          border: Border.all(color: colors.outlineVariant),
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(18),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: Row(
-                    children: [
-                      for (var index = 0; index < 4; index++) ...[
-                        const Expanded(child: SizedBox.shrink()),
-                        if (index < 3)
-                          Container(
-                            width: 1,
-                            height: 26,
-                            color: colors.outline.withValues(alpha: 0.45),
-                          ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              tabs,
-            ],
-          ),
-        ),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+      child: Material(
+        color: materialSurface(colors, colors.surfaceContainerHigh, .08),
+        borderRadius: BorderRadius.circular(28),
+        clipBehavior: Clip.antiAlias,
+        child: tabs,
       ),
     );
   }
@@ -171,6 +162,10 @@ class _IndexPageState extends State<IndexPage>
                       ),
                       AppleGlassSegments(
                         index: _tabController.index,
+                        thirdLabel:
+                            activeSource.value == SourceId.huanmeng
+                                ? '完结'
+                                : '排行',
                         lastLabel:
                             activeSource.value == SourceId.wenku8 ? '完结' : '全部',
                         onSelect: _tabController.animateTo,
@@ -181,6 +176,24 @@ class _IndexPageState extends State<IndexPage>
                 ),
               )
               : AppBar(
+                leadingWidth:
+                    MediaQuery.sizeOf(context).width.clamp(0, 400) * .42,
+                leading: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 0, 4),
+                  child: Tooltip(
+                    message: '切换书源：${activeSource.value.label}',
+                    child: AppButton.tonalIcon(
+                      key: const ValueKey('discovery-source-switch'),
+                      onPressed: _openSources,
+                      icon: const Icon(Icons.local_library_outlined, size: 20),
+                      label: Text(
+                        activeSource.value.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ),
                 title: Text(usesMaterialYou ? '发现' : '轻小说文库'),
                 actions: [
                   if (usesMaterialYou)
@@ -287,22 +300,33 @@ class _IndexPageState extends State<IndexPage>
                   ),
                 ),
               )
-              : TabBarView(
-                controller: _tabController,
-                children:
-                    activeSource.value == SourceId.wenku8
-                        ? const [
-                          RecommendPage(),
-                          CategoryPage(),
-                          ToplistPage(),
-                          ArticlelistPage(),
-                        ]
-                        : const [
-                          RecommendPage(),
-                          ShelfCatalogPage(mode: 'category'),
-                          ShelfCatalogPage(mode: 'rank'),
-                          ShelfCatalogPage(mode: 'all'),
-                        ],
+              : AnimatedBuilder(
+                animation: Listenable.merge([activeSource, sourceRevision]),
+                builder:
+                    (context, _) => TabBarView(
+                      key: ValueKey((activeSource.value, sourceRevision.value)),
+                      controller: _tabController,
+                      children:
+                          activeSource.value == SourceId.wenku8
+                              ? const [
+                                DiscoveryTab(child: RecommendPage()),
+                                DiscoveryTab(child: CategoryPage()),
+                                DiscoveryTab(child: ToplistPage()),
+                                DiscoveryTab(child: ArticlelistPage()),
+                              ]
+                              : const [
+                                DiscoveryTab(child: RecommendPage()),
+                                DiscoveryTab(
+                                  child: ShelfCatalogPage(mode: 'category'),
+                                ),
+                                DiscoveryTab(
+                                  child: ShelfCatalogPage(mode: 'rank'),
+                                ),
+                                DiscoveryTab(
+                                  child: ShelfCatalogPage(mode: 'all'),
+                                ),
+                              ],
+                    ),
               ),
     );
   }
@@ -337,6 +361,7 @@ class _ToplistPageState extends State<ToplistPage> {
   bool _isLoading = false;
   String? _errorMessage;
   static const _keySort = 'toplist_page_sort';
+  int _request = 0;
 
   @override
   void initState() {
@@ -347,6 +372,7 @@ class _ToplistPageState extends State<ToplistPage> {
   Future<void> _loadSavedState() async {
     try {
       final savedSort = await loadProperty(key: _keySort);
+      if (!mounted) return;
       if (savedSort.isNotEmpty) {
         setState(() {
           _selectedSort = savedSort;
@@ -357,6 +383,7 @@ class _ToplistPageState extends State<ToplistPage> {
       }
     } catch (e) {
       // 如果加载失败，使用默认值
+      if (!mounted) return;
       _loadToplist(refresh: true);
     }
   }
@@ -370,7 +397,15 @@ class _ToplistPageState extends State<ToplistPage> {
   }
 
   Future<void> _loadToplist({bool refresh = false}) async {
-    if (_isLoading) return;
+    if (_isLoading && !refresh) return;
+    final request = ++_request;
+    final sort = _selectedSort;
+    final revision = sourceRevision.value;
+    bool current() =>
+        mounted &&
+        request == _request &&
+        sourceRevision.value == revision &&
+        activeSource.value == SourceId.wenku8;
     setState(() {
       _isLoading = true;
       if (refresh) {
@@ -381,9 +416,10 @@ class _ToplistPageState extends State<ToplistPage> {
 
     try {
       final page = await toplist(
-        sort: _selectedSort,
+        sort: sort,
         page: refresh ? 1 : (_currentPage?.currentPage ?? 0) + 1,
       );
+      if (!current()) return;
       setState(() {
         if (refresh) {
           _currentPage = page;
@@ -398,11 +434,18 @@ class _ToplistPageState extends State<ToplistPage> {
         _errorMessage = null;
       });
     } catch (e) {
+      if (!current()) return;
       setState(() {
         _isLoading = false;
         _errorMessage = e.toString();
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _request++;
+    super.dispose();
   }
 
   @override
@@ -487,6 +530,7 @@ class _ToplistPageState extends State<ToplistPage> {
                                 style: Theme.of(context).textTheme.bodyMedium,
                                 textAlign: TextAlign.start,
                               ),
+                              const SourceWebsiteLink(source: SourceId.wenku8),
                             ],
                           ),
                         ),
@@ -494,7 +538,10 @@ class _ToplistPageState extends State<ToplistPage> {
                     ),
                   )
                   : _currentPage == null
-                  ? const CenteredLoadingIndicator()
+                  ? SourceLoadingIndicator(
+                    source: SourceId.wenku8,
+                    requestKey: _request,
+                  )
                   : NotificationListener<ScrollNotification>(
                     onNotification: (notification) {
                       if (notification is ScrollEndNotification &&
@@ -520,6 +567,13 @@ class _ToplistPageState extends State<ToplistPage> {
                               : 0),
                       itemBuilder: (context, index) {
                         if (index >= _currentPage!.records.length) {
+                          if (_isLoading) {
+                            return SourceLoadingIndicator(
+                              source: SourceId.wenku8,
+                              requestKey: _request,
+                              size: 24,
+                            );
+                          }
                           return const Center(
                             child: Padding(
                               padding: EdgeInsets.all(16.0),
@@ -549,6 +603,7 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
   PageStatsNovelCover? _currentPage;
   bool _isLoading = false;
   String? _errorMessage;
+  int _request = 0;
 
   @override
   void initState() {
@@ -557,7 +612,14 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
   }
 
   Future<void> _loadArticlelist({bool refresh = false}) async {
-    if (_isLoading) return;
+    if (_isLoading && !refresh) return;
+    final request = ++_request;
+    final revision = sourceRevision.value;
+    bool current() =>
+        mounted &&
+        request == _request &&
+        sourceRevision.value == revision &&
+        activeSource.value == SourceId.wenku8;
     setState(() {
       _isLoading = true;
       if (refresh) {
@@ -571,6 +633,7 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
         fullflag: 1,
         page: refresh ? 1 : (_currentPage?.currentPage ?? 0) + 1,
       );
+      if (!current()) return;
       setState(() {
         if (refresh) {
           _currentPage = page;
@@ -585,11 +648,18 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
         _errorMessage = null;
       });
     } catch (e) {
+      if (!current()) return;
       setState(() {
         _isLoading = false;
         _errorMessage = e.toString();
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _request++;
+    super.dispose();
   }
 
   @override
@@ -621,6 +691,7 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
                       style: Theme.of(context).textTheme.bodyMedium,
                       textAlign: TextAlign.start,
                     ),
+                    const SourceWebsiteLink(source: SourceId.wenku8),
                   ],
                 ),
               ),
@@ -628,7 +699,7 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
           ),
         )
         : _currentPage == null
-        ? const CenteredLoadingIndicator()
+        ? SourceLoadingIndicator(source: SourceId.wenku8, requestKey: _request)
         : NotificationListener<ScrollNotification>(
           onNotification: (notification) {
             if (notification is ScrollEndNotification &&
@@ -652,6 +723,13 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
                 (_currentPage!.currentPage < _currentPage!.maxPage ? 1 : 0),
             itemBuilder: (context, index) {
               if (index >= _currentPage!.records.length) {
+                if (_isLoading) {
+                  return SourceLoadingIndicator(
+                    source: SourceId.wenku8,
+                    requestKey: _request,
+                    size: 24,
+                  );
+                }
                 return const Center(
                   child: Padding(
                     padding: EdgeInsets.all(16.0),

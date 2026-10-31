@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:wild/services/read_request.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
 import 'dart:io';
 import 'dart:typed_data';
@@ -37,6 +38,7 @@ class ReaderCubit extends Cubit<ReaderState> {
   bool _warmingBook = false;
   bool _reflowingBook = false;
   int _request = 0;
+  ReadRequest? _readRequest;
   String? _loadedContent;
   ReaderDocument? _loadedDocument;
   String? _contentAid;
@@ -141,6 +143,8 @@ class ReaderCubit extends Cubit<ReaderState> {
   }) async {
     if (_closing || isClosed) return;
     final request = ++_request;
+    _readRequest?.cancel();
+    final readRequest = _readRequest = ReadRequest();
     final targetAid = aid ?? initialAid;
     final targetCid = cid ?? initialCid;
     if (sourceOf(targetAid) == SourceId.localEpub) {
@@ -167,16 +171,21 @@ class ReaderCubit extends Cubit<ReaderState> {
       initialCid = targetCid;
 
       final chapterTitle = _findChapterTitle(targetAid, targetCid);
-      final chapter = await _read(
-        aid: targetAid,
-        cid: targetCid,
-        isCurrent:
-            () =>
-                !_closing &&
-                !isClosed &&
-                request == _request &&
-                sourceMatches() &&
-                _session(targetAid) == session,
+      final chapter = await ReadRequest.run(
+        readRequest,
+        () => readRequest.wait(
+          _read(
+            aid: targetAid,
+            cid: targetCid,
+            isCurrent:
+                () =>
+                    !_closing &&
+                    !isClosed &&
+                    request == _request &&
+                    sourceMatches() &&
+                    _session(targetAid) == session,
+          ),
+        ),
       );
       if (_closing || isClosed || request != _request || !sourceMatches()) {
         return;
@@ -309,6 +318,8 @@ class ReaderCubit extends Cubit<ReaderState> {
     }
     final request = ++_request;
     final targetAid = initialAid;
+    _readRequest?.cancel();
+    final readRequest = _readRequest = ReadRequest();
     final targetCid = initialCid;
     final session = _session(targetAid);
     final revision = sourceRevision.value;
@@ -327,16 +338,21 @@ class ReaderCubit extends Cubit<ReaderState> {
       if (_contentAid != targetAid ||
           _contentCid != targetCid ||
           content == null) {
-        final chapter = await _read(
-          aid: targetAid,
-          cid: targetCid,
-          isCurrent:
-              () =>
-                  !_closing &&
-                  !isClosed &&
-                  request == _request &&
-                  sourceMatches() &&
-                  _session(targetAid) == session,
+        final chapter = await ReadRequest.run(
+          readRequest,
+          () => readRequest.wait(
+            _read(
+              aid: targetAid,
+              cid: targetCid,
+              isCurrent:
+                  () =>
+                      !_closing &&
+                      !isClosed &&
+                      request == _request &&
+                      sourceMatches() &&
+                      _session(targetAid) == session,
+            ),
+          ),
         );
         if (_closing ||
             isClosed ||
@@ -954,6 +970,7 @@ class ReaderCubit extends Cubit<ReaderState> {
   @override
   Future<void> close() async {
     _closing = true;
+    _readRequest?.cancel();
     _bookFlow?.close();
     _cssReader?.close();
     _prefetch?.cancel();

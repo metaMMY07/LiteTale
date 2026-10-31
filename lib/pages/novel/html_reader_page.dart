@@ -1,5 +1,6 @@
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/source_website.dart';
 import 'dart:math' as math;
 import 'package:wild/models/reader_page.dart' show ReaderFragment;
 import 'package:wild/models/reader_document.dart' show ReaderLength;
@@ -401,51 +402,69 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                                     },
                                     child:
                                         state is HtmlReaderLoading
-                                            ? const Center(
-                                              child:
-                                                  CircularProgressIndicator(),
+                                            ? SourceLoadingIndicator(
+                                              source: sourceOf(
+                                                context
+                                                    .read<HtmlReaderCubit>()
+                                                    .initialAid,
+                                              ),
+                                              requestKey: state,
                                             )
                                             : state is HtmlReaderError
                                             ? Center(
-                                              child: Column(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment.center,
-                                                children: [
-                                                  Text(
-                                                    state.error,
-                                                    style: TextStyle(
-                                                      color: textColor,
+                                              child: SingleChildScrollView(
+                                                padding: const EdgeInsets.all(
+                                                  16,
+                                                ),
+                                                child: Column(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.center,
+                                                  children: [
+                                                    Text(
+                                                      state.error,
+                                                      style: TextStyle(
+                                                        color: textColor,
+                                                      ),
                                                     ),
-                                                  ),
-                                                  const SizedBox(height: 16),
-                                                  AppButton.elevated(
-                                                    onPressed: () {
-                                                      context
-                                                          .read<
-                                                            HtmlReaderCubit
-                                                          >()
-                                                          .loadChapter();
-                                                    },
-                                                    child: const Text('重试'),
-                                                  ),
-                                                  BiliRecoveryButton(
-                                                    error: state.cause,
-                                                    source: sourceOf(
-                                                      context
-                                                          .read<
-                                                            HtmlReaderCubit
-                                                          >()
-                                                          .initialAid,
+                                                    const SizedBox(height: 16),
+                                                    SourceWebsiteLink(
+                                                      source: sourceOf(
+                                                        context
+                                                            .read<
+                                                              HtmlReaderCubit
+                                                            >()
+                                                            .initialAid,
+                                                      ),
                                                     ),
-                                                    onRecovered:
-                                                        () =>
-                                                            context
-                                                                .read<
-                                                                  HtmlReaderCubit
-                                                                >()
-                                                                .loadChapter(),
-                                                  ),
-                                                ],
+                                                    AppButton.elevated(
+                                                      onPressed: () {
+                                                        context
+                                                            .read<
+                                                              HtmlReaderCubit
+                                                            >()
+                                                            .loadChapter();
+                                                      },
+                                                      child: const Text('重试'),
+                                                    ),
+                                                    BiliRecoveryButton(
+                                                      error: state.cause,
+                                                      source: sourceOf(
+                                                        context
+                                                            .read<
+                                                              HtmlReaderCubit
+                                                            >()
+                                                            .initialAid,
+                                                      ),
+                                                      onRecovered:
+                                                          () =>
+                                                              context
+                                                                  .read<
+                                                                    HtmlReaderCubit
+                                                                  >()
+                                                                  .loadChapter(),
+                                                    ),
+                                                  ],
+                                                ),
                                               ),
                                             )
                                             : state is HtmlReaderLoaded

@@ -11,15 +11,19 @@ import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
 import 'package:wild/widgets/novel_card.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
-import 'package:wild/widgets/app_loading_indicator.dart';
+import 'package:wild/widgets/source_website.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/bili_api_source.dart';
 import 'package:wild/sources/bili_site_source.dart';
 import 'package:wild/services/bili_browser.dart';
+import 'package:wild/services/huanmeng_api_session.dart';
+import 'package:wild/sources/huanmeng_source.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
 import 'package:wild/widgets/wenku8_verification_page.dart';
 import 'package:wild/settings/source_settings_page.dart';
+import 'package:wild/sources/rule_source_registry.dart';
+import 'package:wild/pages/search_page.dart';
 
 import 'recommend_cubit.dart';
 
@@ -34,7 +38,10 @@ class RecommendPage extends StatelessWidget {
         body: BlocBuilder<RecommendCubit, RecommendState>(
           builder: (context, state) {
             if (state is RecommendLoading) {
-              return const CenteredLoadingIndicator();
+              return SourceLoadingIndicator(
+                source: activeSource.value,
+                requestKey: state,
+              );
             }
             if (state is RecommendError) {
               final isWenku8 = activeSource.value == SourceId.wenku8;
@@ -62,13 +69,17 @@ class RecommendPage extends StatelessWidget {
                               : state.cause is ShelfApiException ||
                                   state.cause is BiliApiException ||
                                   state.cause is BiliSiteException ||
-                                  state.cause is BiliBrowserException
+                                  state.cause is BiliBrowserException ||
+                                  state.cause is HuanmengVerificationRequired ||
+                                  state.cause is HuanmengApiException ||
+                                  state.cause is HuanmengSourceException
                               ? state.message
                               : '当前书源暂时无法加载推荐，请检查网络后重试。',
                           textAlign: TextAlign.center,
                           style: Theme.of(context).textTheme.bodyLarge,
                         ),
                         const SizedBox(height: 20),
+                        SourceWebsiteLink(source: activeSource.value),
                         Wrap(
                           alignment: WrapAlignment.center,
                           spacing: 12,
@@ -117,6 +128,24 @@ class RecommendPage extends StatelessWidget {
               );
             }
             if (state is RecommendLoaded) {
+              final rule =
+                  RuleSourceRegistry
+                      .instance[activeSource.value.ruleId]
+                      ?.definition;
+              if (usesAppleGlass &&
+                  rule != null &&
+                  !rule.capabilities.discover &&
+                  rule.capabilities.search) {
+                return SearchOnlySourceNotice(
+                  name: rule.name,
+                  onSearch:
+                      () => Navigator.of(context).push(
+                        HorizontalCoverPageRoute(
+                          builder: (_) => const SearchPage(),
+                        ),
+                      ),
+                );
+              }
               return RefreshIndicator(
                 onRefresh:
                     () =>
@@ -129,6 +158,7 @@ class RecommendPage extends StatelessWidget {
                   hasMore: state.hasMore,
                   loadingMore: state.loadingMore,
                   moreError: state.moreError,
+                  moreCause: state.moreCause,
                 ),
               );
             }
@@ -138,6 +168,40 @@ class RecommendPage extends StatelessWidget {
       ),
     );
   }
+}
+
+class SearchOnlySourceNotice extends StatelessWidget {
+  const SearchOnlySourceNotice({
+    super.key,
+    required this.name,
+    required this.onSearch,
+  });
+  final String name;
+  final VoidCallback onSearch;
+  @override
+  Widget build(BuildContext context) => SingleChildScrollView(
+    physics: const AlwaysScrollableScrollPhysics(),
+    padding: const EdgeInsets.all(16),
+    child: AppleGlassCard(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(name, style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            const Text('此书源通过搜索查找书籍，未提供首页推荐。'),
+            const SizedBox(height: 16),
+            AppButton.filledIcon(
+              onPressed: onSearch,
+              icon: const Icon(Icons.search),
+              label: const Text('搜索书名或作者'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 Future<void> _openWenku8Site(BuildContext context) async {
@@ -166,6 +230,7 @@ class RecommendationFeed extends StatelessWidget {
     this.hasMore = false,
     this.loadingMore = false,
     this.moreError,
+    this.moreCause,
   });
 
   final List<w8.HomeBlock> blocks;
@@ -174,6 +239,7 @@ class RecommendationFeed extends StatelessWidget {
   final List<w8.NovelCover> moreBooks;
   final bool hasMore, loadingMore;
   final String? moreError;
+  final Object? moreCause;
 
   @override
   Widget build(BuildContext context) {
@@ -242,19 +308,46 @@ class RecommendationFeed extends StatelessWidget {
                   padding: const EdgeInsets.all(20),
                   child:
                       moreError == null
-                          ? const Center(
-                            child: SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          )
+                          ? loadingMore
+                              ? SourceLoadingIndicator(
+                                source: activeSource.value,
+                                requestKey: moreBooks.length,
+                                size: 24,
+                                centered: false,
+                              )
+                              : const Center(
+                                child: SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              )
                           : Center(
-                            child: AppButton.text(
-                              onPressed:
-                                  () =>
-                                      context.read<RecommendCubit>().loadMore(),
-                              child: Text(moreError!),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                AppButton.text(
+                                  onPressed:
+                                      () =>
+                                          context
+                                              .read<RecommendCubit>()
+                                              .loadMore(),
+                                  child: Text(moreError!),
+                                ),
+                                SourceWebsiteLink(source: activeSource.value),
+                                if (activeSource.value == SourceId.huanmeng)
+                                  BiliRecoveryButton(
+                                    error: moreCause,
+                                    source: SourceId.huanmeng,
+                                    onRecovered:
+                                        () =>
+                                            context
+                                                .read<RecommendCubit>()
+                                                .loadMore(),
+                                  ),
+                              ],
                             ),
                           ),
                 ),

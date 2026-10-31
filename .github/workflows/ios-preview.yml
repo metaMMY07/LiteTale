@@ -71,6 +71,8 @@ jobs:
           flutter config --no-analytics
           flutter precache --ios
           flutter pub get --enforce-lockfile
+      - name: Check Dart dependencies before native compilation
+        run: dart analyze --no-fatal-warnings lib
       - name: Resolve native plugins
         working-directory: ios
         run: pod install

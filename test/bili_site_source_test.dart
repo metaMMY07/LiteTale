@@ -143,6 +143,30 @@ BiliSiteSource _source({
 );
 
 void main() {
+  test('browser detail requests metadata and catalog as one batch', () async {
+    var batches = 0, singles = 0;
+    final source = BiliSiteSource(
+      searcher: (_, __) => throw UnimplementedError(),
+      chapterLoader: (_, __) => throw UnimplementedError(),
+      documentLoader: (_) async {
+        singles++;
+        return _detail;
+      },
+      documentsLoader: (uris) async {
+        batches++;
+        expect(uris.map((u) => u.path), [
+          '/novel/2844.html',
+          '/novel/2844/catalog',
+        ]);
+        return [_detail, _catalog()];
+      },
+    );
+    final detail = await source.detail('bili:2844');
+    expect(detail.info.title, 'SeaBed');
+    expect(detail.volumes, isNotEmpty);
+    expect(batches, 1);
+    expect(singles, 0);
+  });
   group('BiliSiteSource', () {
     test(
       'desktop homepage cover belongs to its own sibling book link',

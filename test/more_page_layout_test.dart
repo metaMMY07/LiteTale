@@ -65,7 +65,7 @@ void main() {
       final settingsRect = tester.getRect(settingsRow);
       expect(find.text('显示'), findsOneWidget);
       expect(find.text('设置'), findsNothing);
-      expect(settingsRect.top - sourceRect.bottom, closeTo(1, 0.5));
+      expect(settingsRect.top - sourceRect.bottom, closeTo(2, 0.5));
       if (textScale == 1.0) {
         expect(sourceRect.height, settingsRect.height);
       }

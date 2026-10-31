@@ -13,7 +13,7 @@ import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/widgets/cf_action_loader.dart';
 import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
-import 'package:wild/widgets/app_loading_indicator.dart';
+import 'package:wild/widgets/source_website.dart';
 import 'package:wild/pages/shelf_login_page.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 
@@ -169,7 +169,10 @@ class NovelInfoPage extends StatelessWidget {
         body: BlocBuilder<NovelInfoCubit, NovelInfoState>(
           builder: (context, state) {
             if (state is NovelInfoLoading) {
-              return const CenteredLoadingIndicator();
+              return SourceLoadingIndicator(
+                source: sourceOf(novelId),
+                requestKey: state,
+              );
             }
             if (state is NovelInfoError) {
               if (state.loginRequired) {
@@ -180,6 +183,7 @@ class NovelInfoPage extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(state.message, textAlign: TextAlign.center),
+                        SourceWebsiteLink(source: sourceOf(novelId)),
                         const SizedBox(height: 16),
                         AppButton.filled(
                           onPressed: () async {
@@ -217,6 +221,7 @@ class NovelInfoPage extends StatelessWidget {
                         icon: const Icon(Icons.refresh),
                         label: const Text('重新加载'),
                       ),
+                      SourceWebsiteLink(source: sourceOf(novelId)),
                       Wenku8RecoveryButton(
                         error: state.cause ?? state.message,
                         source: sourceOf(novelId),

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/services/bili_browser.dart';
 import 'package:wild/utils/bili_site_dom.dart';
+import 'package:wild/services/read_request.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -308,6 +309,94 @@ void main() {
       expect(s.rendererGeneration, greaterThan(0));
     },
   );
+  test(
+    'metadata and catalogue use one browser operation and cleanup',
+    () async {
+      final p = _Port();
+      final s = session(p);
+      final result = await s.documents([
+        Uri.parse('https://www.bilinovel.net/novel/2844.html'),
+        Uri.parse('https://www.bilinovel.net/novel/2844/catalog'),
+      ]);
+      expect(result, hasLength(2));
+      expect(p.urls, [
+        'https://www.bilinovel.net/novel/2844.html',
+        'https://www.bilinovel.net/novel/2844/catalog',
+        'about:blank',
+      ]);
+      expect(p.modes, [false]);
+    },
+  );
+
+  test(
+    'leaving an active read releases its renderer without stale cleanup',
+    () async {
+      final oldPort = _Port()..documentGate = Completer<void>();
+      final s = session(oldPort);
+      final request = ReadRequest();
+      final old = ReadRequest.run(
+        request,
+        () => s.document(
+          Uri.parse('https://www.bilinovel.net/novel/2844/catalog'),
+        ),
+      );
+      final checked = expectLater(old, throwsA(isA<ReadCancelled>()));
+      await Future<void>.delayed(Duration.zero);
+      expect(oldPort.documentProbes, 1);
+      request.cancel();
+      await checked;
+      final newPort = _Port();
+      s.attach(newPort, s.rendererGeneration);
+      expect(
+        await s.document(
+          Uri.parse('https://www.bilinovel.net/novel/5/catalog'),
+        ),
+        contains('volume-list'),
+      );
+      oldPort.documentGate!.complete();
+      await Future<void>.delayed(Duration.zero);
+      expect(newPort.urls, [
+        'https://www.bilinovel.net/novel/5/catalog',
+        'about:blank',
+      ]);
+      expect(oldPort.urls, isNot(contains('about:blank')));
+    },
+  );
+
+  test(
+    'cancelling a queued page never overtakes the active renderer',
+    () async {
+      final port = _Port()..documentGate = Completer<void>();
+      final s = session(port);
+      final active = s.document(
+        Uri.parse('https://www.bilinovel.net/novel/1/catalog'),
+      );
+      final request = ReadRequest();
+      final abandoned = ReadRequest.run(
+        request,
+        () =>
+            s.document(Uri.parse('https://www.bilinovel.net/novel/2/catalog')),
+      );
+      final checked = expectLater(abandoned, throwsA(isA<ReadCancelled>()));
+      await Future<void>.delayed(Duration.zero);
+      request.cancel();
+      await checked;
+      final last = s.document(
+        Uri.parse('https://www.bilinovel.net/novel/3/catalog'),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(port.urls, ['https://www.bilinovel.net/novel/1/catalog']);
+      expect(s.rendererGeneration, 0);
+      port.documentGate!.complete();
+      await active;
+      await last;
+      expect(
+        port.urls,
+        isNot(contains('https://www.bilinovel.net/novel/2/catalog')),
+      );
+    },
+  );
+
   test('allows only ordinary read/search pages on the known sites', () {
     expect(
       BiliBrowserSession.allowsNavigation(

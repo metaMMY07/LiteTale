@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:wild/services/read_request.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
 import 'package:wild/models/reader_document.dart';
 import 'package:wild/services/reader_chapter_prefetch.dart';
@@ -122,6 +123,7 @@ class HtmlReaderLoaded extends HtmlReaderState {
 
 class HtmlReaderCubit extends Cubit<HtmlReaderState> {
   int _request = 0;
+  ReadRequest? _readRequest;
   bool _closing = false;
   final Future<SourceChapter> Function({
     required String aid,
@@ -270,6 +272,8 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
   Future<void> loadChapter({String? aid, String? cid}) async {
     if (_closing || isClosed) return;
     final request = ++_request;
+    _readRequest?.cancel();
+    final readRequest = _readRequest = ReadRequest();
     final targetAid = aid ?? initialAid;
     final targetCid = cid ?? initialCid;
     _prefetch?.foreground(targetAid, targetCid);
@@ -311,18 +315,23 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
       }
 
       // 加载章节内容
-      final chapter = await _read(
-        aid: targetAid,
-        cid: targetCid,
-        isCurrent:
-            () =>
-                !_closing &&
-                !isClosed &&
-                request == _request &&
-                _session(targetAid) == session &&
-                (sourceOf(targetAid) != SourceId.bili ||
-                    (activeSource.value == SourceId.bili &&
-                        sourceRevision.value == revision)),
+      final chapter = await ReadRequest.run(
+        readRequest,
+        () => readRequest.wait(
+          _read(
+            aid: targetAid,
+            cid: targetCid,
+            isCurrent:
+                () =>
+                    !_closing &&
+                    !isClosed &&
+                    request == _request &&
+                    _session(targetAid) == session &&
+                    (sourceOf(targetAid) != SourceId.bili ||
+                        (activeSource.value == SourceId.bili &&
+                            sourceRevision.value == revision)),
+          ),
+        ),
       );
       if (!current()) return;
       final rawContent = chapter.content;
@@ -470,6 +479,7 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
   @override
   Future<void> close() async {
     _closing = true;
+    _readRequest?.cancel();
     _prefetch?.cancel();
     _request++;
     await super.close();

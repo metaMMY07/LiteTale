@@ -9,7 +9,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/widgets/cf_action_loader.dart';
 import 'package:wild/widgets/novel_card.dart';
-import 'package:wild/widgets/app_loading_indicator.dart';
+import 'package:wild/widgets/source_website.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/pages/local_epub_library_page.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
@@ -51,7 +51,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
           title: const Text('我的书架'),
           actions: [_localLibraryButton(context)],
         ),
-        body: const CenteredLoadingIndicator(),
+        body: SourceLoadingIndicator(source: activeSource.value),
       );
     }
 
@@ -86,6 +86,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                     style: Theme.of(context).textTheme.bodyMedium,
                     textAlign: TextAlign.start,
                   ),
+                  SourceWebsiteLink(source: activeSource.value),
                 ],
               ),
             ],
@@ -213,7 +214,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
           Expanded(
             child:
                 state.isRefreshing && state.getCurrentBooks() == null
-                    ? const CenteredLoadingIndicator()
+                    ? SourceLoadingIndicator(
+                      source: activeSource.value,
+                      requestKey: state.currentCaseId,
+                    )
                     : RefreshIndicator(
                       onRefresh:
                           () => context.read<BookshelfCubit>().loadBookcases(),

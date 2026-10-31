@@ -4,10 +4,13 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/pages/auth_cubit.dart';
 import 'package:wild/pages/home/index_page.dart';
+import 'package:wild/settings/source_settings_page.dart';
 import 'package:wild/src/rust/frb_generated.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
+import 'package:wild/theme/material_you.dart';
 
 class _FakeAuthCubit extends AuthCubit {
   _FakeAuthCubit(AuthStatus initialStatus)
@@ -94,16 +97,66 @@ class _BlockingHttpClient implements HttpClient {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  final rustApi = _FakeRustApi();
+  setUpAll(() => RustLib.initMock(api: rustApi));
+  setUp(() {
+    rustApi.indexCalls = 0;
+    rustApi.databaseWrites = 0;
+  });
+
+  for (final width in [320.0, 1280.0]) {
+    testWidgets(
+      'Android top-left source entry opens the source chooser at width $width',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = Size(width, 900);
+        addTearDown(tester.view.reset);
+        final auth = _FakeAuthCubit(AuthStatus.unauthenticated);
+        final host = ApiHostCubit(read: () async => '', write: (_) async {});
+        await host.initialized;
+        addTearDown(auth.close);
+        addTearDown(host.close);
+        await tester.pumpWidget(
+          MultiBlocProvider(
+            providers: [
+              BlocProvider<AuthCubit>.value(value: auth),
+              BlocProvider<ApiHostCubit>.value(value: host),
+            ],
+            child: MaterialApp(
+              theme: materialYouTheme(Brightness.light),
+              home: const IndexPage(),
+            ),
+          ),
+        );
+        final entry = find.byKey(const ValueKey('discovery-source-switch'));
+        expect(entry, findsOneWidget);
+        expect(tester.getCenter(entry).dx, lessThan(width / 2));
+        await tester.tap(entry);
+        await tester.pumpAndSettle();
+        expect(find.byType(SourceSettingsPage), findsOneWidget);
+        expect(find.text('https://www.wenku8.net/'), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('source-picker-button')));
+        await tester.pumpAndSettle();
+        expect(find.text('选择书源'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('source-option-bili')),
+          findsOneWidget,
+        );
+        expect(rustApi.indexCalls, 0);
+        expect(rustApi.databaseWrites, 0);
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+  }
 
   testWidgets(
     'the mounted Wenku8 discovery page follows login and logout state',
     (tester) async {
       final auth = _FakeAuthCubit(AuthStatus.unauthenticated);
-      final rustApi = _FakeRustApi();
       final httpClient = _BlockingHttpClient();
       final pageKey = GlobalKey();
       addTearDown(auth.close);
-      RustLib.initMock(api: rustApi);
 
       await HttpOverrides.runZoned(() async {
         await tester.pumpWidget(

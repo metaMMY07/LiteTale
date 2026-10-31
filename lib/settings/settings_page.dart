@@ -7,6 +7,7 @@ import 'package:wild/settings/settings_preferences.dart';
 import 'package:wild/settings/settings_widgets.dart';
 import 'package:wild/settings/theme_paper_page.dart';
 import 'package:wild/widgets/left_aligned_scrollable.dart';
+import 'package:wild/theme/material_you.dart';
 
 /// The former settings entry now opens display preferences directly.
 class SettingsPage extends StatelessWidget {
@@ -24,8 +25,11 @@ class SettingsPage extends StatelessWidget {
           key: const ValueKey('display-navigation-card'),
           margin: EdgeInsets.zero,
           clipBehavior: Clip.antiAlias,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          color:
+              usesMaterialYou
+                  ? Theme.of(context).scaffoldBackgroundColor
+                  : null,
+          child: SettingsTileGroup(
             children: [
               SettingsEntry(
                 icon: Icons.format_paint_outlined,
@@ -34,8 +38,6 @@ class SettingsPage extends StatelessWidget {
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => openSettingsPage(context, const ThemePaperPage()),
               ),
-              if (!usesAppleGlass)
-                const Divider(height: 1, indent: 50, endIndent: 14),
               SettingsEntry(
                 icon: Icons.text_fields_rounded,
                 title: '字体设置',
@@ -44,8 +46,6 @@ class SettingsPage extends StatelessWidget {
                 onTap:
                     () => openSettingsPage(context, const FontSettingsPage()),
               ),
-              if (!usesAppleGlass)
-                const Divider(height: 1, indent: 50, endIndent: 14),
               SettingsEntry(
                 icon: Icons.chrome_reader_mode_outlined,
                 title: '阅读显示',
@@ -54,8 +54,6 @@ class SettingsPage extends StatelessWidget {
                 onTap:
                     () => openSettingsPage(context, const ReaderSettingsPage()),
               ),
-              if (!usesAppleGlass)
-                const Divider(height: 1, indent: 50, endIndent: 14),
               SettingsEntry(
                 icon: Icons.translate_rounded,
                 title: '汉字变体',

@@ -1,6 +1,7 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/sources/book_source.dart';
+import 'package:wild/services/read_request.dart';
 
 abstract class HistoryState {}
 
@@ -22,6 +23,7 @@ class HistoryError extends HistoryState {
 
 class HistoryCubit extends Cubit<HistoryState> {
   int _request = 0;
+  ReadRequest? _opening;
   bool localOnly = false;
   SourceId get historySource =>
       localOnly ? SourceId.localEpub : activeSource.value;
@@ -30,7 +32,32 @@ class HistoryCubit extends Cubit<HistoryState> {
   void showLocal(bool local) {
     if (localOnly == local) return;
     localOnly = local;
+    _opening?.cancel();
     load();
+  }
+
+  Future<SourceBookDetail> loadDetail(String aid) async {
+    _opening?.cancel();
+    final request = _opening = ReadRequest();
+    final source = historySource;
+    final revision = sourceRevision.value;
+    final detail = await ReadRequest.run(
+      request,
+      () => request.wait(w8.loadBookDetail(aid: aid)),
+    );
+    request.check();
+    if (isClosed ||
+        historySource != source ||
+        sourceRevision.value != revision) {
+      throw const ReadCancelled();
+    }
+    return detail;
+  }
+
+  @override
+  Future<void> close() {
+    _opening?.cancel();
+    return super.close();
   }
 
   Future<void> load() async {

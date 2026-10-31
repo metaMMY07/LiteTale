@@ -9,6 +9,8 @@ class SourceId {
   static const lightNovelShelf = SourceId._('lightNovelShelf', '轻书架');
   static const lnovel = SourceId._('lnovel', '轻小说百科');
   static const bili = SourceId._('bili', '哔哩轻小说');
+  static const huanmeng = SourceId._('huanmeng', '幻梦轻小说');
+  static const esj = SourceId._('esj', 'ESJ Zone');
   static const localEpub = SourceId._('localEpub', '本地 EPUB');
   static final _rules = <String, SourceId>{};
   final String name;
@@ -21,6 +23,8 @@ class SourceId {
     lightNovelShelf,
     lnovel,
     bili,
+    huanmeng,
+    esj,
     localEpub,
     ..._rules.values,
   ];
@@ -52,6 +56,8 @@ SourceId sourceOf(String id) {
   if (id.startsWith('lns:')) return SourceId.lightNovelShelf;
   if (id.startsWith('lnv:')) return SourceId.lnovel;
   if (id.startsWith('bili:')) return SourceId.bili;
+  if (id.startsWith('hm:')) return SourceId.huanmeng;
+  if (id.startsWith('esj:')) return SourceId.esj;
   if (id.startsWith('src:')) {
     final parts = id.split(':');
     if (parts.length != 3 ||

@@ -1,12 +1,16 @@
 import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/services/read_request.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/source_api.dart' as api;
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
-import 'package:wild/widgets/app_loading_indicator.dart';
+import 'package:wild/widgets/source_website.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
 import 'package:wild/sources/rule_book_source.dart';
+import 'package:wild/sources/huanmeng_categories.dart';
+import 'package:wild/sources/huanmeng_source.dart' show HuanmengSourceException;
+import 'package:wild/sources/esj_source.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 
 /// Uses the same card grid, tabs and color scheme as the Wenku8 catalogue.
@@ -26,6 +30,7 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
   Object? _error;
   bool _errorMore = false;
   int _request = 0;
+  ReadRequest? _readRequest;
   final _source = activeSource.value;
   @override
   void initState() {
@@ -37,10 +42,18 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
   @override
   void dispose() {
     _request++;
+    _readRequest?.cancel();
     super.dispose();
   }
 
-  Future<void> _load({bool more = false}) async {
+  Future<void> _load({bool more = false}) {
+    if (more && _loading) return Future.value();
+    _readRequest?.cancel();
+    final request = _readRequest = ReadRequest();
+    return ReadRequest.run(request, () => _loadPage(more: more));
+  }
+
+  Future<void> _loadPage({bool more = false}) async {
     final request = ++_request;
     final revision = sourceRevision.value;
     bool currentBiliRequest() =>
@@ -56,6 +69,58 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
       if (!more) _page = null;
     });
     try {
+      if (_source == SourceId.huanmeng || _source == SourceId.esj) {
+        if (widget.mode == 'category') {
+          _categories =
+              _source == SourceId.esj
+                  ? EsjSource.categories
+                  : huanmengCategories;
+        }
+        final result =
+            _source == SourceId.esj
+                ? await api.esjSource.list(
+                  page: number,
+                  keyword:
+                      widget.mode == 'category' && _category != null
+                          ? EsjSource.categories.firstWhere(
+                                (c) => c['Id'] == _category,
+                              )['Name']
+                              as String
+                          : null,
+                  popular: widget.mode == 'rank',
+                )
+                : await api.huanmengSource.list(
+                  page: number,
+                  tag: widget.mode == 'category' ? _category : null,
+                  state: widget.mode == 'rank' ? 2 : null,
+                );
+        if (!mounted ||
+            request != _request ||
+            revision != sourceRevision.value ||
+            activeSource.value != _source) {
+          return;
+        }
+        final seen = <String>{};
+        final records = [...result.records];
+        if (more) {
+          records.insertAll(0, _page?.records ?? []);
+        }
+        final unique = records.where((book) => seen.add(book.aid)).toList();
+        if (more &&
+            result.records.isNotEmpty &&
+            unique.length == _page!.records.length) {
+          throw const HuanmengSourceException('原站续页未提供新书籍，请稍后刷新。');
+        }
+        setState(() {
+          _page = api.PageStatsNovelCover(
+            currentPage: result.currentPage,
+            maxPage: result.maxPage,
+            records: unique,
+          );
+          _loading = false;
+        });
+        return;
+      }
       if (_source == SourceId.bili) {
         if (widget.mode == 'category') {
           _categories =
@@ -138,7 +203,10 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
         if (_source == SourceId.bili && !currentBiliRequest()) return;
         setState(() {
           _loading = false;
-          _error = _source == SourceId.bili ? e : e.toString();
+          _error =
+              _source == SourceId.bili || _source == SourceId.huanmeng
+                  ? e
+                  : e.toString();
           _errorMore = more;
         });
       }
@@ -260,28 +328,19 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
           padding: EdgeInsets.all(12),
           child: Text('轻书架按分卷收录，此处展示全部书籍'),
         ),
-      if (_error != null)
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              Text(_error!.toString(), textAlign: TextAlign.center),
-              BiliRecoveryButton(
-                error: _error,
-                source: _source,
-                onRecovered: () => _load(more: _errorMore),
-              ),
-              AppButton.text(
-                onPressed: () => _load(more: _page != null),
-                child: const Text('重试'),
-              ),
-            ],
+      if (_error != null && _page != null)
+        ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * .35,
           ),
+          child: _errorView(context),
         ),
       Expanded(
         child:
-            _loading && _page == null
-                ? const CenteredLoadingIndicator()
+            _error != null && _page == null
+                ? Center(child: _errorView(context))
+                : _loading && _page == null
+                ? SourceLoadingIndicator(source: _source, requestKey: _request)
                 : _page == null
                 ? const SizedBox.shrink()
                 : _page!.records.isEmpty
@@ -303,9 +362,11 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
                 ),
       ),
       if (_loading && _page != null)
-        const SizedBox(
-          height: 48,
-          child: Center(child: AppLoadingIndicator(size: 24)),
+        SourceLoadingIndicator(
+          source: _source,
+          requestKey: _request,
+          size: 24,
+          centered: false,
         ),
       if (!_loading && _page != null && _page!.currentPage < _page!.maxPage)
         AppButton.text(
@@ -313,5 +374,25 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
           child: const Text('加载更多'),
         ),
     ],
+  );
+
+  Widget _errorView(BuildContext context) => SingleChildScrollView(
+    padding: const EdgeInsets.all(16),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(_error!.toString(), textAlign: TextAlign.center),
+        SourceWebsiteLink(source: _source),
+        BiliRecoveryButton(
+          error: _error,
+          source: _source,
+          onRecovered: () => _load(more: _errorMore),
+        ),
+        AppButton.text(
+          onPressed: () => _load(more: _page != null),
+          child: const Text('重试'),
+        ),
+      ],
+    ),
   );
 }

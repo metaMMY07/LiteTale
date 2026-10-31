@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
@@ -9,6 +10,7 @@ import 'package:http/http.dart' as http;
 
 import 'rule_source_definition.dart';
 import 'rule_source_models.dart';
+import 'scoped_rule_transport.dart';
 
 class RuleSourceLimits {
   const RuleSourceLimits({
@@ -69,7 +71,8 @@ abstract interface class RuleSourceTransport {
 /// Default transport disables automatic redirects and reads the body as a
 /// bounded stream. One client per request means a timeout closes that socket.
 class IoRuleSourceTransport implements RuleSourceTransport {
-  const IoRuleSourceTransport();
+  const IoRuleSourceTransport({this.userAgent});
+  final String? userAgent;
 
   @override
   Future<RuleSourceHttpResponse> get(
@@ -84,6 +87,7 @@ class IoRuleSourceTransport implements RuleSourceTransport {
             ..followRedirects = false
             ..headers['accept'] = 'text/html,application/json;q=0.9,*/*;q=0.5'
             ..headers['accept-encoding'] = 'gzip';
+      if (userAgent != null) request.headers['user-agent'] = userAgent!;
       final response = await client.send(request);
       final headers = <String, String>{
         for (final entry in response.headers.entries)
@@ -133,7 +137,15 @@ class RuleSourceEngine {
     this.definition, {
     RuleSourceTransport? transport,
     this.limits = const RuleSourceLimits(),
-  }) : transport = transport ?? const IoRuleSourceTransport() {
+  }) : transport =
+           transport ??
+           (Platform.isIOS && definition.importKey != null
+               ? ScopedRuleSourceTransport(
+                 origin: definition.baseUrl,
+                 userAgent: definition.userAgent,
+                 cookiesEnabled: definition.cookieJar,
+               )
+               : IoRuleSourceTransport(userAgent: definition.userAgent)) {
     limits.validate(definition.id);
   }
 
@@ -229,6 +241,8 @@ class RuleSourceEngine {
         catalogUrl: _optionalUrlField(
           rule.field('catalogUrl'),
           _FieldContext(page, page.root),
+          sameOrigin: true,
+          allowFragment: true,
         ),
       );
     });
@@ -304,23 +318,30 @@ class RuleSourceEngine {
           page.root,
           '正文内容',
         );
-        final sanitized = _sanitizeContent(rawHtml, page.finalUri);
+        final contentField = rule.field('content')!;
+        // Extended Legado @text is already plain text. Do not parse text that
+        // happens to contain angle brackets as executable or structural HTML.
+        final input =
+            contentField.legado != null &&
+                    contentField.kind == RuleValueKind.text
+                ? rawHtml
+                    .split('\n')
+                    .map((line) => '<p>${const HtmlEscape().convert(line)}</p>')
+                    .join()
+                : rawHtml;
+        final sanitized = _sanitizeContent(input, page.finalUri);
         pages.add(sanitized.html);
         images.addAll(sanitized.images);
         count++;
-        final nextValue = _nextValue(rule, page);
-        if (nextValue.isEmpty) break;
+        final next = _nextPageUrl(rule, page);
+        if (next == null) break;
         if (count >= limits.maxPages) {
           throw RuleSourceLimitException(
             definition.id,
             '正文超过 ${limits.maxPages} 页分页上限。',
           );
         }
-        current = _resolveSourceUrl(
-          nextValue,
-          base: page.finalUri,
-          sameOrigin: true,
-        );
+        current = next;
       }
       final uniqueImages = <String, RuleSourceImage>{};
       for (final image in images) {
@@ -356,8 +377,8 @@ class RuleSourceEngine {
         items.add(mapItem(page, item));
       }
       count++;
-      final nextValue = _nextValue(rule, page);
-      if (nextValue.isEmpty) {
+      final next = _nextPageUrl(rule, page);
+      if (next == null) {
         return RulePage(items: items, pagesFetched: count, reachedEnd: true);
       }
       if (count >= limits.maxPages) {
@@ -366,11 +387,7 @@ class RuleSourceEngine {
           '分页超过 ${limits.maxPages} 页上限。',
         );
       }
-      current = _resolveSourceUrl(
-        nextValue,
-        base: page.finalUri,
-        sameOrigin: true,
-      );
+      current = next;
     }
   }
 
@@ -388,18 +405,7 @@ class RuleSourceEngine {
       for (final item in _select(rule.items!.selector, page))
         mapItem(page, item),
     ];
-    final nextValue = _nextValue(rule, page);
-    final next =
-        nextValue.isEmpty
-            ? null
-            : _resolveSourceUrl(
-              nextValue,
-              base: page.finalUri,
-              sameOrigin: true,
-            );
-    if (next != null && next == page.finalUri) {
-      throw RuleSourcePaginationException(definition.id, '分页链接循环：$next');
-    }
+    final next = _nextPageUrl(rule, page);
     return RulePage(
       items: items,
       pagesFetched: 1,
@@ -585,7 +591,12 @@ class RuleSourceEngine {
     return _resolveSourceUrl(rendered, sameOrigin: true);
   }
 
-  Uri _resolveSourceUrl(String value, {Uri? base, required bool sameOrigin}) {
+  Uri _resolveSourceUrl(
+    String value, {
+    Uri? base,
+    required bool sameOrigin,
+    bool allowFragment = false,
+  }) {
     if (value.trim().isEmpty) {
       throw RuleSourceExtractionException(definition.id, 'URL 为空。');
     }
@@ -605,7 +616,7 @@ class RuleSourceEngine {
     if ((uri.scheme != 'https' && uri.scheme != 'http') ||
         uri.host.isEmpty ||
         uri.userInfo.isNotEmpty ||
-        uri.hasFragment ||
+        (uri.hasFragment && !allowFragment) ||
         _isLocalHost(uri.host)) {
       throw RuleSourceUnsupportedException(
         definition.id,
@@ -618,30 +629,54 @@ class RuleSourceEngine {
         '拒绝访问书源站点以外的 URL：$value',
       );
     }
-    return uri;
+    // Fragments select a location within a document, never a network resource.
+    // Only catalog and pagination navigation opt in; image/identity URLs retain
+    // the strict default policy above.
+    return allowFragment ? uri.removeFragment() : uri;
   }
 
   String _checkedResultUrl(String value) =>
       _resolveSourceUrl(value, sameOrigin: true).toString();
 
-  String _optionalUrlField(RuleField? field, _FieldContext context) {
+  String _optionalUrlField(
+    RuleField? field,
+    _FieldContext context, {
+    bool sameOrigin = false,
+    bool allowFragment = false,
+  }) {
     final value = _fieldValue(field, context, sourceId: definition.id);
     if (value.isEmpty) return '';
     return _resolveSourceUrl(
       value,
       base: context.page.finalUri,
-      sameOrigin: false,
+      sameOrigin: sameOrigin,
+      allowFragment: allowFragment,
     ).toString();
   }
 
-  String _nextValue(RuleOperation rule, _PageContext page) {
+  Uri? _nextPageUrl(RuleOperation rule, _PageContext page) {
     final field = rule.next;
-    if (field == null) return '';
-    return _fieldValue(
-      field,
-      _FieldContext(page, page.root),
-      sourceId: definition.id,
-    ).trim();
+    if (field == null) return null;
+    final value =
+        _fieldValue(
+          field,
+          _FieldContext(page, page.root),
+          sourceId: definition.id,
+        ).trim();
+    if (value.isEmpty) return null;
+    final next = _resolveSourceUrl(
+      value,
+      base: page.finalUri,
+      sameOrigin: true,
+      allowFragment: true,
+    );
+    if (next == page.finalUri) {
+      // A local anchor cannot advance pagination. End without fetching the
+      // same document again; a plain self-link remains an explicit loop error.
+      if (Uri.parse(value).hasFragment) return null;
+      throw RuleSourcePaginationException(definition.id, '分页链接循环：$next');
+    }
+    return next;
   }
 
   String _requiredField(
@@ -674,6 +709,12 @@ class RuleSourceEngine {
     required String sourceId,
   }) {
     if (field == null) return '';
+    if (field.legado != null) {
+      final root = context.item ?? context.page.root;
+      return root is dom.Node
+          ? field.legado!.extract(root, first: field.asUrl)
+          : '';
+    }
     final nodes =
         _select(field.selector, context.page, context.item)
             .where(
@@ -713,6 +754,9 @@ class RuleSourceEngine {
       return _selectJsonPath(target, selector.expression);
     }
     final target = item ?? page.root;
+    if (selector.legado != null) {
+      return target is dom.Node ? selector.legado!.select(target) : const [];
+    }
     if (selector.expression == ':scope') {
       if (target is dom.Element) return [target];
       if (target is dom.Document && target.documentElement != null) {

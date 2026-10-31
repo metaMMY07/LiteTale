@@ -1,5 +1,7 @@
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:wild/widgets/source_website.dart';
+import 'package:wild/sources/source_website.dart';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:file_selector/file_selector.dart';
@@ -10,16 +12,21 @@ import 'package:wild/sources/rules/rule_source.dart';
 import 'package:wild/sources/source_api.dart' as api;
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/widgets/left_aligned_scrollable.dart';
+import 'package:wild/services/source_import_file.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 
 class RuleSourceManager extends StatefulWidget {
-  const RuleSourceManager({super.key});
+  const RuleSourceManager({super.key, this.registry, this.pickFile});
+  final RuleSourceRegistry? registry;
+  final Future<XFile?> Function()? pickFile;
   @override
   State<RuleSourceManager> createState() => _RuleSourceManagerState();
 }
 
 class _RuleSourceManagerState extends State<RuleSourceManager> {
   bool busy = false;
-  final registry = RuleSourceRegistry.instance;
+  RuleSourceRegistry get registry =>
+      widget.registry ?? RuleSourceRegistry.instance;
 
   Future<void> _import(bool fromLink) async {
     if (busy) return;
@@ -31,26 +38,42 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
         if (link == null || link.trim().isEmpty) return;
         raw = await fetchSourceImport(Uri.parse(link.trim()));
       } else {
-        final file = await openFile(
-          acceptedTypeGroups: [
-            const XTypeGroup(
-              label: 'JSON 书源',
-              extensions: ['json'],
-              mimeTypes: ['application/json'],
-            ),
-          ],
-        );
+        final file =
+            await (widget.pickFile ??
+                (usesAppleGlass
+                    ? pickSourceImportFile
+                    : () => openFile(
+                      acceptedTypeGroups: [
+                        const XTypeGroup(
+                          label: 'JSON 书源',
+                          extensions: ['json'],
+                          mimeTypes: ['application/json'],
+                        ),
+                      ],
+                    )))();
         if (file == null) return;
-        if (await file.length() > 2 * 1024 * 1024) {
-          throw const FormatException('书源文件不能超过 2 MB');
+        if (usesAppleGlass) {
+          raw = await readSourceImportFile(
+            file,
+          ).timeout(const Duration(seconds: 15));
+        } else {
+          if (await file.length() > 2 * 1024 * 1024) {
+            throw const FormatException('书源文件不能超过 2 MB');
+          }
+          raw = utf8
+              .decode(await file.readAsBytes())
+              .replaceFirst('\uFEFF', '');
         }
-        raw = utf8.decode(await file.readAsBytes()).replaceFirst('\uFEFF', '');
       }
-      final items = inspectSourceImport(raw);
+      final items = inspectSourceImport(
+        raw,
+        installedSources: registry.entries,
+      );
       if (!mounted) return;
       await Navigator.of(context).push(
         HorizontalCoverPageRoute(
-          builder: (_) => RuleImportPreviewPage(items: items),
+          builder:
+              (_) => RuleImportPreviewPage(items: items, registry: registry),
         ),
       );
     } catch (error) {
@@ -68,6 +91,12 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
     try {
       final id = entry.definition.id;
       switch (action) {
+        case 'website':
+          final uri = sourceWebsite(
+            SourceId.rule(id),
+            ruleBaseUrl: entry.definition.baseUrl,
+          );
+          if (uri != null && mounted) await openSourceWebsite(context, uri);
         case 'use':
           await api.selectSource(SourceId.rule(id));
         case 'rename':
@@ -124,10 +153,12 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
                 style: Theme.of(context).textTheme.titleLarge,
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
-                '支持 LiteTale JSON 和部分阅读 JSON 规则。导入前会检查兼容情况；当前规则书源使用公开阅读，无需账号。',
+                usesAppleGlass
+                    ? '支持 LiteTale JSON 和可转换的阅读书源规则。先预览兼容情况，再确认保存。规则书源用于公开阅读，不导入账号或执行外部脚本。'
+                    : '支持 LiteTale JSON 和部分阅读 JSON 规则。导入前会检查兼容情况；当前规则书源使用公开阅读，无需账号。',
               ),
             ),
             Padding(
@@ -149,7 +180,10 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
                 ],
               ),
             ),
-            if (busy) const LinearProgressIndicator(),
+            if (busy)
+              usesAppleGlass
+                  ? const Center(child: AppLoadingIndicator(size: 24))
+                  : const LinearProgressIndicator(),
             if (registry.warning != null)
               Padding(
                 padding: const EdgeInsets.all(16),
@@ -166,7 +200,7 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
                   ),
                   title: Text(entry.definition.name),
                   subtitle: Text(
-                    '${entry.builtIn ? '内置' : '导入'} · ${entry.definition.version} · ${entry.enabled ? '已启用' : '已停用'}\n${entry.definition.baseUrl.host}',
+                    '${entry.builtIn ? '内置' : '导入'} · ${entry.definition.version} · ${entry.enabled ? '已启用' : '已停用'}\n${entry.definition.baseUrl.origin}/',
                   ),
                   isThreeLine: true,
                   onTap: entry.enabled ? () => _action(entry, 'use') : null,
@@ -174,6 +208,10 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
                     onSelected: (value) => _action(entry, value),
                     itemBuilder:
                         (_) => [
+                          const PopupMenuItem(
+                            value: 'website',
+                            child: Text('打开原网站'),
+                          ),
                           if (entry.enabled)
                             const PopupMenuItem(
                               value: 'use',
@@ -259,7 +297,12 @@ class _RuleImportPreviewPageState extends State<RuleImportPreviewPage> {
       final source = widget.items[i].definition;
       if (source != null) {
         selected.add(i);
-        modes[i] = registry[source.id] == null ? 'new' : 'copy';
+        modes[i] =
+            registry[source.id] == null
+                ? 'new'
+                : usesAppleGlass
+                ? 'replace'
+                : 'copy';
       }
     }
   }
@@ -343,12 +386,26 @@ class _RuleImportPreviewPageState extends State<RuleImportPreviewPage> {
       return AppleGlassCard(
         child: ListTile(
           leading: const Icon(Icons.error_outline),
-          title: Text('第 ${index + 1} 项未通过'),
+          title: Text(
+            item.name == null ? '第 ${index + 1} 项未通过' : '${item.name} · 未通过',
+          ),
           subtitle: Text(item.error ?? '规则无效'),
         ),
       );
     }
     final existing = registry[source.id];
+    final notices =
+        usesAppleGlass
+            ? <String>[
+              if (!source.capabilities.discover && source.capabilities.search)
+                '此书源通过搜索使用，未提供首页推荐。',
+              if (!source.capabilities.images) '当前规则仅提供文字阅读，不包含插图。',
+              if (item.notices.any(
+                (notice) => notice.contains('kind') && notice.contains('跳过'),
+              ))
+                '部分分类信息未导入，目录与正文规则已保留。',
+            ]
+            : item.notices;
     return AppleGlassCard(
       child: Column(
         children: [
@@ -369,6 +426,23 @@ class _RuleImportPreviewPageState extends State<RuleImportPreviewPage> {
               '${source.baseUrl.host} · ${source.version}\n${source.capabilities.search ? '支持站内搜索' : '按目录逐页查找'} · 目录与正文 · ${source.capabilities.images ? '支持插图' : '文字阅读'}',
             ),
           ),
+          if (notices.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final notice in notices)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        notice,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                ],
+              ),
+            ),
           if (existing != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),

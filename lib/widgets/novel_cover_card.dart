@@ -25,7 +25,7 @@ class NovelCoverCard extends StatelessWidget {
             ),
       );
     }
-    final cardRadius = BorderRadius.circular(usesMaterialYou ? 16 : 4);
+    final cardRadius = BorderRadius.circular(usesMaterialYou ? 24 : 4);
     return Card(
       clipBehavior: Clip.antiAlias,
       elevation: usesMaterialYou ? 0 : .5,
@@ -52,13 +52,22 @@ class NovelCoverCard extends StatelessWidget {
             ),
             Padding(
               padding: EdgeInsets.all(usesMaterialYou ? 10 : 4),
-              child: Text(
-                novel.title,
-                maxLines: usesMaterialYou ? 2 : 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: usesMaterialYou ? 13 : 12,
-                  fontWeight: FontWeight.w500,
+              child: SizedBox(
+                height:
+                    usesMaterialYou
+                        ? MediaQuery.textScalerOf(context).scale(13) * 2.8
+                        : null,
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    novel.title,
+                    maxLines: usesMaterialYou ? 2 : 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: usesMaterialYou ? 13 : 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ),
               ),
             ),

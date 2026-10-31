@@ -26,6 +26,46 @@ void main() {
   tearDown(() => activeSource.value = SourceId.wenku8);
 
   test(
+    'oversized active shelf directory is not reloaded for every chapter',
+    () async {
+      var detailCalls = 0;
+      final sorts = <int>[];
+      final source = LightNovelShelfSource(
+        detailCacheBytes: 0,
+        invoke: (method, args) async {
+          if (method == 'GetBookInfo') {
+            detailCalls++;
+            return details;
+          }
+          if (method == 'GetNovelContent') {
+            sorts.add(args['SortNum'] as int);
+            return {
+              'chapter': {'content': '正文', 'font': ''},
+            };
+          }
+          throw StateError('unexpected fixture method');
+        },
+      );
+      await source.chapter('lns:42', 'lns:42:900');
+      await source.chapter('lns:42', 'lns:42:700');
+      expect(detailCalls, 1);
+      expect(sorts, [1, 2]);
+      source.clearSessionCache();
+      await source.chapter('lns:42', 'lns:42:900');
+      expect(detailCalls, 2);
+    },
+  );
+
+  test(
+    'retired ESJ stays out of choices without invalidating existing IDs',
+    () {
+      expect(api.availableSources, isNot(contains(SourceId.esj)));
+      expect(sourceOf('esj:1788983302'), SourceId.esj);
+      expect(api.sourceAdapter(SourceId.esj).id, SourceId.esj);
+    },
+  );
+
+  test(
     'live native adapter loads anonymous book cards',
     () async {
       final original = HttpOverrides.current;
