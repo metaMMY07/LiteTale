@@ -13,21 +13,11 @@ import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/material_source_picker.dart';
-import 'package:wild/widgets/source_picker_sheet.dart';
 import 'package:wild/widgets/source_website.dart';
 
 /// Kept within settings; the rest of the app shows exactly one provider.
 class SourceSettings extends StatelessWidget {
   const SourceSettings({super.key});
-
-  Future<void> _showSources(BuildContext context, SourceId source) async {
-    final selected = await showSourcePicker(
-      context,
-      value: source,
-      sources: api.availableSources,
-    );
-    if (context.mounted) await _selectSource(context, selected);
-  }
 
   Future<void> _selectSource(BuildContext context, SourceId? value) async {
     if (value == null || value == activeSource.value) return;
@@ -70,13 +60,24 @@ class SourceSettings extends StatelessWidget {
                           onChanged: (value) => _selectSource(context, value),
                         )
                       else
-                        AppButton.tonalIcon(
+                        AppDropdownButtonFormField<SourceId>(
                           key: const ValueKey('source-picker-button'),
-                          onPressed: () => _showSources(context, source),
-                          icon: const Icon(Icons.local_library_outlined),
-                          label: Text(
-                            '${source.label}${source.isRule ? '（导入）' : ''}',
-                          ),
+                          value: source,
+                          decoration: const InputDecoration(labelText: '当前书源'),
+                          items:
+                              api.availableSources
+                                  .map(
+                                    (s) => DropdownMenuItem(
+                                      value: s,
+                                      child: Text(
+                                        usesAppleGlass && s.isRule
+                                            ? '${s.label}（导入）'
+                                            : s.label,
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                          onChanged: (value) => _selectSource(context, value),
                         ),
                       const SizedBox(height: 12),
                       SourceWebsiteLink(

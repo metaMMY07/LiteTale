@@ -8,13 +8,16 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
+import 'package:wild/pages/auth_cubit.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/rule_source_registry.dart';
 import 'package:wild/src/rust/frb_generated.dart';
 import 'package:wild/theme/ios_glass_theme.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/material_source_picker.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/source_settings.dart';
 import 'package:wild/widgets/source_website.dart';
 
 class _Launcher extends UrlLauncherPlatform {
@@ -32,9 +35,21 @@ class _Launcher extends UrlLauncherPlatform {
 }
 
 class _ReadOnlyApi implements RustLibApi {
+  final sourceSelections = <String>[];
   @override
   Future<String> crateApiDatabaseLoadProperty({required String key}) async =>
       '';
+  @override
+  Future<void> crateApiDatabaseSaveProperty({
+    required String key,
+    required String value,
+  }) async {
+    if (key != 'litetale.active_source') {
+      throw StateError('Unexpected property write: $key');
+    }
+    sourceSelections.add(value);
+  }
+
   @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw StateError('Unexpected Rust call: ${invocation.memberName}');
@@ -49,8 +64,9 @@ Widget _app(Widget child, {Brightness brightness = Brightness.light}) =>
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late _Launcher launcher;
+  final rustApi = _ReadOnlyApi();
   setUpAll(() async {
-    RustLib.initMock(api: _ReadOnlyApi());
+    RustLib.initMock(api: rustApi);
     final builtIns =
         (jsonDecode(
                   await rootBundle.loadString(
@@ -63,6 +79,7 @@ void main() {
     await RuleSourceRegistry.instance.load(builtIns: builtIns);
   });
   setUp(() {
+    rustApi.sourceSelections.clear();
     final original = UrlLauncherPlatform.instance;
     launcher = _Launcher();
     UrlLauncherPlatform.instance = launcher;
@@ -236,7 +253,7 @@ void main() {
     },
   );
 
-  for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+  for (final platform in [TargetPlatform.android]) {
     testWidgets(
       'source addresses remain readable with large text on a narrow phone ($platform)',
       (tester) async {
@@ -343,4 +360,109 @@ void main() {
       variant: TargetPlatformVariant.only(platform),
     );
   }
+
+  testWidgets(
+    'iOS native source menu keeps the website outside the menu and follows selection',
+    (tester) async {
+      final previousSource = activeSource.value;
+      activeSource.value = SourceId.wenku8;
+      addTearDown(() => activeSource.value = previousSource);
+      final auth = AuthCubit();
+      final authBefore = auth.state;
+      final host = ApiHostCubit(
+        read: () async => 'https://m.wenku8.net',
+        write: (_) async {},
+      );
+      await host.initialized;
+      addTearDown(auth.close);
+      addTearDown(host.close);
+      await tester.pumpWidget(
+        MultiBlocProvider(
+          providers: [
+            BlocProvider<AuthCubit>.value(value: auth),
+            BlocProvider<ApiHostCubit>.value(value: host),
+          ],
+          child: MaterialApp(
+            theme: iosGlassTheme(Brightness.light),
+            home: const Scaffold(
+              body: SingleChildScrollView(child: SourceSettings()),
+            ),
+          ),
+        ),
+      );
+      final nativeMenu = find.byType(AppleGlassMenu);
+      expect(find.text('https://m.wenku8.net/'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.byType(SourceWebsiteLink)).dy,
+        greaterThan(tester.getBottomLeft(nativeMenu).dy),
+      );
+      final menu = tester.widget<AppleGlassMenu>(nativeMenu);
+      expect(
+        menu.items.every((item) => !item['label']!.contains('http')),
+        isTrue,
+      );
+      // UIKit invokes this callback on iOS. Its dismissal timing differs from
+      // the Material popup used as a desktop-only fallback in widget tests.
+      final bili = menu.items.singleWhere((item) => item['label'] == '哔哩轻小说');
+      menu.onSelect(bili['value']!);
+      await tester.pumpAndSettle();
+      expect(activeSource.value, SourceId.bili);
+      expect(rustApi.sourceSelections, ['bili']);
+      expect(find.text('https://www.bilinovel.net/'), findsOneWidget);
+      expect(find.text('https://m.wenku8.net/'), findsNothing);
+      await tester.tap(find.text('打开原网站'));
+      await tester.pumpAndSettle();
+      expect(launcher.launches.single.$1, 'https://www.bilinovel.net/');
+      expect(activeSource.value, SourceId.bili);
+      expect(auth.state, authBefore);
+      expect(rustApi.sourceSelections, ['bili']);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
+  testWidgets(
+    'reselecting the current iOS source at large text does not persist or change the website',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(320, 640);
+      addTearDown(tester.view.reset);
+      final previousSource = activeSource.value;
+      activeSource.value = SourceId.wenku8;
+      addTearDown(() => activeSource.value = previousSource);
+      final auth = AuthCubit();
+      addTearDown(auth.close);
+      await tester.pumpWidget(
+        BlocProvider<AuthCubit>.value(
+          value: auth,
+          child: MaterialApp(
+            theme: iosGlassTheme(Brightness.light),
+            builder:
+                (context, child) => MediaQuery(
+                  data: MediaQuery.of(
+                    context,
+                  ).copyWith(textScaler: const TextScaler.linear(2)),
+                  child: child!,
+                ),
+            home: const Scaffold(
+              body: SingleChildScrollView(child: SourceSettings()),
+            ),
+          ),
+        ),
+      );
+      final nativeMenu = find.byType(AppleGlassMenu);
+      await tester.ensureVisible(nativeMenu);
+      await tester.pumpAndSettle();
+      // Exercise the native callback rather than opening a desktop popup route:
+      // native UIKit menus do not push a Flutter route or hide the chrome.
+      final menu = tester.widget<AppleGlassMenu>(nativeMenu);
+      menu.onSelect(menu.selected!);
+      await tester.pumpAndSettle();
+      expect(activeSource.value, SourceId.wenku8);
+      expect(rustApi.sourceSelections, isEmpty);
+      expect(find.text('https://www.wenku8.net/'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
 }
