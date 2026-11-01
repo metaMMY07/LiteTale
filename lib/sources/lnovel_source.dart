@@ -5,10 +5,13 @@ import 'package:http/http.dart' as http;
 import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'book_source.dart';
+import 'package:wild/models/source_comment.dart';
+import 'comment_parsers.dart' show lnovelComments;
+import 'package:wild/services/read_request.dart';
 
 /// Native adapter for the public catalogue referenced by legado-source.
 /// No downloaded JavaScript or account cookies are executed/shared.
-class LNovelSource implements BookSource {
+class LNovelSource implements BookSource, BookCommentsSource {
   LNovelSource({http.Client? client}) : _client = client;
   final http.Client? _client;
   static final base = Uri.parse('https://lnovel.tw/');
@@ -19,10 +22,44 @@ class LNovelSource implements BookSource {
   @override
   SourceId get id => SourceId.lnovel;
 
+  @override
+  bool get supportsComments => true;
+  @override
+  List<CommentFeed> get commentFeeds => const [CommentFeed.comments];
+  @override
+  Future<SourceCommentPage> comments(
+    String bookId, {
+    int page = 1,
+    CommentFeed feed = CommentFeed.comments,
+    String? threadId,
+  }) async {
+    validateCommentPage(page);
+    final number = _number(bookId);
+    if (page != 1 || feed != CommentFeed.comments || threadId != null) {
+      throw const SourceCommentException('轻小说百科评论没有此分页');
+    }
+    return lnovelComments(await _get(base.resolve('books-$number')));
+  }
+
   Future<Document> _get(Uri uri) async {
-    final response = await (_client?.get(uri, headers: headers) ??
-            http.get(uri, headers: headers))
-        .timeout(const Duration(seconds: 25));
+    final scope = ReadRequest.current;
+    scope?.check();
+    final client = _client ?? http.Client();
+    final ownsClient = _client == null;
+    final removeCancel = scope?.onCancel((_) {
+      if (ownsClient) client.close();
+    });
+    late final http.Response response;
+    try {
+      final load = client.get(uri, headers: headers);
+      response = await (scope?.wait(load) ?? load).timeout(
+        const Duration(seconds: 25),
+      );
+      scope?.check();
+    } finally {
+      removeCancel?.call();
+      if (ownsClient) client.close();
+    }
     if (response.statusCode != 200) {
       throw StateError('轻小说百科暂时无法访问（${response.statusCode}），请稍后重试');
     }

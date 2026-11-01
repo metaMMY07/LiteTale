@@ -22,7 +22,14 @@ String wenku8ReadDomExtractionScript(
   required String kind,
   String? aid,
 }) {
-  if (!const {'detail', 'reader', 'chapter', 'tags', 'list'}.contains(kind)) {
+  if (!const {
+    'detail',
+    'reader',
+    'chapter',
+    'tags',
+    'list',
+    'reviews',
+  }.contains(kind)) {
     throw const FormatException('不支持的文库8页面类型。');
   }
   final expectedHost = jsonEncode(Uri.parse(normalizeWenku8Host(apiHost)).host);
@@ -390,11 +397,47 @@ String wenku8ReadDomExtractionScript(
       return {currentPage: current, maxPage: maximum, records: records};
     }
 
+    function collectReviews() {
+      var params = page.searchParams;
+      if (page.pathname !== '/modules/article/reviews.php' ||
+          params.get('aid') !== expectedAid ||
+          !/^[1-9][0-9]{0,5}$/.test(params.get('page') || '')) return null;
+      var content = document.querySelector('#content');
+      var table = content && content.querySelector('table.grid');
+      if (!table) return null;
+      var records = [];
+      Array.from(table.querySelectorAll('tr')).forEach(function(row) {
+        var cells = row.querySelectorAll('td');
+        if (cells.length < 4 || records.length >= 100) return;
+        var link = cells[0].querySelector('a[href*="reviewshow.php"]');
+        if (!link) return;
+        var target = new URL(link.getAttribute('href'), page.href);
+        if (target.origin !== page.origin) return;
+        var rid = target.searchParams.get('tid') || target.searchParams.get('rid') || '';
+        if (!/^[1-9][0-9]{0,11}$/.test(rid)) return;
+        var user = cells[2].querySelector('a[href]');
+        var userUrl = user ? new URL(user.getAttribute('href'),page.href) : null;
+        var uid = userUrl && userUrl.origin === page.origin ? (userUrl.searchParams.get('id') || '') : '';
+        var replies = cleanText(cells[1].textContent).match(/^(\d+)\s*\//);
+        records.push({rid:rid,content:cleanText(link.textContent),
+          replyCount:replies ? Number(replies[1]) : 0,
+          uid:/^[0-9]{1,12}$/.test(uid) ? uid : '',
+          uname:cleanText(user ? user.textContent : cells[2].textContent,256),
+          time:cleanText(cells[3].textContent,128)});
+      });
+      var stats = document.querySelector('em#pagestats');
+      var match = stats && cleanText(stats.textContent).match(/^(\d+)\s*\/\s*(\d+)$/);
+      var current = Number(params.get('page'));
+      return {currentPage:match ? Number(match[1]) : current,
+        maxPage:match ? Number(match[2]) : current, records:records};
+    }
+
     if (expectedKind === 'detail') payload.data = collectDetail();
     else if (expectedKind === 'reader') payload.data = collectReader();
     else if (expectedKind === 'chapter') payload.data = collectChapter();
     else if (expectedKind === 'tags') payload.data = collectTags();
     else if (expectedKind === 'list') payload.data = collectList();
+    else if (expectedKind === 'reviews') payload.data = collectReviews();
   } catch (_) {
     payload.data = null;
   }
@@ -416,7 +459,14 @@ Object parseWenku8ReadWebViewResult(
   required String kind,
   String? aid,
 }) {
-  if (!const {'detail', 'reader', 'chapter', 'tags', 'list'}.contains(kind)) {
+  if (!const {
+    'detail',
+    'reader',
+    'chapter',
+    'tags',
+    'list',
+    'reviews',
+  }.contains(kind)) {
     throw const FormatException('不支持的文库8页面类型。');
   }
   if (result is String && result.length > _maxPayloadLength) {
@@ -596,6 +646,45 @@ Object parseWenku8ReadWebViewResult(
         throw const FormatException('文库8标签页没有可用标签。');
       }
       return List<TagGroup>.unmodifiable(groups);
+    case 'reviews':
+      _requireKeys(fields, const {'currentPage', 'maxPage', 'records'});
+      final current = _boundedInt(fields, 'currentPage', 1, 1000);
+      final maximum = _boundedInt(fields, 'maxPage', 1, 1000000);
+      final rows = fields['records'];
+      if (current != int.parse(page!.queryParameters['page']!) ||
+          maximum < current ||
+          rows is! List ||
+          rows.length > 100) {
+        throw const FormatException('文库8评论分页或内容无效');
+      }
+      final reviews = <Review>[];
+      for (final value in rows) {
+        if (value is! Map) throw const FormatException('文库8评论字段无效');
+        final row = Map<String, dynamic>.from(value);
+        _requireKeys(row, const {
+          'rid',
+          'content',
+          'replyCount',
+          'uid',
+          'uname',
+          'time',
+        });
+        reviews.add(
+          Review(
+            rid: _boundedDigits(row, 'rid', 12),
+            content: _boundedString(row, 'content', 32768, required: true),
+            replyCount: _boundedInt(row, 'replyCount', 0, 10000000),
+            uid: _boundedString(row, 'uid', 12),
+            uname: _boundedString(row, 'uname', 256),
+            time: _boundedString(row, 'time', 128),
+          ),
+        );
+      }
+      return PageStatsReviews(
+        currentPage: current,
+        maxPage: maximum,
+        records: List.unmodifiable(reviews),
+      );
     case 'list':
       if (fields.containsKey('emptyReason')) {
         _requireKeys(fields, const {
@@ -665,7 +754,10 @@ Object parseWenku8ReadWebViewResult(
 }
 
 String _bookAidForKind(String kind, String? aid) {
-  if (kind == 'detail' || kind == 'reader' || kind == 'chapter') {
+  if (kind == 'detail' ||
+      kind == 'reader' ||
+      kind == 'chapter' ||
+      kind == 'reviews') {
     if (aid == null || !RegExp(r'^[1-9][0-9]{0,11}$').hasMatch(aid)) {
       throw const FormatException('文库8书号无效。');
     }
@@ -751,6 +843,15 @@ bool _isValidPage(Uri? page, Uri expected, String kind, String? aid) {
       return page.path == '/modules/article/tags.php' &&
           exactQuery(const {'charset'}, optional: const {'charset'}) &&
           charsetAllowed();
+    case 'reviews':
+      return page.path == '/modules/article/reviews.php' &&
+          exactQuery(
+            const {'aid', 'page', 'charset'},
+            optional: const {'charset'},
+          ) &&
+          charsetAllowed() &&
+          query['aid']!.single == expectedAid &&
+          _positivePage(query['page']!.single);
     case 'list':
       if (page.path == '/modules/article/tags.php') {
         return exactQuery(

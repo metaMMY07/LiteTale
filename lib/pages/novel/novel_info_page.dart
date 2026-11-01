@@ -324,18 +324,12 @@ class _NovelInfoContent extends StatelessWidget {
                   label: sourceOf(novelId) == SourceId.localEpub ? '导入' : '更新',
                   value: novelInfo.finUpdate,
                 ),
-                if (sourceOf(novelId) != SourceId.localEpub)
+                if (w8.sourceSupportsComments(novelId))
                   _StatItem(
                     icon: Icons.comment,
                     label: '评论',
                     value: '',
                     onTap: () {
-                      if (sourceOf(novelId) != SourceId.wenku8) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('该书源的评论请前往原站查看')),
-                        );
-                        return;
-                      }
                       Navigator.of(context).pushNamed(
                         '/novel/reviews',
                         arguments: {'aid': novelId, 'title': novelInfo.title},

@@ -28,6 +28,9 @@ import 'package:wild/services/bounded_detail_cache.dart';
 import 'package:wild/services/read_diagnostics.dart';
 import 'package:wild/services/read_request.dart';
 import 'package:wild/services/read_result_cache.dart';
+import 'package:wild/models/source_comment.dart';
+import 'package:wild/services/book_comments_repository.dart';
+import 'comment_parsers.dart' show commentText;
 
 export 'package:wild/src/rust/api/wenku8.dart'
     hide
@@ -199,7 +202,7 @@ Future<w8.PageStatsNovelCover> articlelist({
   ),
 );
 
-class Wenku8Source implements BookSource {
+class Wenku8Source implements BookSource, BookCommentsSource {
   late final _reads = Wenku8ReadRepository(
     host: _wenkuBrowser.apiHost,
     session: () => readerSessionGeneration('1'),
@@ -222,6 +225,48 @@ class Wenku8Source implements BookSource {
 
   @override
   SourceId get id => SourceId.wenku8;
+  @override
+  bool get supportsComments => true;
+  @override
+  List<CommentFeed> get commentFeeds => const [CommentFeed.comments];
+  @override
+  Future<SourceCommentPage> comments(
+    String bookId, {
+    int page = 1,
+    CommentFeed feed = CommentFeed.comments,
+    String? threadId,
+  }) async {
+    _wenkuId(bookId);
+    validateCommentPage(page);
+    if (threadId != null || feed != CommentFeed.comments) {
+      throw const SourceCommentException('文库8评论请求无效');
+    }
+    final result = await _wenkuBrowser.nativeOrBrowser(
+      () => w8.reviews(aid: bookId, pageNumber: page),
+      () => _wenkuRead<w8.PageStatsReviews>(
+        'reviews',
+        '/modules/article/reviews.php',
+        aid: bookId,
+        query: {'aid': bookId, 'page': '$page', 'charset': 'gbk'},
+      ),
+    );
+    return SourceCommentPage(
+      page: result.currentPage,
+      hasMore: result.currentPage < result.maxPage,
+      items: List.unmodifiable(
+        result.records.map(
+          (review) => SourceComment(
+            id: review.rid,
+            author: commentText(review.uname),
+            content: commentText(review.content),
+            time: commentText(review.time),
+            replyCount: review.replyCount,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Future<List<HomeBlock>> discover() =>
       _wenkuBrowser.nativeOrBrowser(w8.index, _wenkuBrowser.home);
@@ -316,6 +361,56 @@ final Map<SourceId, BookSource> bookSources = {
 
 BookSource sourceAdapter(SourceId source) =>
     bookSources[source] ?? (throw StateError('此书源已停用或移除。请在“书源与账号”中恢复或重新导入。'));
+
+bool sourceSupportsComments(String bookId) {
+  final adapter = bookSources[sourceOf(bookId)];
+  return adapter is BookCommentsSource &&
+      (adapter as BookCommentsSource).supportsComments;
+}
+
+List<CommentFeed> sourceCommentFeeds(String bookId) {
+  final adapter = sourceAdapter(sourceOf(bookId));
+  return adapter is BookCommentsSource &&
+          (adapter as BookCommentsSource).supportsComments
+      ? (adapter as BookCommentsSource).commentFeeds
+      : const [];
+}
+
+final _comments = BookCommentsRepository(
+  generation: readerSessionGeneration,
+  loader: (
+    bookId, {
+    int page = 1,
+    CommentFeed feed = CommentFeed.comments,
+    String? threadId,
+  }) {
+    final adapter = sourceAdapter(sourceOf(bookId));
+    if (adapter is! BookCommentsSource ||
+        !(adapter as BookCommentsSource).supportsComments) {
+      throw const SourceCommentException('该书源目前没有可读取的原站评论区');
+    }
+    return (adapter as BookCommentsSource).comments(
+      bookId,
+      page: page,
+      feed: feed,
+      threadId: threadId,
+    );
+  },
+);
+
+Future<SourceCommentPage> loadBookComments(
+  String bookId, {
+  int page = 1,
+  CommentFeed feed = CommentFeed.comments,
+  String? threadId,
+  bool refresh = false,
+}) => _comments.load(
+  bookId,
+  page: page,
+  feed: feed,
+  threadId: threadId,
+  refresh: refresh,
+);
 bool sourceUsesCatalogSearch(SourceId source) =>
     source == SourceId.lnovel ||
     (bookSources[source] is RuleBookSource &&

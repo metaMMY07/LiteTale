@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'shelf_api_error.dart';
 import 'shelf_device_id.dart';
+import 'read_request.dart';
 
 /// A compact book summary returned by LightNovelShelf's public latest feed.
 class LightNovelShelfBook {
@@ -65,6 +66,7 @@ class LightNovelShelfService {
     'GetRank',
     'GetBookInfo',
     'GetNovelContent',
+    'GetComments',
   };
   final Uri _hub;
   final Future<String> Function() _deviceId;
@@ -114,6 +116,11 @@ class LightNovelShelfService {
     Map<String, Object?> arguments, {
     String? token,
   }) {
+    // The comment repository owns shared subscribers and cancellation. Do not
+    // let a new page join an abandoned socket via the legacy read pool.
+    if (method == 'GetComments') {
+      return _readWithRetry(method, arguments, token);
+    }
     if (!_readMethods.contains(method)) {
       return _attempt(method, arguments, token);
     }
@@ -135,8 +142,10 @@ class LightNovelShelfService {
     try {
       return await _attempt(method, args, token);
     } on ShelfApiException catch (error) {
+      if (method == 'GetComments') ReadRequest.current?.check();
       if (!error.retryable) rethrow;
       await Future<void>.delayed(retryDelay);
+      if (method == 'GetComments') ReadRequest.current?.check();
       return _attempt(method, args, token);
     }
   }
@@ -146,13 +155,21 @@ class LightNovelShelfService {
     Map<String, Object?> args,
     String? token,
   ) async {
+    final scope = method == 'GetComments' ? ReadRequest.current : null;
+    scope?.check();
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
     WebSocket? socket;
     StreamIterator<Map<String, dynamic>>? records;
     var expired = false;
+    final removeCancel = scope?.onCancel((_) {
+      expired = true;
+      client.close(force: true);
+      if (socket != null) unawaited(_closeSocket(socket!));
+    });
     try {
       final operation = () async {
         final deviceId = await _deviceId();
+        scope?.check();
         if (expired) throw shelfTimeoutError;
         final connection = WebSocket.connect(
           _hub.toString(),
@@ -178,6 +195,7 @@ class LightNovelShelfService {
           '${jsonEncode({'protocol': 'json', 'version': 1})}$_recordSeparator',
         );
         await _waitForHandshake(records!).timeout(const Duration(seconds: 6));
+        scope?.check();
         const invocationId = 'read';
         socket!.add(
           '${jsonEncode({
@@ -192,7 +210,9 @@ class LightNovelShelfService {
         );
         return _waitForCompletion(records!, invocationId);
       }();
-      return await operation.timeout(attemptTimeout);
+      return await (scope?.wait(operation) ?? operation).timeout(
+        attemptTimeout,
+      );
     } on ShelfApiException {
       rethrow;
     } on WebSocketException catch (error) {
@@ -207,6 +227,7 @@ class LightNovelShelfService {
     } on FormatException {
       throw shelfInvalidResponse;
     } finally {
+      removeCancel?.call();
       expired = true;
       client.close(force: true);
       // Both close and subscription cancellation are independently bounded.

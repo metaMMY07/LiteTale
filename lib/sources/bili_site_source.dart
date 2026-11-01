@@ -11,6 +11,8 @@ import 'package:wild/src/rust/wenku8/models.dart';
 import 'book_source.dart';
 import 'package:wild/services/read_request.dart';
 import 'package:wild/services/read_diagnostics.dart';
+import 'package:wild/models/source_comment.dart';
+import 'comment_parsers.dart' show biliComments;
 
 const _siteOrigin = 'https://www.bilinovel.net';
 const _pageSize = 30;
@@ -71,7 +73,7 @@ class BiliSiteCategory {
 /// browser session. This class never submits the site's form or reads browser
 /// cookies. An injected HTTP client remains caller-owned; otherwise a fresh
 /// client is closed after each public operation.
-class BiliSiteSource implements BookSource {
+class BiliSiteSource implements BookSource, BookCommentsSource {
   BiliSiteSource({
     required BiliSiteSearcher searcher,
     required BiliSiteChapterLoader chapterLoader,
@@ -126,6 +128,31 @@ class BiliSiteSource implements BookSource {
 
   @override
   SourceId get id => SourceId.bili;
+
+  @override
+  bool get supportsComments => true;
+  @override
+  List<CommentFeed> get commentFeeds => const [CommentFeed.comments];
+  @override
+  Future<SourceCommentPage> comments(
+    String bookId, {
+    int page = 1,
+    CommentFeed feed = CommentFeed.comments,
+    String? threadId,
+  }) {
+    validateCommentPage(page);
+    final number = _parseBookId(bookId);
+    if (threadId != null || feed != CommentFeed.comments) {
+      throw const SourceCommentException('哔哩完整书评及回复需要原站登录，当前显示公开书评');
+    }
+    return _withSession((session) async {
+      final document = await _getDocument(
+        session,
+        Uri.parse('$_siteOrigin/reviews_${number}_$page.html'),
+      );
+      return biliComments(document, '$number', page);
+    });
+  }
 
   List<BiliSiteCategory> categories() => _categories;
 

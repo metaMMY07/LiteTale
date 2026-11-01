@@ -5,6 +5,8 @@ import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'book_source.dart';
 import 'rules/rule_source.dart';
+import 'package:wild/models/source_comment.dart';
+import 'sfacg_comments.dart';
 
 String ruleBookId(String sourceId, String url) =>
     'src:$sourceId:${base64Url.encode(utf8.encode(url)).replaceAll('=', '')}';
@@ -20,7 +22,7 @@ String ruleBookUrl(String id, String sourceId) {
   }
 }
 
-class RuleBookSource implements BookSource {
+class RuleBookSource implements BookSource, BookCommentsSource {
   RuleBookSource(this.definition, {RuleSourceEngine? engine})
     : engine = engine ?? RuleSourceEngine(definition);
   final RuleSourceDefinition definition;
@@ -47,6 +49,40 @@ class RuleBookSource implements BookSource {
   @override
   SourceId get id => SourceId.rule(definition.id, label: definition.name);
   bool get hasSearch => definition.capabilities.search;
+
+  // Imported rules never acquire SF's built-in API merely from a label.
+  @override
+  bool get supportsComments =>
+      definition.id == 'sfacg_public' &&
+      definition.baseUrl.origin == 'https://book.sfacg.com';
+  @override
+  List<CommentFeed> get commentFeeds =>
+      supportsComments
+          ? const [CommentFeed.comments, CommentFeed.reviews]
+          : const [];
+  @override
+  Future<SourceCommentPage> comments(
+    String bookId, {
+    int page = 1,
+    CommentFeed feed = CommentFeed.comments,
+    String? threadId,
+  }) async {
+    if (!supportsComments) {
+      throw const SourceCommentException('该书源未提供可读取的评论');
+    }
+    final url = Uri.parse(ruleBookUrl(bookId, definition.id));
+    final match = RegExp(r'^/Novel/([1-9]\d{0,11})/?$').firstMatch(url.path);
+    if (url.origin != definition.baseUrl.origin ||
+        url.userInfo.isNotEmpty ||
+        url.hasQuery ||
+        url.hasFragment ||
+        match == null) {
+      throw const SourceCommentException('SF 书籍地址无效');
+    }
+    return SfacgComments(
+      engine.transport,
+    ).load(match[1]!, page: page, feed: feed, threadId: threadId);
+  }
 
   NovelCover _cover(RuleSourceBook book) => NovelCover(
     aid: ruleBookId(definition.id, book.detailUrl),

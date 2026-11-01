@@ -555,6 +555,10 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH);
             '<html><body><div id="content"><table class="grid"><tr><td></td></tr><tr><td><em id="pagestats">1/1</em><a href="?page=1">首页</a></td></tr></table></div></body></html>',
         'listUnknownEmpty':
             '<html><body><div id="content">本页面暂未找到加载组件。</div></body></html>',
+        'reviews':
+            await File('test/fixtures/wenku8_reviews.html').readAsString(),
+        'reviewsEmpty':
+            '<div id="content"><table class="grid"><tr><th>书评</th></tr></table></div>',
       };
       const urls = {
         'detail': '$_apiHost/book/$_aid.htm',
@@ -576,6 +580,10 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH);
             '$_apiHost/modules/article/search.php?searchtype=articlename&searchkey=missing-grid&page=1&charset=gbk',
         'listUnknownEmpty':
             '$_apiHost/modules/article/search.php?searchtype=articlename&searchkey=unknown&page=1&charset=gbk',
+        'reviews':
+            '$_apiHost/modules/article/reviews.php?aid=$_aid&page=1&charset=gbk',
+        'reviewsEmpty':
+            '$_apiHost/modules/article/reviews.php?aid=$_aid&page=1&charset=gbk',
       };
       final cases = <Map<String, Object?>>[];
       for (final fixture in fixtures.entries) {
@@ -586,6 +594,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH);
           'listEmptyGrid' ||
           'listUnknownEmpty' => 'list',
           'detailLong' || 'detailEnglishTags' => 'detail',
+          'reviewsEmpty' => 'reviews',
           _ => fixture.key,
         };
         cases.add({
@@ -595,7 +604,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH);
             _apiHost,
             kind: kind,
             aid:
-                const {'detail', 'reader', 'chapter'}.contains(kind)
+                const {'detail', 'reader', 'chapter', 'reviews'}.contains(kind)
                     ? _aid
                     : null,
           ),
@@ -629,7 +638,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH);
       await Future.wait([outFuture, errFuture]);
       expect(exitCode, 0, reason: stderr.toString());
       final results = jsonDecode(stdout.toString()) as List;
-      expect(results, hasLength(12));
+      expect(results, hasLength(14));
       final detail =
           parseWenku8ReadWebViewResult(
                 results[0],
@@ -775,6 +784,30 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH);
         ),
         throwsFormatException,
       );
+      final reviews =
+          parseWenku8ReadWebViewResult(
+                results[12],
+                apiHost: _apiHost,
+                loadedUrl: urls['reviews']!,
+                kind: 'reviews',
+                aid: _aid,
+              )
+              as PageStatsReviews;
+      expect(reviews.records, hasLength(1));
+      expect(reviews.records.single.content, '测试 & 评论');
+      expect(reviews.records.single.uname, '读者甲');
+      expect(reviews.records.single.replyCount, 2);
+      expect(results[12], isNot(contains('privateToken')));
+      final emptyReviews =
+          parseWenku8ReadWebViewResult(
+                results[13],
+                apiHost: _apiHost,
+                loadedUrl: urls['reviewsEmpty']!,
+                kind: 'reviews',
+                aid: _aid,
+              )
+              as PageStatsReviews;
+      expect(emptyReviews.records, isEmpty);
     },
     skip:
         _playwrightModulePath() == null ||

@@ -8,6 +8,7 @@ import 'package:wild/sources/light_novel_shelf_source.dart';
 import 'package:wild/sources/shelf_session.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:wild/services/read_request.dart';
 
 const rs = '\u001e';
 
@@ -66,6 +67,92 @@ Future<void> reply(HttpRequest request, {bool split = false}) async {
 }
 
 void main() {
+  test(
+    'cancelled comments close a stalled socket without replaying it',
+    () async {
+      var attempts = 0;
+      final started = Completer<void>();
+      final closed = Completer<void>();
+      final f = await hub((request, n) async {
+        attempts = n;
+        if (n > 1) {
+          await reply(request);
+          return;
+        }
+        final socket = await WebSocketTransformer.upgrade(request);
+        addTearDown(() => socket.close());
+        socket.listen(
+          (raw) {
+            final message = jsonDecode((raw as String).split(rs).first) as Map;
+            if (message['protocol'] != null) {
+              socket.add('{}$rs');
+            } else if (message['type'] == 1) {
+              expect(message['target'], 'GetComments');
+              started.complete();
+            }
+          },
+          onDone: () {
+            if (!closed.isCompleted) closed.complete();
+          },
+        );
+      });
+      final scope = ReadRequest();
+      final pending = ReadRequest.run(
+        scope,
+        () => f.service.invoke('GetComments', {
+          'Type': 'Book',
+          'Id': 1,
+          'Page': 1,
+        }),
+      );
+      final check = expectLater(pending, throwsA(isA<ReadCancelled>()));
+      await started.future;
+      scope.cancel();
+      await check;
+      await closed.future.timeout(const Duration(seconds: 2));
+      expect(attempts, 1);
+      expect(
+        await f.service.invoke('GetComments', {
+          'Type': 'Book',
+          'Id': 1,
+          'Page': 1,
+        }),
+        isA<Map>(),
+      );
+      expect(attempts, 2);
+    },
+  );
+
+  test(
+    'comments cancelled during device identity lookup never connect late',
+    () async {
+      var connects = 0;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        connects++;
+        await request.response.close();
+      });
+      addTearDown(() => server.close(force: true));
+      final identity = Completer<String>();
+      final service = LightNovelShelfService(
+        testHub: Uri.parse('ws://127.0.0.1:${server.port}/hub/api'),
+        deviceId: () => identity.future,
+      );
+      final scope = ReadRequest();
+      final pending = ReadRequest.run(
+        scope,
+        () =>
+            service.invoke('GetComments', {'Type': 'Book', 'Id': 1, 'Page': 1}),
+      );
+      final check = expectLater(pending, throwsA(isA<ReadCancelled>()));
+      scope.cancel();
+      await check;
+      identity.complete('00000000-0000-4000-8000-000000000001');
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(connects, 0);
+    },
+  );
+
   test(
     'a rejected access token refreshes once and replays the authenticated read',
     () async {

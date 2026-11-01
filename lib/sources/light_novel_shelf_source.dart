@@ -10,6 +10,9 @@ import 'package:wild/src/rust/wenku8/models.dart';
 import 'book_source.dart';
 import 'package:wild/services/bounded_detail_cache.dart';
 import 'shelf_session.dart';
+import 'package:wild/models/source_comment.dart';
+import 'comment_parsers.dart' show shelfComments;
+import 'package:wild/services/read_request.dart';
 
 typedef ShelfInvoke =
     Future<Object?> Function(String method, Map<String, Object?> args);
@@ -129,7 +132,7 @@ SourceBookDetail shelfDetail(Map payload) {
   ]);
 }
 
-class LightNovelShelfSource implements BookSource {
+class LightNovelShelfSource implements BookSource, BookCommentsSource {
   LightNovelShelfSource({
     ShelfInvoke? invoke,
     ShelfSession? session,
@@ -151,6 +154,35 @@ class LightNovelShelfSource implements BookSource {
   @override
   SourceId get id => SourceId.lightNovelShelf;
 
+  @override
+  bool get supportsComments => true;
+  @override
+  List<CommentFeed> get commentFeeds => const [CommentFeed.comments];
+  @override
+  Future<SourceCommentPage> comments(
+    String bookId, {
+    int page = 1,
+    CommentFeed feed = CommentFeed.comments,
+    String? threadId,
+  }) async {
+    validateCommentPage(page);
+    final numeric = remoteShelfId(bookId);
+    if (numeric < 1 || threadId != null || feed != CommentFeed.comments) {
+      throw const SourceCommentException('轻书架评论请求无效');
+    }
+    final generation = _sessionGeneration;
+    final payload = await _invoke('GetComments', {
+      'Type': 'Book',
+      'Id': numeric,
+      'Page': page,
+    });
+    if (generation != _sessionGeneration) {
+      throw const SourceCommentException('轻书架账号已变化，请重新打开评论');
+    }
+    // Injected transports follow the same normalized contract as _call.
+    return shelfComments(_normalizeShelfFields(payload), page);
+  }
+
   static Future<Object?> _call(
     String method,
     Map<String, Object?> args, {
@@ -168,8 +200,11 @@ class LightNovelShelfSource implements BookSource {
         (method == 'GetBookInfo' || method == 'GetNovelContent')) {
       throw const ShelfSignInRequired();
     }
-    Future<Object?> invoke(String? access) async =>
-        shelfPayload(await service!.invoke(method, args, token: access));
+    Future<Object?> invoke(String? access) async {
+      if (method == 'GetComments') ReadRequest.current?.check();
+      return shelfPayload(await service!.invoke(method, args, token: access));
+    }
+
     try {
       return await invoke(token);
     } on ShelfSignInRequired {
