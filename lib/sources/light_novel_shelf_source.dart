@@ -175,6 +175,7 @@ class LightNovelShelfSource implements BookSource, BookCommentsSource {
       'Type': 'Book',
       'Id': numeric,
       'Page': page,
+      'Size': 10,
     });
     if (generation != _sessionGeneration) {
       throw const SourceCommentException('轻书架账号已变化，请重新打开评论');

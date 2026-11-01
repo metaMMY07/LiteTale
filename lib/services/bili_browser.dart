@@ -262,6 +262,9 @@ class BiliBrowserSession extends ChangeNotifier {
             uri.path == '/S6/' ||
             uri.path == '/search.html' ||
             RegExp(r'^/novel/[1-9]\d*/catalog$').hasMatch(uri.path) ||
+            (RegExp(r'^/reviews_[1-9]\d*_[1-9]\d*\.html$').hasMatch(uri.path) &&
+                !uri.hasQuery &&
+                !uri.hasFragment) ||
             RegExp(r'^/top/[a-z]+/[1-9]\d*\.html$').hasMatch(uri.path) ||
             RegExp(r'^/wenku/(?:[a-z]+/[1-9]\d*\.html)?$').hasMatch(uri.path) ||
             RegExp(

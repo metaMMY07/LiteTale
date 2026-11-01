@@ -130,7 +130,7 @@ void main() {
         final source = LightNovelShelfSource(
           invoke: (method, args) async {
             expect(method, 'GetComments');
-            expect(args, {'Type': 'Book', 'Id': 77, 'Page': 1});
+            expect(args, {'Type': 'Book', 'Id': 77, 'Page': 1, 'Size': 10});
             return shelfPage();
           },
         );

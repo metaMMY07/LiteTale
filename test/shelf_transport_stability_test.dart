@@ -31,7 +31,11 @@ Future<({HttpServer server, LightNovelShelfService service})> hub(
   );
 }
 
-Future<void> reply(HttpRequest request, {bool split = false}) async {
+Future<void> reply(
+  HttpRequest request, {
+  bool split = false,
+  Map<String, Object?>? envelope,
+}) async {
   final socket = await WebSocketTransformer.upgrade(request);
   addTearDown(() async {
     try {
@@ -51,10 +55,12 @@ Future<void> reply(HttpRequest request, {bool split = false}) async {
       final text = jsonEncode({
         'type': 3,
         'invocationId': message['invocationId'],
-        'result': {
-          'Success': true,
-          'Response': {'Title': '中文完整内容'},
-        },
+        'result':
+            envelope ??
+            {
+              'Success': true,
+              'Response': {'Title': '中文完整内容'},
+            },
       });
       if (split) {
         socket.add(text.substring(0, 30));
@@ -67,6 +73,173 @@ Future<void> reply(HttpRequest request, {bool split = false}) async {
 }
 
 void main() {
+  for (final status in [401, 500]) {
+    test(
+      'comment envelope $status preserves the account and scopes token renewal',
+      () async {
+        var refreshes = 0, deletes = 0, connections = 0;
+        final session = ShelfSession(
+          deviceId: () async => '00000000-0000-4000-8000-000000000001',
+          createClient:
+              () => MockClient((_) async {
+                refreshes++;
+                return http.Response(
+                  jsonEncode({
+                    'success': true,
+                    'response': 'fixture-access-$refreshes',
+                  }),
+                  200,
+                );
+              }),
+          readCredential: () async => 'fixture-refresh',
+          writeCredential: (_) async {},
+          deleteCredential: () async {
+            deletes++;
+          },
+        );
+        final f = await hub((request, n) async {
+          connections = n;
+          await reply(
+            request,
+            envelope:
+                status == 500 || n == 1
+                    ? {'success': false, 'status': status}
+                    : {
+                      'success': true,
+                      'response': {
+                        'Page': 1,
+                        'TotalPages': 0,
+                        'Users': <String, Object?>{},
+                        'Commentaries': <String, Object?>{},
+                        'Data': <Object?>[],
+                      },
+                    },
+          );
+        });
+        final source = LightNovelShelfSource(
+          session: session,
+          service: f.service,
+        );
+        if (status == 500) {
+          await expectLater(
+            source.comments('lns:1'),
+            throwsA(
+              isA<ShelfApiException>().having((e) => e.status, 'status', 500),
+            ),
+          );
+        } else {
+          expect((await source.comments('lns:1')).items, isEmpty);
+        }
+        expect(connections, 2);
+        expect(refreshes, status == 401 ? 2 : 1);
+        expect(deletes, 0);
+        expect(session.signedIn.value, true);
+      },
+    );
+  }
+
+  test(
+    'comments retry one transient server error inside a SignalR envelope',
+    () async {
+      var attempts = 0;
+      final f = await hub((request, n) async {
+        attempts = n;
+        await reply(
+          request,
+          envelope:
+              n == 1
+                  ? {'Success': false, 'Status': 500}
+                  : {
+                    'Success': true,
+                    'Response': {'Page': 1, 'Data': []},
+                  },
+        );
+      });
+      final value = await f.service.invoke('GetComments', {
+        'Type': 'Book',
+        'Id': 1,
+        'Page': 1,
+        'Size': 10,
+      });
+      expect((value as Map)['Response'], {'Page': 1, 'Data': []});
+      expect(attempts, 2);
+    },
+  );
+
+  test('persistent comment envelope errors stop after one retry', () async {
+    var attempts = 0;
+    final f = await hub((request, n) async {
+      attempts = n;
+      await reply(request, envelope: {'success': false, 'status': 500});
+    });
+    await expectLater(
+      f.service.invoke('GetComments', {
+        'Type': 'Book',
+        'Id': 1,
+        'Page': 1,
+        'Size': 10,
+      }),
+      throwsA(isA<ShelfApiException>().having((e) => e.status, 'status', 500)),
+    );
+    expect(attempts, 2);
+  });
+
+  for (final status in [401, 403, 429]) {
+    test('comment envelope $status is not retried by the transport', () async {
+      var attempts = 0;
+      final f = await hub((request, n) async {
+        attempts = n;
+        await reply(request, envelope: {'Success': false, 'Status': status});
+      });
+      await expectLater(
+        f.service.invoke('GetComments', {
+          'Type': 'Book',
+          'Id': 1,
+          'Page': 1,
+          'Size': 10,
+        }),
+        throwsA(
+          isA<ShelfApiException>().having((e) => e.status, 'status', status),
+        ),
+      );
+      expect(attempts, 1);
+    });
+  }
+
+  test(
+    'leaving comments during server-error backoff prevents a late retry',
+    () async {
+      var attempts = 0;
+      final received = Completer<void>();
+      final f = await hub((request, n) async {
+        attempts = n;
+        await reply(request, envelope: {'Success': false, 'Status': 500});
+        if (!received.isCompleted) received.complete();
+      });
+      final service = LightNovelShelfService(
+        testHub: Uri.parse('ws://127.0.0.1:${f.server.port}/hub/api'),
+        deviceId: () async => '00000000-0000-4000-8000-000000000001',
+        retryDelay: const Duration(milliseconds: 100),
+      );
+      final scope = ReadRequest();
+      final pending = ReadRequest.run(
+        scope,
+        () => service.invoke('GetComments', {
+          'Type': 'Book',
+          'Id': 1,
+          'Page': 1,
+          'Size': 10,
+        }),
+      );
+      final checked = expectLater(pending, throwsA(isA<ReadCancelled>()));
+      await received.future;
+      scope.cancel();
+      await checked;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(attempts, 1);
+    },
+  );
+
   test(
     'cancelled comments close a stalled socket without replaying it',
     () async {

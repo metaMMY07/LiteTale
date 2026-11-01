@@ -139,14 +139,27 @@ class LightNovelShelfService {
     Map<String, Object?> args,
     String? token,
   ) async {
+    Future<Object?> attempt() async {
+      final result = await _attempt(method, args, token);
+      // A completed SignalR invocation can still carry a provider 5xx. Keep
+      // comment reads inside the same one-retry policy as failed handshakes;
+      // never treat an error envelope as an empty successful comment page.
+      if (method == 'GetComments' &&
+          result is Map &&
+          (result['Success'] ?? result['success']) == false) {
+        throw ShelfApiException.envelope(result);
+      }
+      return result;
+    }
+
     try {
-      return await _attempt(method, args, token);
+      return await attempt();
     } on ShelfApiException catch (error) {
       if (method == 'GetComments') ReadRequest.current?.check();
       if (!error.retryable) rethrow;
       await Future<void>.delayed(retryDelay);
       if (method == 'GetComments') ReadRequest.current?.check();
-      return _attempt(method, args, token);
+      return attempt();
     }
   }
 

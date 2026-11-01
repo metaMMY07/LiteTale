@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/services/bili_browser.dart';
 import 'package:wild/utils/bili_site_dom.dart';
 import 'package:wild/services/read_request.dart';
+import 'package:flutter/foundation.dart';
+import 'package:wild/sources/bili_site_source.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -73,6 +75,59 @@ void main() {
       'https://www.linovelib.com/novel/2844/catalog',
       'about:blank',
     ]);
+  });
+  for (final platform in [TargetPlatform.iOS, TargetPlatform.android]) {
+    test('public comments use the real browser loader on $platform', () async {
+      debugDefaultTargetPlatformOverride = platform;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final port =
+          _Port()
+            ..documentHtml = '''<ol id="list_content" class="book-ol-comment">
+<li class="book-li"><a class="book-layout" href="/reviewshow_42_1.html">
+<div class="book-meta-l"><em>读者</em></div><time>2026-11-01</time>
+<div class="book-comment-p">原站公开评论</div></a></li></ol>
+<div class="pagebar"><a href="/reviews_88_2.html">下一页</a></div>''';
+      final browser = session(port);
+      final source = BiliSiteSource(
+        searcher: (_, __) => throw StateError('not used'),
+        chapterLoader: (_, __) => throw StateError('not used'),
+        documentLoader: browser.document,
+      );
+      final first = await source.comments('bili:88');
+      expect(first.items.single.content, '原站公开评论');
+      expect(first.hasMore, true);
+      port.documentHtml = port.documentHtml!.replaceAll('42_1', '43_1');
+      final second = await source.comments('bili:88', page: 2);
+      expect(second.items.single.id, isNot(first.items.single.id));
+      expect(port.urls, [
+        'https://www.bilinovel.net/reviews_88_1.html',
+        'about:blank',
+        'https://www.bilinovel.net/reviews_88_2.html',
+        'about:blank',
+      ]);
+      expect(port.modes, [false, false]);
+    });
+  }
+  test('allows only well-formed public review list routes', () {
+    expect(
+      BiliBrowserSession.allowsNavigation(
+        'https://www.bilinovel.net/reviews_88_1.html',
+      ),
+      true,
+    );
+    for (final url in [
+      'https://evil.example/reviews_88_1.html',
+      'http://www.bilinovel.net/reviews_88_1.html',
+      'https://www.bilinovel.net:444/reviews_88_1.html',
+      'https://user:pass@www.bilinovel.net/reviews_88_1.html',
+      'https://www.bilinovel.net/reviews_0_1.html',
+      'https://www.bilinovel.net/reviews_88_0.html',
+      'https://www.bilinovel.net/reviews_88_1.html?next=https://evil.example',
+      'https://www.bilinovel.net/reviews_88_1.html#other',
+      'https://www.bilinovel.net/reviewshow_42_1.html',
+    ]) {
+      expect(BiliBrowserSession.allowsNavigation(url), false, reason: url);
+    }
   });
   test('real next search link is associated with its query', () async {
     final p =
@@ -440,6 +495,7 @@ class _Port implements BiliBrowserPort {
   int? chapterPages;
   bool submitted = false, blank = false, stall = false;
   String? staleDocumentUrl;
+  String? documentHtml;
   int documentProbes = 0;
   int searchProbes = 0;
   final searchResponses = <Map<String, dynamic>>[];
@@ -481,7 +537,7 @@ class _Port implements BiliBrowserPort {
       return {
         'url': url,
         'ready': true,
-        'html': '<div id="volume-list"></div>',
+        'html': documentHtml ?? '<div id="volume-list"></div>',
       };
     }
     if (script == biliHomeReadyScript) return {'url': current, 'ready': true};
