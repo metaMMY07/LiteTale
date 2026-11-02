@@ -1,17 +1,15 @@
 import 'package:wild/widgets/platform_controls.dart';
-import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/wenku8_recovery_button.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/sources/source_api.dart' as w8;
-import 'package:wild/widgets/cached_image.dart';
-import 'package:flutter_html/flutter_html.dart';
+import 'package:wild/widgets/book_details_view.dart';
+import 'package:wild/models/book_detail_hint.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/widgets/cf_action_loader.dart';
-import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
 import 'package:wild/widgets/source_website.dart';
 import 'package:wild/pages/shelf_login_page.dart';
@@ -31,9 +29,6 @@ class NovelInfoPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 获取全局的 BookshelfCubit
-    final bookshelfCubit = context.read<BookshelfCubit>();
-
     Future<void> navigateToDownload(BuildContext context) async {
       final state = context.read<NovelInfoCubit>().state;
       if (state is! NovelInfoLoaded) return;
@@ -66,7 +61,7 @@ class NovelInfoPage extends StatelessWidget {
         appBar: AppBar(
           title: const Text('小说详情'),
           actions: [
-            if (sourceOf(novelId) != SourceId.localEpub)
+            if (sourceOf(novelId) == SourceId.wenku8)
               BlocBuilder<NovelInfoCubit, NovelInfoState>(
                 builder: (context, state) {
                   if (state is! NovelInfoLoaded) {
@@ -85,93 +80,23 @@ class NovelInfoPage extends StatelessWidget {
                   );
                 },
               ),
-            if (sourceOf(novelId) != SourceId.localEpub)
-              BlocBuilder<BookshelfCubit, BookshelfState>(
-                builder: (context, state) {
-                  if (state.status == BookshelfStatus.loading) {
-                    return const Center(
-                      child: SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    );
-                  }
-                  final isInBookshelf = state.isBookInBookshelf(novelId);
-                  return AppIconButton(
-                    icon: Icon(
-                      isInBookshelf ? Icons.bookmark : Icons.bookmark_border,
-                      color:
-                          isInBookshelf
-                              ? Theme.of(context).colorScheme.primary
-                              : null,
-                    ),
-                    onPressed: () async {
-                      try {
-                        if (isInBookshelf) {
-                          await bookshelfCubit.removeFromBookshelf(novelId);
-                        } else {
-                          await bookshelfCubit.addToBookshelf(novelId);
-                        }
-                      } catch (e) {
-                        if (!context.mounted) return;
-                        if (_isCfError(e)) {
-                          final apiHost = context.read<ApiHostCubit>().state;
-                          String actionPath;
-                          if (isInBookshelf) {
-                            final bid = bookshelfCubit.state.getBookBid(
-                              novelId,
-                            );
-                            if (bid == null) return;
-                            actionPath =
-                                '/modules/article/bookcase.php?delid=$bid';
-                          } else {
-                            actionPath =
-                                '/modules/article/addbookcase.php?bid=$novelId';
-                          }
-                          showAdaptiveDialog(
-                            context: context,
-                            barrierDismissible: false,
-                            builder:
-                                (ctx) => Dialog.fullscreen(
-                                  child: CfActionLoader(
-                                    apiHost: apiHost,
-                                    actionPath: actionPath,
-                                    successUrlKeyword: 'bookcase.php',
-                                    successBodyKeyword: '处理成功',
-                                    onSuccess: () {
-                                      Navigator.of(ctx).pop();
-                                      bookshelfCubit.loadBookcases();
-                                    },
-                                    onError: (err) {
-                                      Navigator.of(ctx).pop();
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        SnackBar(content: Text('操作失敗: $err')),
-                                      );
-                                    },
-                                  ),
-                                ),
-                          );
-                        } else {
-                          ScaffoldMessenger.of(
-                            context,
-                          ).showSnackBar(SnackBar(content: Text('操作失败: $e')));
-                        }
-                      }
-                    },
-                  );
-                },
-              ),
           ],
         ),
         body: BlocBuilder<NovelInfoCubit, NovelInfoState>(
           builder: (context, state) {
             if (state is NovelInfoLoading) {
-              return SourceLoadingIndicator(
-                source: sourceOf(novelId),
-                requestKey: state,
+              final hint = BookDetailHint.lookup(novelId);
+              return Column(
+                children: [
+                  if (hint != null)
+                    BookDetailsHeader(hint: hint, source: sourceOf(novelId)),
+                  Expanded(
+                    child: SourceLoadingIndicator(
+                      source: sourceOf(novelId),
+                      requestKey: state,
+                    ),
+                  ),
+                ],
               );
             }
             if (state is NovelInfoError) {
@@ -304,374 +229,112 @@ class _NovelInfoContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<NovelInfoCubit>().state;
     if (state is! NovelInfoLoaded) return const SizedBox.shrink();
-
-    return CustomScrollView(
-      slivers: [
-        SliverToBoxAdapter(
-          child: _NovelHeader(novelInfo: novelInfo, source: sourceOf(novelId)),
-        ),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 16.0,
-              vertical: 8.0,
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _StatItem(
-                  icon: Icons.update,
-                  label: sourceOf(novelId) == SourceId.localEpub ? '导入' : '更新',
-                  value: novelInfo.finUpdate,
-                ),
-                if (w8.sourceSupportsComments(novelId))
-                  _StatItem(
-                    icon: Icons.comment,
-                    label: '评论',
-                    value: '',
-                    onTap: () {
-                      Navigator.of(context).pushNamed(
-                        '/novel/reviews',
-                        arguments: {'aid': novelId, 'title': novelInfo.title},
-                      );
-                    },
-                  ),
-                // _StatItem(
-                //   icon: Icons.local_fire_department,
-                //   label: '热度',
-                //   value: novelInfo.heat,
-                // ),
-                // _StatItem(
-                //   icon: Icons.trending_up,
-                //   label: '趋势',
-                //   value: novelInfo.trending,
-                // ),
-              ],
-            ),
-          ),
-        ),
-        SliverToBoxAdapter(
-          child: _NovelTags(tags: novelInfo.tags, source: sourceOf(novelId)),
-        ),
-        // 添加继续阅读按钮
-        if (state.readingHistory != null)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.only(
-                top: 24,
-                bottom: 16,
-                left: 16,
-                right: 16,
-              ),
-              child: AppButton.elevatedIcon(
-                onPressed:
-                    () => _navigateToReader(
-                      context,
-                      state.readingHistory!.novelId,
-                      state.readingHistory!.chapterId,
-                      state.readingHistory!.novelName,
-                    ),
-                icon: const Icon(Icons.book),
-                label: Text('继续阅读 - ${state.readingHistory!.chapterTitle}'),
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 48),
-                ),
-              ),
-            ),
-          ),
-        SliverToBoxAdapter(
-          child: _NovelDescription(description: novelInfo.introduce),
-        ),
-        SliverList(
-          delegate: SliverChildBuilderDelegate((context, index) {
-            final volume = volumes[index];
-            return _VolumeItem(
-              volume: volume,
-              onChapterTap:
-                  (chapter) => _navigateToReader(
-                    context,
-                    chapter.aid,
-                    chapter.cid,
-                    chapter.title,
-                  ),
-            );
-          }, childCount: volumes.length),
-        ),
-
-        SliverToBoxAdapter(child: SafeArea(top: false, child: Container())),
-      ],
-    );
-  }
-}
-
-class _NovelHeader extends StatelessWidget {
-  final NovelInfo novelInfo;
-  final SourceId source;
-
-  const _NovelHeader({required this.novelInfo, required this.source});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (source == SourceId.localEpub && novelInfo.imgUrl.isEmpty)
-            Container(
-              width: 120,
-              height: 160,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                Icons.menu_book_rounded,
-                size: 48,
-                color: Theme.of(context).colorScheme.onPrimaryContainer,
-              ),
-            )
-          else
-            CachedImage(
-              url: novelInfo.imgUrl,
-              source: source,
-              width: 120,
-              height: 160,
-              fit: BoxFit.cover,
-              borderRadius: BorderRadius.circular(8),
-            ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  novelInfo.title,
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 8),
-                InkWell(
-                  onTap:
-                      source == SourceId.localEpub
-                          ? null
-                          : () async {
-                            if (!w8.sourceSupportsAuthorSearch(source)) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('该书源暂不支持作者查找')),
-                              );
-                              return;
-                            }
-                            await Navigator.pushNamed(
-                              context,
-                              '/search',
-                              arguments: {
-                                'searchType': 'author',
-                                'searchKey': novelInfo.author,
-                              },
-                            );
-                            if (context.mounted) {
-                              context.read<NovelInfoCubit>().loadHistory();
-                            }
-                          },
-                  child: Text(
-                    '作者：${novelInfo.author}',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color:
-                          source == SourceId.localEpub
-                              ? null
-                              : Theme.of(context).colorScheme.primary,
-                      decoration:
-                          source == SourceId.localEpub
-                              ? TextDecoration.none
-                              : TextDecoration.underline,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '状态：${novelInfo.status}',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                if (novelInfo.isAnimated)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      '动画化',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final VoidCallback? onTap;
-
-  const _StatItem({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final row = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 16, color: Theme.of(context).colorScheme.primary),
-        const SizedBox(width: 4),
-        value != ''
-            ? Text(
-              '$label: $value',
-              style: Theme.of(context).textTheme.bodySmall,
-            )
-            : Text(label, style: Theme.of(context).textTheme.bodySmall),
-      ],
-    );
-    if (onTap != null) {
-      return InkWell(onTap: onTap, child: row);
-    }
-    return row;
-  }
-}
-
-class _NovelDescription extends StatelessWidget {
-  final String description;
-
-  const _NovelDescription({required this.description});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('简介', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Html(
-            data: description,
-            style: {
-              'body': Style(
-                margin: Margins.zero,
-                padding: HtmlPaddings.zero,
-                fontFamily:
-                    Theme.of(context).textTheme.bodyMedium?.fontFamily ??
-                    appFontFamily,
-                fontSize: FontSize(14),
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-              'p': Style(margin: Margins.only(bottom: 8)),
-              'br': Style(margin: Margins.only(bottom: 8)),
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _NovelTags extends StatelessWidget {
-  final List<String> tags;
-  final SourceId source;
-
-  const _NovelTags({required this.tags, required this.source});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children:
-            tags.map((tag) {
-              return InkWell(
-                onTap:
-                    source == SourceId.wenku8
-                        ? () => Navigator.pushNamed(
-                          context,
-                          '/category',
-                          arguments: {'tag': tag},
-                        )
-                        : null,
-                child: AppChip(
-                  label: Text(tag),
-                  backgroundColor:
-                      Theme.of(context).colorScheme.primaryContainer,
-                  labelStyle: TextStyle(
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
-                  ),
-                ),
-              );
-            }).toList(),
-      ),
-    );
-  }
-}
-
-class _VolumeItem extends StatelessWidget {
-  final Volume volume;
-  final Function(Chapter) onChapterTap;
-
-  const _VolumeItem({required this.volume, required this.onChapterTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return AppleGlassCard(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              volume.title,
-              style: Theme.of(
+    final source = sourceOf(novelId);
+    final shelf = context.watch<BookshelfCubit>().state;
+    return BookDetailsView(
+      key: ValueKey('book-details-$novelId'),
+      info: novelInfo,
+      volumes: volumes,
+      source: source,
+      resumeChapterId: state.readingHistory?.chapterId,
+      inShelf: shelf.isBookInBookshelf(novelId),
+      onBookmark:
+          source == SourceId.localEpub
+              ? null
+              : () => _toggleBookShelf(context, novelId),
+      onComments:
+          w8.sourceSupportsComments(novelId)
+              ? () => Navigator.pushNamed(
                 context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-            ),
+                '/novel/reviews',
+                arguments: {'aid': novelId, 'title': novelInfo.title},
+              )
+              : null,
+      onAuthor:
+          w8.sourceSupportsAuthorSearch(source) &&
+                  novelInfo.author.trim().isNotEmpty
+              ? () async {
+                await Navigator.pushNamed(
+                  context,
+                  '/search',
+                  arguments: {
+                    'searchType': 'author',
+                    'searchKey': novelInfo.author,
+                  },
+                );
+                if (context.mounted) {
+                  context.read<NovelInfoCubit>().loadHistory();
+                }
+              }
+              : null,
+      onTag:
+          source == SourceId.wenku8
+              ? (tag) => Navigator.pushNamed(
+                context,
+                '/category',
+                arguments: {'tag': tag},
+              )
+              : null,
+      onRead:
+          (chapter) => _navigateToReader(
+            context,
+            chapter.aid,
+            chapter.cid,
+            novelInfo.title,
           ),
-          const Divider(height: 1),
-          ...volume.chapters.map((chapter) {
-            return InkWell(
-              onTap: () => onChapterTap(chapter),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        chapter.title,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ),
-                    Icon(
-                      Icons.chevron_right,
-                      size: 20,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }),
-        ],
-      ),
     );
+  }
+}
+
+Future<void> _toggleBookShelf(BuildContext context, String novelId) async {
+  final bookshelfCubit = context.read<BookshelfCubit>();
+  final isInBookshelf = bookshelfCubit.state.isBookInBookshelf(novelId);
+
+  try {
+    if (isInBookshelf) {
+      await bookshelfCubit.removeFromBookshelf(novelId);
+    } else {
+      await bookshelfCubit.addToBookshelf(novelId);
+    }
+  } catch (e) {
+    if (!context.mounted) return;
+    if (_isCfError(e)) {
+      final apiHost = context.read<ApiHostCubit>().state;
+      String actionPath;
+      if (isInBookshelf) {
+        final bid = bookshelfCubit.state.getBookBid(novelId);
+        if (bid == null) return;
+        actionPath = '/modules/article/bookcase.php?delid=$bid';
+      } else {
+        actionPath = '/modules/article/addbookcase.php?bid=$novelId';
+      }
+      showAdaptiveDialog(
+        context: context,
+        barrierDismissible: false,
+        builder:
+            (ctx) => Dialog.fullscreen(
+              child: CfActionLoader(
+                apiHost: apiHost,
+                actionPath: actionPath,
+                successUrlKeyword: 'bookcase.php',
+                successBodyKeyword: '处理成功',
+                onSuccess: () {
+                  Navigator.of(ctx).pop();
+                  bookshelfCubit.loadBookcases();
+                },
+                onError: (err) {
+                  Navigator.of(ctx).pop();
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('操作失敗: $err')));
+                },
+              ),
+            ),
+      );
+    } else {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('操作失败: $e')));
+    }
   }
 }

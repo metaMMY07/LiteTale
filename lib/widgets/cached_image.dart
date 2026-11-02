@@ -8,8 +8,14 @@ class CachedImageProvider extends ImageProvider<CachedImageProvider> {
   final String url;
   final double scale;
   final SourceId source;
+  final int revision;
 
-  CachedImageProvider(this.url, {required this.source, this.scale = 1.0});
+  CachedImageProvider(
+    this.url, {
+    required this.source,
+    this.scale = 1.0,
+    int? revision,
+  }) : revision = revision ?? sourceRevision.value;
 
   @override
   ImageStreamCompleter loadImage(
@@ -33,7 +39,7 @@ class CachedImageProvider extends ImageProvider<CachedImageProvider> {
   ) async {
     assert(key == this);
     final ref = ReaderImageRef(source: source, url: url);
-    final revision = sourceRevision.value;
+    final revision = key.revision;
     final repository = ReaderImageRepository.instance;
     final data = await repository.read(ref, revision: revision);
     try {
@@ -50,11 +56,12 @@ class CachedImageProvider extends ImageProvider<CachedImageProvider> {
     final CachedImageProvider typedOther = other as CachedImageProvider;
     return url == typedOther.url &&
         scale == typedOther.scale &&
-        source == typedOther.source;
+        source == typedOther.source &&
+        revision == typedOther.revision;
   }
 
   @override
-  int get hashCode => Object.hash(url, scale, source);
+  int get hashCode => Object.hash(url, scale, source, revision);
 
   @override
   String toString() =>

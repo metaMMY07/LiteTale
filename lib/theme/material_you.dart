@@ -41,20 +41,12 @@ ThemeData materialYouTheme(
     // Flutter 3.29 still needs this switch for the updated inline indicators.
     // ignore: deprecated_member_use
     progressIndicatorTheme: const ProgressIndicatorThemeData(year2023: false),
-    scaffoldBackgroundColor: materialSurface(
-      colors,
-      colors.surfaceContainerLow,
-      .025,
-    ),
+    scaffoldBackgroundColor: colors.surface,
     appBarTheme: AppBarTheme(
       centerTitle: false,
       elevation: 0,
       scrolledUnderElevation: 0,
-      backgroundColor: materialSurface(
-        colors,
-        colors.surfaceContainerLow,
-        .025,
-      ),
+      backgroundColor: colors.surface,
       foregroundColor: colors.onSurface,
       titleTextStyle: TextStyle(
         color: colors.onSurface,
@@ -72,7 +64,7 @@ ThemeData materialYouTheme(
     ),
     cardTheme: CardTheme(
       elevation: 0,
-      color: materialSurface(colors, colors.surfaceContainerHigh, .08),
+      color: colors.surfaceContainerLow,
       margin: EdgeInsets.zero,
       shape: rounded,
     ),
@@ -85,10 +77,10 @@ ThemeData materialYouTheme(
     listTileTheme: ListTileThemeData(iconColor: colors.onSurfaceVariant),
     searchBarTheme: SearchBarThemeData(
       elevation: const WidgetStatePropertyAll(0),
-      backgroundColor: WidgetStatePropertyAll(
-        materialSurface(colors, colors.surfaceContainerHigh, .08),
+      backgroundColor: WidgetStatePropertyAll(colors.surfaceContainerHighest),
+      side: WidgetStatePropertyAll(
+        BorderSide(color: colors.outlineVariant, width: 1.2),
       ),
-      side: const WidgetStatePropertyAll(BorderSide.none),
       shape: const WidgetStatePropertyAll(StadiumBorder()),
     ),
     inputDecorationTheme: InputDecorationTheme(
@@ -117,7 +109,7 @@ ThemeData materialYouTheme(
     chipTheme: ChipThemeData(
       shape: const StadiumBorder(),
       side: BorderSide.none,
-      backgroundColor: colors.surfaceContainerHigh,
+      backgroundColor: colors.surfaceContainerLow,
       selectedColor: colors.secondaryContainer,
     ),
     tabBarTheme: TabBarTheme(
@@ -132,7 +124,7 @@ ThemeData materialYouTheme(
       shape: rounded,
     ),
     popupMenuTheme: PopupMenuThemeData(
-      color: colors.surfaceContainerHigh,
+      color: colors.surfaceContainer,
       elevation: 3,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
     ),

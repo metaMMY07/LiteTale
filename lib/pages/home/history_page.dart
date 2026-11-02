@@ -1,9 +1,9 @@
+import 'package:wild/widgets/book_cover_image.dart';
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/sources/source_api.dart' as w8;
-import 'package:wild/widgets/cached_image.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/services/read_request.dart';
 import 'package:intl/intl.dart';
@@ -210,7 +210,7 @@ class _HistoryItem extends StatelessWidget {
                   ),
                 )
               else
-                CachedImage(
+                BookCoverImage(
                   url: history.cover,
                   source: sourceOf(history.novelId),
                   width: 80,

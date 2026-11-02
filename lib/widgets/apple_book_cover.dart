@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../sources/book_source.dart';
-import 'cached_image.dart';
+import 'book_cover_image.dart';
 
 /// Every item reserves the same two title lines, even for a one-line title.
 class AppleBookCover extends StatelessWidget {
@@ -37,7 +37,7 @@ class AppleBookCover extends StatelessWidget {
               borderRadius: BorderRadius.circular(16),
               child: LayoutBuilder(
                 builder:
-                    (context, box) => CachedImage(
+                    (context, box) => BookCoverImage(
                       url: url,
                       source: source,
                       width: double.infinity,

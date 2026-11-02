@@ -1,3 +1,4 @@
+import 'package:wild/widgets/book_cover_image.dart';
 import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
@@ -701,7 +702,7 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
                             ),
                           ),
                         )
-                        : CachedImage(
+                        : BookCoverImage(
                           url: book.coverUrl,
                           source: SourceId.localEpub,
                           fit: BoxFit.contain,

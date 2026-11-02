@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'apple_book_cover.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/sources/book_source.dart';
-import 'package:wild/widgets/cached_image.dart';
+import 'package:wild/widgets/book_cover_image.dart';
+import 'package:wild/models/book_detail_hint.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 
 class NovelCard extends StatelessWidget {
@@ -51,7 +52,13 @@ class NovelCard extends StatelessWidget {
       title: novel.title,
       coverUrl: novel.coverUrl,
       author: novel.author,
-      onTap: onTap,
+      onTap:
+          onTap == null
+              ? null
+              : () {
+                BookDetailHint.remember(novel.id, novel.title, novel.coverUrl);
+                onTap();
+              },
       width: width,
       height: height,
       fit: fit,
@@ -78,7 +85,13 @@ class NovelCard extends StatelessWidget {
     return NovelCard(
       title: novel.title,
       coverUrl: novel.img,
-      onTap: onTap,
+      onTap:
+          onTap == null
+              ? null
+              : () {
+                BookDetailHint.remember(novel.aid, novel.title, novel.img);
+                onTap();
+              },
       width: width,
       height: height,
       fit: fit,
@@ -116,7 +129,7 @@ class NovelCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: CachedImage(
+              child: BookCoverImage(
                 url: coverUrl,
                 source: source,
                 fit: fit,
