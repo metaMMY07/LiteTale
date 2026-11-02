@@ -67,38 +67,48 @@ class AppleGlassCard extends StatelessWidget {
 }
 
 class AppleGlassSurface extends StatelessWidget {
-  const AppleGlassSurface({super.key, required this.child, this.tint});
+  const AppleGlassSurface({
+    super.key,
+    required this.child,
+    this.tint,
+    this.capsule = false,
+  });
   final Widget child;
   final Color? tint;
+  final bool capsule;
   @override
   Widget build(BuildContext context) {
     if (!usesAppleGlass) return child;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: _AppleChrome(
-              parameters: {
-                'kind': 'surface',
-                if (tint != null) 'tint': tint!.toARGB32(),
-                'dark': Theme.of(context).brightness == Brightness.dark,
-              },
-              onAction: (_, _) {},
-              fallback: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                child: ColoredBox(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.surface.withValues(alpha: .64),
-                ),
+    final content = Stack(
+      children: [
+        Positioned.fill(
+          child: _AppleChrome(
+            parameters: {
+              'kind': 'surface',
+              if (capsule) 'capsule': true,
+              if (tint != null) 'tint': tint!.toARGB32(),
+              'dark': Theme.of(context).brightness == Brightness.dark,
+            },
+            onAction: (_, _) {},
+            fallback: BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+              child: ColoredBox(
+                color: Theme.of(
+                  context,
+                ).colorScheme.surface.withValues(alpha: .64),
               ),
             ),
           ),
-          child,
-        ],
-      ),
+        ),
+        child,
+      ],
     );
+    return capsule
+        ? ClipPath(
+          clipper: const ShapeBorderClipper(shape: StadiumBorder()),
+          child: content,
+        )
+        : ClipRRect(borderRadius: BorderRadius.circular(20), child: content);
   }
 }
 

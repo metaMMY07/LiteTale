@@ -17,12 +17,33 @@ final _customAccentPattern = RegExp(r'^custom:#[0-9a-fA-F]{6}$');
 
 /// A system palette has no seed; preset and custom choices have one.
 Color? appAccentSeed(String value) {
-  if (iosAccentColors.containsKey(value))
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    value = _androidAccentKey(value);
+  }
+  if (iosAccentColors.containsKey(value)) {
     return iosAccentColors[value]!.$2.color;
+  }
   final preset = appAccentColors[value];
   if (preset != null) return preset.$2;
   if (!_customAccentPattern.hasMatch(value)) return null;
   return Color(0xFF000000 | int.parse(value.substring(8), radix: 16));
+}
+
+// Imported iOS settings keep the corresponding 1.0.0 Android preset rather
+// than introducing UIKit's more saturated palette into Material You.
+String _androidAccentKey(String value) {
+  const legacy = {
+    'ios-blue': 'blue',
+    'ios-indigo': 'iris',
+    'ios-purple': 'iris',
+    'ios-pink': 'rose',
+    'ios-orange': 'orange',
+    'ios-green': 'green',
+    'ios-teal': 'teal',
+  };
+  if (legacy.containsKey(value)) return legacy[value]!;
+  final native = iosAccentColors[value];
+  return native == null ? value : customAccentValue(native.$2.color);
 }
 
 String customAccentValue(Color color) =>
@@ -57,6 +78,8 @@ class AppAccentCubit extends Cubit<String> {
         emit(
           defaultTargetPlatform == TargetPlatform.iOS
               ? iosAccentKey(value)
+              : defaultTargetPlatform == TargetPlatform.android
+              ? _androidAccentKey(value)
               : value,
         );
       }
@@ -67,6 +90,9 @@ class AppAccentCubit extends Cubit<String> {
 
   Future<void> select(String value) async {
     if (!_validAccent(value)) return;
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      value = _androidAccentKey(value);
+    }
     _revision++;
     emit(value);
     // Preserve selection order when the user taps several colors quickly.

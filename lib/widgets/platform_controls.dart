@@ -926,16 +926,19 @@ class AppChip extends StatelessWidget {
     this.backgroundColor,
     this.padding,
     this.labelStyle,
+    this.capsule = false,
   });
   final Widget label;
   final TextStyle? labelStyle;
   final Widget? avatar;
   final Color? backgroundColor;
   final EdgeInsetsGeometry? padding;
+  final bool capsule;
   @override
   Widget build(BuildContext context) =>
       usesAppleGlass
           ? AppleGlassSurface(
+            capsule: capsule,
             child: Padding(
               padding:
                   padding ??

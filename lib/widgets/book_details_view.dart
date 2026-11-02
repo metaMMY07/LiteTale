@@ -220,11 +220,20 @@ class _BookDetailsViewState extends State<BookDetailsView> {
                   ))
                     InkWell(
                       borderRadius: BorderRadius.circular(20),
+                      customBorder: apple ? const StadiumBorder() : null,
                       onTap:
                           widget.onTag == null
                               ? null
                               : () => widget.onTag!(tag),
                       child: AppChip(
+                        capsule: apple,
+                        padding:
+                            apple
+                                ? const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 8,
+                                )
+                                : null,
                         label: Text(tag),
                         backgroundColor: colors.primaryContainer,
                         labelStyle: TextStyle(color: colors.onPrimaryContainer),

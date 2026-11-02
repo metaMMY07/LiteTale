@@ -31,6 +31,7 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
   private var segments: UISegmentedControl?
   private var surface: UIVisualEffectView?
   private var surfaceTint: UInt32?
+  private var surfaceCapsule = false
   private var menuButton: UIButton?
   private var menuItems: [[String: String]] = []
   private var applyingSelection = false
@@ -56,6 +57,7 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       segments = control
       addSubview(control)
     } else if kind == "surface" {
+      surfaceCapsule = config["capsule"] as? Bool ?? false
       let effect: UIVisualEffect
       if #available(iOS 26.0, *) { effect = UIGlassEffect(style: .regular) }
       else { effect = UIBlurEffect(style: .systemMaterial) }
@@ -165,6 +167,8 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       green: CGFloat((argb >> 8) & 255) / 255, blue: CGFloat(argb & 255) / 255, alpha: 1)
     tintColor = color
     if let surface {
+      surfaceCapsule = config["capsule"] as? Bool ?? false
+      setNeedsLayout()
       let argb = (config["tint"] as? NSNumber)?.uint32Value
       if #available(iOS 26.0, *), surfaceTint != argb {
         let glass = UIGlassEffect(style: .regular)
@@ -242,7 +246,22 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    if let surface { surface.frame = bounds }
+    if let surface {
+      surface.frame = bounds
+      if surfaceCapsule {
+        // Match Flutter's StadiumBorder on both the glass and its host. An
+        // outer clip alone leaves the material using its rectangular outline.
+        let radius = min(bounds.width, bounds.height) / 2
+        layer.cornerRadius = radius
+        layer.cornerCurve = .circular
+        surface.layer.cornerRadius = radius
+        surface.layer.cornerCurve = .circular
+        surface.clipsToBounds = true
+      } else {
+        layer.cornerRadius = 20
+        surface.layer.cornerRadius = 0
+      }
+    }
     else if let button = menuButton { button.frame = bounds }
     else if let tabs {
       tabs.view.frame = bounds

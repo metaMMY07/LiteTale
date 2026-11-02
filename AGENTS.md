@@ -1,5 +1,7 @@
 # LiteTale 工作约定
 
+- 2026-11-02 最新追加：用户授权iOS详情分类标签改胶囊，并指出Android旧配色没完全恢复。先读 `docs/IOS_CAPSULE_ANDROID_PALETTE_1.2.0_FIX3.md`。只改详情标签，其他已验收布局不重做。胶囊须Flutter StadiumBorder与原生surface/玻璃同半径，不能只套外裁剪。Android底栏选中色恢复1.0.0 primary/primaryContainer及旧毛玻璃底色，materialSurface不再额外灰色混合，保留动态色/自选色/新卡片几何。Android导入ios-*色名映射旧预设，iOS色盘不动。13针对性检查通过，版本1.2.0+85；84APK和iOS26只有封面渐变，不包含此追加项。
+
 - 2026-11-02 封面渐变修复二：先读 `docs/COVER_FADE_1.2.0_FIX2.md`。用户确认详情完成，禁止本轮改详情布局/主题。同步解码和预加载不等于已显示；封面真实paint后才登记/开始过渡，不能恢复build83的`synchronous`直接跳过。iOS所有来源200ms原生ease-in-out交叉渐变、无BlurHash源用同帧32×48层模糊底；Android主题色底与500ms单图渐变。已实际显示/减少动态效果直显。下载三页补接统一组件。Yomiru私有封面未提取，不得谎称完整反编译移植；Novella与Expo时序已按固定源码适配。10针对性检查通过，详情/主题散列未变，仍按用户要求只做必要构建与交付，版本1.2.0+84。
 
 - 2026-11-02 封面/详情实施：先读 `docs/COVER_DETAILS_1.2.0_FIX1.md`。用户已授权 Android 参考 Yomiru、iOS 参考 Novella，详情必须多源通用；Android 恢复 1.0.0 色阶但保留毛玻璃底栏和几何，iOS 原生选色/玻璃保留。首页整页 spinner 不改，首帧动画仅封面，不能给 reader 插图加动画；缓存/已显示/减少动态效果直显。小预览 RAM 256项/8MiB、最多2活动无队列；原图仓库和文库8磁盘缓存沿用，source/revision 隔离。分卷/继续阅读/书架/书评按真实能力显示，保留原登录和站点恢复。用户要求尽快交付 APK+IPA 并自行测试，仅13针对性检查及目标分析通过，不重跑全量或声称实体已验；版本1.2.0+83，构建使用独立临时 index。

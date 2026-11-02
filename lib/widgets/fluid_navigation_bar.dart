@@ -1,7 +1,6 @@
 import 'dart:ui' show ImageFilter, lerpDouble;
 
 import 'package:flutter/material.dart';
-import 'package:wild/theme/material_you.dart';
 
 const _iconSlotTop = 10.0;
 const _iconSlotHeight = 40.0;
@@ -90,25 +89,13 @@ class _FluidNavigationBarState extends State<FluidNavigationBar>
         filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color:
-                usesMaterialYou
-                    ? materialSurface(
-                      colors,
-                      colors.surfaceContainerHigh,
-                      .08,
-                    ).withValues(alpha: isLight ? .76 : .78)
-                    : (isLight ? colors.surfaceContainerHigh : colors.surface)
-                        .withValues(alpha: .72),
-            border:
-                usesMaterialYou
-                    ? null
-                    : Border(
-                      top: BorderSide(
-                        color: colors.outline.withValues(
-                          alpha: isLight ? 0.28 : 0.34,
-                        ),
-                      ),
-                    ),
+            color: (isLight ? colors.surfaceContainerHigh : colors.surface)
+                .withValues(alpha: .72),
+            border: Border(
+              top: BorderSide(
+                color: colors.outline.withValues(alpha: isLight ? .28 : .34),
+              ),
+            ),
           ),
           child: _navigationContent(
             colors: colors,
@@ -141,12 +128,7 @@ class _FluidNavigationBarState extends State<FluidNavigationBar>
                     fromIndex: _fromIndex,
                     toIndex: _toIndex,
                     count: widget.destinations.length,
-                    color:
-                        usesMaterialYou
-                            ? colors.secondaryContainer
-                            : (isLight
-                                ? colors.primary
-                                : colors.primaryContainer),
+                    color: isLight ? colors.primary : colors.primaryContainer,
                   ),
                 ),
               ),
@@ -197,10 +179,7 @@ class _FluidNavigationBarState extends State<FluidNavigationBar>
                                         size: 25,
                                         color:
                                             index == widget.selectedIndex
-                                                ? (usesMaterialYou
-                                                    ? colors
-                                                        .onSecondaryContainer
-                                                    : isLight
+                                                ? (isLight
                                                     ? colors.onPrimary
                                                     : colors.onPrimaryContainer)
                                                 : colors.onSurfaceVariant,

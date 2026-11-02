@@ -5,15 +5,9 @@ import 'package:wild/theme/horizontal_page_transitions.dart';
 
 bool get usesMaterialYou => defaultTargetPlatform == TargetPlatform.android;
 
-/// Android 12 palettes may omit newer surface roles. Preserve the real accent
-/// palette while still separating an opaque card from the page beneath it.
-Color materialSurface(ColorScheme colors, Color role, double alpha) =>
-    role == colors.surface
-        ? Color.alphaBlend(
-          colors.onSurface.withValues(alpha: alpha),
-          colors.surface,
-        )
-        : role;
+/// Keep the exact 1.0.0 palette roles. Extra onSurface blending in the newer
+/// controls made the same selected theme look greyer than the legacy app.
+Color materialSurface(ColorScheme colors, Color role, double alpha) => role;
 
 /// Android follows wallpaper colors when available, with a violet fallback or a chosen accent.
 ThemeData materialYouTheme(
