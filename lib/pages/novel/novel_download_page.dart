@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/novel/novel_download_cubit.dart';
-import 'package:wild/widgets/cached_image.dart';
+import 'package:wild/widgets/book_cover_image.dart';
 import 'package:wild/pages/novel/novel_download_info_page.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' as w8;
@@ -120,7 +120,7 @@ class _NovelDownloadContent extends StatelessWidget {
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
-                          child: CachedImage(
+                          child: BookCoverImage(
                             url: download.coverUrl,
                             source: sourceOf(download.novelId),
                             width: 80,

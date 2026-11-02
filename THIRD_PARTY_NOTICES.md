@@ -14,6 +14,8 @@ LiteTale 使用 Flutter 与自己的存储、阅读器、书源和更新接口�
 
 ## Novella 与轻书架
 
+1.2.0 封面首显的显示记录、预览保留及交叉渐变行为参照 Novella 固定提交 `bedd62c5a20aa80e9bf922b33ea12887d991aa8a` 的 `apps/mobile/src/components/book-cover-image.tsx`，按 LiteTale 的 Flutter ImageStream、实际绘制、书源隔离与缓存独立适配。iOS 的200ms ease-in-out 对照 Expo Image `expo-image@58.0.16` 的 UIKit transition 配置；Expo 版权归650 Industries，MIT许可见 `LICENSES/Expo-MIT.txt`。Novella 原作者与贡献者版权及仓库AGPL-3.0许可保留。未引入其账号或服务端接口。
+
 Windows 应用图标取自 [celia-sh/Novella](https://github.com/celia-sh/Novella) 仓库中的 `apps/mobile/assets/icon.png`。该仓库按 GNU Affero General Public License v3.0 发布，许可文本见 [LICENSES/AGPL-3.0.txt](LICENSES/AGPL-3.0.txt)。
 
 轻书架接入参考了 Novella 的 `archive/flutter` 分支和 LightNovelShelf/Web 公布的接口约定。网络客户端使用 Dart WebSocket 与 HTTP 独立实现；0.0.18 增加原生登录、搜索、目录和阅读适配。登录遵循官方表单的密码 SHA-256 协议。匿名首页仅调用 `GetLatestBookList`，受限接口仍按站点要求登录。

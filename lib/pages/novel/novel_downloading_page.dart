@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/src/rust/wenku8/models.dart';
-import 'package:wild/widgets/cached_image.dart';
+import 'package:wild/widgets/book_cover_image.dart';
 
 class NovelDownloadingPage extends StatefulWidget {
   final String novelId;
@@ -129,7 +129,7 @@ class _NovelDownloadingPageState extends State<NovelDownloadingPage> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CachedImage(
+                  BookCoverImage(
                     url: widget.novelInfo.imgUrl,
                     source: sourceOf(widget.novelId),
                     width: 80,

@@ -1,5 +1,7 @@
 # LiteTale 工作约定
 
+- 2026-11-02 封面渐变修复二：先读 `docs/COVER_FADE_1.2.0_FIX2.md`。用户确认详情完成，禁止本轮改详情布局/主题。同步解码和预加载不等于已显示；封面真实paint后才登记/开始过渡，不能恢复build83的`synchronous`直接跳过。iOS所有来源200ms原生ease-in-out交叉渐变、无BlurHash源用同帧32×48层模糊底；Android主题色底与500ms单图渐变。已实际显示/减少动态效果直显。下载三页补接统一组件。Yomiru私有封面未提取，不得谎称完整反编译移植；Novella与Expo时序已按固定源码适配。10针对性检查通过，详情/主题散列未变，仍按用户要求只做必要构建与交付，版本1.2.0+84。
+
 - 2026-11-02 封面/详情实施：先读 `docs/COVER_DETAILS_1.2.0_FIX1.md`。用户已授权 Android 参考 Yomiru、iOS 参考 Novella，详情必须多源通用；Android 恢复 1.0.0 色阶但保留毛玻璃底栏和几何，iOS 原生选色/玻璃保留。首页整页 spinner 不改，首帧动画仅封面，不能给 reader 插图加动画；缓存/已显示/减少动态效果直显。小预览 RAM 256项/8MiB、最多2活动无队列；原图仓库和文库8磁盘缓存沿用，source/revision 隔离。分卷/继续阅读/书架/书评按真实能力显示，保留原登录和站点恢复。用户要求尽快交付 APK+IPA 并自行测试，仅13针对性检查及目标分析通过，不重跑全量或声称实体已验；版本1.2.0+83，构建使用独立临时 index。
 
 - 2026-11-02 详情/封面研究：先读 `docs/research/DETAIL_COVER_RESEARCH_2026-11-02.md`。用户已澄清首页整页转圈保留，只学习每本封面占位、首帧过渡、缓存再次显示；不能借此改首页为骨架屏或全局Loading。REA核验Yomiru1.6.0 APK与Novella2.7.0 IPA；Yomiru模拟器实际同书详情与新封面录像确认主题渐变占位后逐渐显现，但业务源码未公开、unified Dart AOT不被当前读取器支持，曲线/容量未知。Novella固定源码确认32×48 BlurHash、200ms cross-dissolve、memory-disk、256显示记录、尺寸分桶与可见附近行激活；120ms占位常量未使用，500ms页面骨架等待不引入。后续拟用专用封面组件，不能给Reader插图全局加动画；缓存直显、无额外请求制造占位。详情借鉴Yomiru卷卡和Novella封面头部，保留iOS系统色/玻璃与Android Material You。仅调研，未改1.2.0生产代码/包/版本；未运行Novella iOS，不把库存/字符串写成动态实测。

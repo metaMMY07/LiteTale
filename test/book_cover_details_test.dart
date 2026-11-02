@@ -87,6 +87,7 @@ void main() {
       final pixels = await _pixels(tester);
       provider.ready.complete(ImageInfo(image: pixels));
       await tester.pump();
+      await tester.pump();
       expect(
         tester
             .widget<FadeTransition>(find.byKey(const ValueKey('cover-reveal')))
@@ -105,7 +106,7 @@ void main() {
       expect(opacity, greaterThan(0));
       expect(opacity, lessThan(1));
       expect(tester.getRect(find.byType(BookCoverImage)), frame);
-      await tester.pump(const Duration(milliseconds: 150));
+      await tester.pump(const Duration(milliseconds: 450));
       expect(
         find.byKey(const ValueKey('cover-android-placeholder')),
         findsNothing,
