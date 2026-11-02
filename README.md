@@ -8,19 +8,18 @@
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
-## 最新正式版 LiteTale 1.1.1（2026-10-31）
+## 最新正式版 LiteTale 1.2.0
 
-[Android ARM64 APK（build79）](https://github.com/metaMMY07/LiteTale/releases/download/v1.1.1/LiteTale-1.1.1%2B79-arm64-v8a.apk) · [Android x86_64 APK（build79）](https://github.com/metaMMY07/LiteTale/releases/download/v1.1.1/LiteTale-1.1.1%2B79-x86_64.apk) · [iOS IPA（build21，未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.1.1/LiteTale-1.1.1-ios-21-unsigned.ipa) · [校验值](https://github.com/metaMMY07/LiteTale/releases/download/v1.1.1/SHA256SUMS-v1.1.1.txt) · [发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v1.1.1)
+[Android 手机／平板 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.0-build85/LiteTale-1.2.0%2B85-arm64-v8a.apk) · [Android x86_64 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.0-build85/LiteTale-1.2.0%2B85-x86_64.apk) · [iPhone／iPad IPA（未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.0-build85/LiteTale-1.2.0-ios-27-unsigned.ipa) · [更新内容](https://github.com/metaMMY07/LiteTale/releases/tag/v1.2.0-build85)
 
-本版加入幻梦轻小说书源，提供 Android 书源快捷切换和原网站访问入口，并保留 iOS 原生液态玻璃选源菜单。Android 安装包沿用现有签名；iOS IPA 需自行签名后侧载。
+iOS 安装包需要自行签名后安装。
 
-## LiteTale 1.0.0
+### 本次更新
 
-LiteTale 1.0.0 提供 Android ARM64 手机／平板版、x86_64 模拟器版和 iOS 版。在线轻小说与本地 EPUB 书籍可以在同一书架管理。
-
-[下载 ARM64 手机／平板版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-build75/LiteTale-1.0.0-build75-arm64-v8a.apk) · [下载 x86_64 模拟器版 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-build75/LiteTale-1.0.0-build75-x86_64.apk) · [下载 iOS IPA（未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.0.0-build75/LiteTale-1.0.0-ios-13-unsigned.ipa) · [查看正式发布说明](https://github.com/metaMMY07/LiteTale/releases/tag/v1.0.0-build75)
-
-完整功能和安装包校验值见 [1.0.0 发布记录](docs/releases/1.0.0.md)。
+- 本地 EPUB 支持批量导入、分类与管理。
+- 阅读支持覆盖翻页，插图可预览、缩放和保存。
+- 优化多书源详情页、封面加载和评论体验。
+- iOS 优化液态玻璃界面；Android 恢复旧版主题配色并保留动态配色。
 
 ### 界面预览
 
