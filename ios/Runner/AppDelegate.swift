@@ -2,6 +2,7 @@ import Flutter
 import UIKit
 import AVFoundation
 import MediaPlayer
+import Photos
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -41,6 +42,7 @@ import MediaPlayer
   private var isChangingLauncherIcon = false
   private var appleBooks: AppleBooksChannel?
   private var paletteChannel: FlutterMethodChannel?
+  private var readerImages: ReaderImageChannel?
 
   private var volumeEventSink: FlutterEventSink?
   private var audioSession: AVAudioSession?
@@ -69,6 +71,7 @@ import MediaPlayer
     }
     paletteChannel = palette
     appleBooks = AppleBooksChannel(parent: controller, messenger: controller.binaryMessenger)
+    readerImages = ReaderImageChannel(parent: controller, messenger: controller.binaryMessenger)
     AppleThemeReveal.shared.install(messenger: controller.binaryMessenger, window: { [weak self] in self?.window })
 
     let channel = FlutterMethodChannel(name: "methods", binaryMessenger: controller.binaryMessenger)
@@ -338,6 +341,93 @@ import MediaPlayer
     if Thread.isMainThread { handle() } else { DispatchQueue.main.async(execute: handle) }
   }
 
+}
+
+/// Image export stays separate from Apple Books and source account sessions.
+private final class ReaderImageChannel: NSObject {
+  private let channel: FlutterMethodChannel
+  private weak var parent: UIViewController?
+  private var pending: FlutterResult?
+
+  init(parent: UIViewController, messenger: FlutterBinaryMessenger) {
+    self.parent = parent
+    channel = FlutterMethodChannel(name: "litetale/reader_images", binaryMessenger: messenger)
+    super.init()
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { result(FlutterError(code: "unavailable", message: "图片窗口已关闭", details: nil)); return }
+      self.handle(call, result: result)
+    }
+  }
+  private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard call.method == "save" || call.method == "export" else { result(FlutterMethodNotImplemented); return }
+    guard pending == nil else { result(FlutterError(code: "image_busy", message: "请先完成当前保存", details: nil)); return }
+    guard let args = call.arguments as? [String: Any], let typed = args["bytes"] as? FlutterStandardTypedData,
+          !typed.data.isEmpty, typed.data.count <= 20 * 1024 * 1024,
+          let name = args["name"] as? String, !name.isEmpty, name.count <= 150,
+          !name.contains("/"), !name.contains("\\"),
+          let mime = args["mime"] as? String,
+          ["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/avif"].contains(mime) else {
+      result(FlutterError(code: "invalid_image", message: "图片数据无效", details: nil)); return
+    }
+    pending = result
+    if call.method == "export" { export(typed.data, name: name); return }
+    guard #available(iOS 14, *) else { finishError("当前系统请使用导出原图"); return }
+    PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] status in
+      DispatchQueue.main.async {
+        guard let self else { return }
+        guard status == .authorized || status == .limited else { self.finishError("未获得添加照片的权限，请使用导出原图"); return }
+        PHPhotoLibrary.shared().performChanges({
+          let options = PHAssetResourceCreationOptions()
+          options.originalFilename = name
+          PHAssetCreationRequest.forAsset().addResource(with: .photo, data: typed.data, options: options)
+        }) { [weak self] success, _ in
+          DispatchQueue.main.async {
+            guard let self else { return }
+            if success { self.finish("saved") } else { self.finishError("未能保存到相册，请使用导出原图") }
+          }
+        }
+      }
+    }
+  }
+  private func export(_ data: Data, name: String) {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("reader-image-" + UUID().uuidString, isDirectory: true)
+    let url = directory.appendingPathComponent(name)
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      do {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
+        DispatchQueue.main.async {
+          guard let self else { return }
+          guard let parent = self.parent, parent.presentedViewController == nil else {
+            self.removeTemporary(url, directory: directory); self.finishError("请关闭当前系统窗口后重试"); return
+          }
+          let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+          if let popover = sheet.popoverPresentationController {
+            popover.sourceView = parent.view
+            popover.sourceRect = CGRect(x: parent.view.bounds.midX, y: parent.view.bounds.maxY - 80, width: 1, height: 1)
+            popover.permittedArrowDirections = []
+          }
+          sheet.completionWithItemsHandler = { [weak self] _, completed, _, error in
+            DispatchQueue.main.async {
+              guard let self else { return }
+              self.removeTemporary(url, directory: directory)
+              if error != nil { self.finishError("图片导出失败") }
+              else { self.finish(completed ? "exported" : "cancelled") }
+            }
+          }
+          parent.present(sheet, animated: true)
+        }
+      } catch {
+        DispatchQueue.main.async { self?.removeTemporary(url, directory: directory); self?.finishError("无法准备图片文件") }
+      }
+    }
+  }
+  private func removeTemporary(_ file: URL, directory: URL) {
+    // Only this operation's one temporary file and now-empty directory.
+    DispatchQueue.global(qos: .utility).async { try? FileManager.default.removeItem(at: file); try? FileManager.default.removeItem(at: directory) }
+  }
+  private func finish(_ status: String) { let result = pending; pending = nil; result?(status) }
+  private func finishError(_ message: String) { let result = pending; pending = nil; result?(FlutterError(code: "image_save", message: message, details: nil)) }
 }
 
 extension AppDelegate: FlutterStreamHandler {

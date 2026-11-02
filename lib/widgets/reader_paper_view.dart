@@ -7,6 +7,8 @@ import 'package:wild/widgets/cached_image.dart';
 import 'package:wild/widgets/reader_raster_readiness.dart';
 import 'package:wild/widgets/reader_styled_paragraph.dart';
 import 'package:wild/services/epub/epub_css_reader.dart';
+import 'package:wild/services/reader_images.dart';
+import 'package:wild/widgets/reader_illustration.dart';
 
 /// A real spread contains two independently paginated leaves. Text continues
 /// from the left leaf to the right, rather than being laid out across the seam.
@@ -90,6 +92,63 @@ class ReaderPaperView extends StatelessWidget {
   }
 }
 
+class _CssIllustrations extends StatefulWidget {
+  const _CssIllustrations({required this.page});
+  final ReaderCssPage page;
+  @override
+  State<_CssIllustrations> createState() => _CssIllustrationsState();
+}
+
+class _CssIllustrationsState extends State<_CssIllustrations> {
+  late Future<List<ReaderCssImageRegion>> _images;
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  void _load() =>
+      _images = widget.page.readImages?.call() ?? Future.value(const []);
+  @override
+  void didUpdateWidget(_CssIllustrations oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.page.key != widget.page.key ||
+        oldWidget.page.index != widget.page.index) {
+      _load();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder:
+        (context, constraints) => FutureBuilder(
+          future: _images,
+          builder:
+              (context, snapshot) => Stack(
+                children: [
+                  for (final image
+                      in snapshot.data ?? const <ReaderCssImageRegion>[])
+                    Positioned.fromRect(
+                      rect: Rect.fromLTRB(
+                        image.rect.left * constraints.maxWidth,
+                        image.rect.top * constraints.maxHeight,
+                        image.rect.right * constraints.maxWidth,
+                        image.rect.bottom * constraints.maxHeight,
+                      ),
+                      child: ReaderImageRegion(
+                        image: ReaderImageRef(
+                          source: SourceId.localEpub,
+                          url: image.key,
+                          readLocal: image.read,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+        ),
+  );
+}
+
 class ReaderPaperLeaf extends StatelessWidget {
   const ReaderPaperLeaf({
     super.key,
@@ -110,6 +169,15 @@ class ReaderPaperLeaf extends StatelessWidget {
   final double paragraphSpacing;
   final String titleFontFamily;
 
+  Widget _illustration(String url, Widget error) {
+    final provider = CachedImageProvider(url, source: source);
+    return ReaderIllustration(
+      image: ReaderImageRef(source: source, url: url),
+      provider: provider,
+      child: ReaderRasterImage(image: provider, errorChild: error),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // An odd chapter ends with a blank right-hand leaf, never duplicated text.
@@ -129,6 +197,7 @@ class ReaderPaperLeaf extends StatelessWidget {
                 child: Text('页面加载失败，请重新打开本章', style: textStyle),
               ),
             ),
+            _CssIllustrations(page: page!.cssPage!),
             if (chapterTitle.isNotEmpty &&
                 layout.headerHeight > 0 &&
                 !page!.cssPage!.fixedLayout)
@@ -156,9 +225,9 @@ class ReaderPaperLeaf extends StatelessWidget {
         label: page!.artworkText,
         child: ColoredBox(
           color: Colors.white,
-          child: ReaderRasterImage(
-            image: CachedImageProvider(page!.content, source: source),
-            errorChild: Center(child: Text('特殊页面加载失败', style: textStyle)),
+          child: _illustration(
+            page!.content,
+            Center(child: Text('特殊页面加载失败', style: textStyle)),
           ),
         ),
       );
@@ -198,9 +267,9 @@ class ReaderPaperLeaf extends StatelessWidget {
             width: layout.contentWidth,
             child:
                 page!.isImage
-                    ? ReaderRasterImage(
-                      image: CachedImageProvider(content, source: source),
-                      errorChild: Center(
+                    ? _illustration(
+                      content,
+                      Center(
                         child: Text(
                           '图片加载失败',
                           style: textStyle.copyWith(fontSize: 14),

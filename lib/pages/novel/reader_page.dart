@@ -31,7 +31,7 @@ import 'left_padding_cubit.dart';
 import 'right_padding_cubit.dart';
 import 'reader_type_cubit.dart';
 import 'package:wild/cubits/reader_background_cubit.dart';
-import 'package:wild/services/reader_page_controller.dart';
+import 'package:wild/widgets/reader_cover_view.dart';
 import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/widgets/page_curl_view.dart';
 import 'package:wild/widgets/reader_curl_setting.dart';
@@ -199,7 +199,7 @@ class _ReaderViewState extends State<_ReaderView> {
     busy: () => _isTurning,
     dispatch: _onController,
   );
-  late ReaderPageController _pageController;
+  late ReaderCoverController _pageController;
   final _curlKey = GlobalKey<PageCurlViewState>();
   bool _wasCurlEnabled = false;
   Size? _lastLayoutSize;
@@ -208,7 +208,6 @@ class _ReaderViewState extends State<_ReaderView> {
   bool? _lastBoldText;
   String? _lastHanVariant;
   Color? _lastPaperColor, _lastTextColor;
-  double _boundaryOverscroll = 0;
   var preTime = 0;
 
   int get _viewIndex =>
@@ -238,7 +237,7 @@ class _ReaderViewState extends State<_ReaderView> {
   @override
   void initState() {
     super.initState();
-    _pageController = ReaderPageController(initialPage: _viewIndex);
+    _pageController = ReaderCoverController();
     setKeepScreenUpOnReading(true);
   }
 
@@ -271,7 +270,6 @@ class _ReaderViewState extends State<_ReaderView> {
 
     final spread = widget.state.layout.isSpread;
     if (tapX < leftArea || (!spread && tapY < topArea)) {
-      if (_isTurning) return;
       // 点击左侧或上方区域，上一页
       if (_viewIndex > 0) {
         _turnPage(-1, startY: details.localPosition.dy);
@@ -279,7 +277,6 @@ class _ReaderViewState extends State<_ReaderView> {
         _handleBoundaryTurn(-1);
       }
     } else if (tapX > rightArea || (!spread && tapY > bottomArea)) {
-      if (_isTurning) return;
       // 点击右侧或下方区域，下一页
       if (_viewIndex < _viewCount - 1) {
         _turnPage(1, startY: details.localPosition.dy);
@@ -332,27 +329,6 @@ class _ReaderViewState extends State<_ReaderView> {
         currentVolumeIndex < widget.state.volumes.length - 1) {
       context.read<ReaderCubit>().goToNextChapter();
     }
-  }
-
-  bool _onPageScroll(ScrollNotification notification) {
-    if (_bookSource != SourceId.localEpub || notification.depth != 0) {
-      return false;
-    }
-    if (notification is ScrollStartNotification) _boundaryOverscroll = 0;
-    if (notification is OverscrollNotification &&
-        notification.dragDetails != null) {
-      _boundaryOverscroll += notification.overscroll;
-    }
-    if (notification is ScrollEndNotification) {
-      final distance = _boundaryOverscroll;
-      _boundaryOverscroll = 0;
-      if (distance.abs() > 36) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _handleBoundaryTurn(distance.isNegative ? -1 : 1);
-        });
-      }
-    }
-    return false;
   }
 
   void _showChapterList() {
@@ -471,7 +447,7 @@ class _ReaderViewState extends State<_ReaderView> {
   void _syncCurlMode(bool enabled) {
     if (_wasCurlEnabled && !enabled) {
       final old = _pageController;
-      _pageController = ReaderPageController(initialPage: _viewIndex);
+      _pageController = ReaderCoverController();
       WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
     }
     _wasCurlEnabled = enabled;
@@ -624,19 +600,25 @@ class _ReaderViewState extends State<_ReaderView> {
                         }
                         return GestureDetector(
                           onTapUp: _handleTap,
-                          child: NotificationListener<ScrollNotification>(
-                            onNotification: _onPageScroll,
-                            child: PageView.builder(
-                              controller: _pageController,
-                              itemCount: _viewCount,
-                              onPageChanged: _onViewChanged,
-                              itemBuilder:
-                                  (context, index) => _buildReaderPage(
-                                    context,
-                                    index,
-                                    textColor,
-                                  ),
+                          child: ReaderCoverView(
+                            controller: _pageController,
+                            index: _viewIndex,
+                            pageCount: _viewCount,
+                            leafCount: widget.state.pages.length,
+                            isSpread: widget.state.layout.isSpread,
+                            active: !state.showControls,
+                            revision: Object.hash(
+                              widget.state.presentationKey ??
+                                  widget.state.pages,
+                              paperDecoration,
+                              widget.title,
                             ),
+                            paperDecoration: paperDecoration,
+                            onPageChanged: _onViewChanged,
+                            onBoundaryTurn: _handleBoundaryTurn,
+                            pageBuilder:
+                                (context, index) =>
+                                    _buildReaderPage(context, index, textColor),
                           ),
                         );
                       },

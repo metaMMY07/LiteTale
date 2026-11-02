@@ -57,6 +57,7 @@ class PTQBookPageCurlNativeView(
     private var announcedReadyIndex: Int? = null
     private var turnInProgress = false
     private var disposed = false
+    private val imageRegions = mutableMapOf<Int, List<android.graphics.RectF>>()
 
     private val composeView = ComposeView(context).apply {
         setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
@@ -131,6 +132,9 @@ class PTQBookPageCurlNativeView(
                         val width = rightDown.x.coerceAtLeast(1f)
                         val height = rightDown.y.coerceAtLeast(1f)
                         when {
+                            imageRegions[pageIndex]?.any { it.contains(touchPoint.x / width, touchPoint.y / height) } == true -> {
+                                sendEvent("imageTap", mapOf("index" to pageIndex, "x" to touchPoint.x / width, "y" to touchPoint.y / height)); null
+                            }
                             !tapToTurnState.value -> { sendEvent("centerTap", null); null }
                             touchPoint.x < width * 0.30f || (!isSpread && touchPoint.y < height * 0.30f) -> false
                             touchPoint.x > width * 0.70f || (!isSpread && touchPoint.y > height * 0.70f) -> true
@@ -191,6 +195,17 @@ class PTQBookPageCurlNativeView(
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
         )
         setBackgroundColor(AndroidColor.WHITE)
+    }
+
+    fun setImageRegions(index: Int, regions: List<*>) {
+        imageRegions[index] = regions.take(256).mapNotNull { item ->
+            val rect = (item as? Map<*, *>)?.get("rect") as? List<*> ?: return@mapNotNull null
+            if (rect.size != 4) return@mapNotNull null
+            val values = rect.map { (it as? Number)?.toFloat() ?: return@mapNotNull null }
+            if (values.any { !it.isFinite() } || values[2] <= values[0] || values[3] <= values[1]) return@mapNotNull null
+            android.graphics.RectF(values[0], values[1], values[2], values[3])
+        }
+        imageRegions.keys.removeAll { kotlin.math.abs(it - pageIndexState.intValue) > 3 }
     }
 
     fun updateState(pageCount: Int, index: Int, paperColor: Int, isSpread: Boolean = false, tapToTurn: Boolean = true) {

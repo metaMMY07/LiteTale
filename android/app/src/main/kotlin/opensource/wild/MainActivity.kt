@@ -28,6 +28,7 @@ class MainActivity : FlutterFragmentActivity() {
     private val uiThreadHandler = Handler(Looper.getMainLooper())
     private var epubArtwork: EpubArtworkChannel? = null
     private var epubPages: EpubPageChannel? = null
+    private var readerImages: ReaderImageChannel? = null
     
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -46,6 +47,7 @@ class MainActivity : FlutterFragmentActivity() {
         SettingsDocumentChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         epubArtwork = EpubArtworkChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         epubPages = EpubPageChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        readerImages = ReaderImageChannel(this, flutterEngine.dartExecutor.binaryMessenger)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "litetale/web_session")
             .setMethodCallHandler { call, result ->
@@ -87,6 +89,8 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        readerImages?.dispose()
+        readerImages = null
         epubArtwork?.dispose()
         epubArtwork = null
         epubPages?.dispose()

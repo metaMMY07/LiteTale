@@ -52,6 +52,7 @@ internal class PTQPageCurlPlatformViewFactory(
                     if (index < 0 || bytes == null) {
                         result.error("invalid_page", "setPage requires index and PNG bytes", null)
                     } else {
+                        nativeView.setImageRegions(index, values["imageRegions"] as? List<*> ?: emptyList<Any>())
                         nativeView.setPageImage(index, bytes) { success, error ->
                             if (success) result.success(null)
                             else result.error(error ?: "decode_failed", "Could not decode page $index", null)

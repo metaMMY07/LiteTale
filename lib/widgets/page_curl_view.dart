@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/reader_illustration.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:wild/widgets/reader_raster_readiness.dart';
@@ -64,6 +65,7 @@ class PageCurlViewState extends State<PageCurlView>
   // PTQFlipper owns the actual curl on Android. Flutter pages are rasterized
   // only when pagination changes; no Dart geometry runs on drag frames.
   final Map<int, GlobalKey> _nativeKeys = {};
+  final Map<int, ReaderImageHitRegistry> _imageHits = {};
   final Map<int, ReaderRasterReadiness> _nativeRasterReadiness = {};
   final Map<int, Uint8List> _nativePages = {};
   final Set<int> _nativeRequestedPages = {};
@@ -285,6 +287,7 @@ class PageCurlViewState extends State<PageCurlView>
           await _nativeChannel?.invokeMethod<void>('setPage', {
             'index': index,
             'bytes': bytes,
+            'imageRegions': _imageHits[index]?.serialized ?? const [],
           });
           if (!_nativeReady && index == widget.index) {
             setState(() => _nativeReady = true);
@@ -413,6 +416,12 @@ class PageCurlViewState extends State<PageCurlView>
   }
 
   void _loadingTap(Offset position) {
+    if (_imageHits[widget.index]?.openAt(
+          Offset(position.dx / _width, position.dy / _height),
+        ) ==
+        true) {
+      return;
+    }
     if (!widget.tapToTurn) {
       widget.onCenterTap?.call();
       return;
@@ -431,6 +440,16 @@ class PageCurlViewState extends State<PageCurlView>
   Future<void> _handleNativeCall(MethodCall call) async {
     if (!mounted) return;
     switch (call.method) {
+      case 'imageTap':
+        final args = call.arguments as Map;
+        if (!isTurning && args['index'] == widget.index) {
+          _imageHits[widget.index]?.openAt(
+            Offset(
+              (args['x'] as num).toDouble(),
+              (args['y'] as num).toDouble(),
+            ),
+          );
+        }
       case 'turnStarted':
         if (!_nativeTurning) _nativeTurnSequence++;
         _nativeTurning = true;
@@ -462,6 +481,7 @@ class PageCurlViewState extends State<PageCurlView>
               await _nativeChannel!.invokeMethod<void>('setPage', {
                 'index': index,
                 'bytes': cached,
+                'imageRegions': _imageHits[index]?.serialized ?? const [],
               });
               _nativeRequestedPages.remove(index);
             } catch (error) {
@@ -486,6 +506,7 @@ class PageCurlViewState extends State<PageCurlView>
     // Native PNGs keep the nearby history; offscreen Flutter page widgets do
     // not need a GlobalKey for every page the reader has ever visited.
     _nativeKeys.removeWhere((index, _) => !visible.contains(index));
+    _imageHits.removeWhere((index, _) => !visible.contains(index));
     _nativeRasterReadiness.removeWhere((index, _) => !visible.contains(index));
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -533,12 +554,18 @@ class PageCurlViewState extends State<PageCurlView>
                 opacity: !_nativeReady && index == widget.index ? 1 : 0.01,
                 child: RepaintBoundary(
                   key: _nativeKeys.putIfAbsent(index, GlobalKey.new),
-                  child: ReaderRasterScope(
-                    readiness: _readinessFor(index),
-                    child: DecoratedBox(
-                      decoration: widget.paperDecoration,
-                      child: SizedBox.expand(
-                        child: widget.pageBuilder(context, index),
+                  child: ReaderImageHitScope(
+                    registry: _imageHits.putIfAbsent(
+                      index,
+                      () => ReaderImageHitRegistry(_nativeKeys[index]!),
+                    ),
+                    child: ReaderRasterScope(
+                      readiness: _readinessFor(index),
+                      child: DecoratedBox(
+                        decoration: widget.paperDecoration,
+                        child: SizedBox.expand(
+                          child: widget.pageBuilder(context, index),
+                        ),
                       ),
                     ),
                   ),
@@ -578,6 +605,8 @@ class PageCurlViewState extends State<PageCurlView>
                           .invokeMethod<void>('setPage', {
                             'index': entry.key,
                             'bytes': entry.value,
+                            'imageRegions':
+                                _imageHits[entry.key]?.serialized ?? const [],
                           })
                           .catchError((Object error) {
                             debugPrint(

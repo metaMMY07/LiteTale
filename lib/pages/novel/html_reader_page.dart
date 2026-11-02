@@ -1,5 +1,8 @@
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
+import 'package:wild/services/reader_images.dart';
+import 'package:wild/widgets/reader_illustration.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/widgets/source_website.dart';
 import 'dart:math' as math;
 import 'package:wild/models/reader_page.dart' show ReaderFragment;
@@ -600,25 +603,26 @@ class _ReaderContent extends StatelessWidget {
               width: constraints.maxWidth,
               child: AspectRatio(
                 aspectRatio: 4 / 3, // 默认图片比例
-                child: Image(
-                  image: CachedImageProvider(content.imageUrl, source: source),
-                  width: constraints.maxWidth,
-                  fit: BoxFit.contain,
-                  loadingBuilder: (context, child, loadingProgress) {
-                    if (loadingProgress == null) return child;
-                    return Container(
-                      width: constraints.maxWidth,
-                      color: Colors.grey[200],
-                      child: const Center(child: CircularProgressIndicator()),
-                    );
-                  },
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      width: constraints.maxWidth,
-                      color: Colors.grey[200],
-                      child: const Center(child: Text('图片加载失败')),
-                    );
-                  },
+                child: ReaderIllustration(
+                  image: ReaderImageRef(source: source, url: content.imageUrl),
+                  provider: CachedImageProvider(
+                    content.imageUrl,
+                    source: source,
+                  ),
+                  child: Image(
+                    image: CachedImageProvider(
+                      content.imageUrl,
+                      source: source,
+                    ),
+                    fit: BoxFit.contain,
+                    loadingBuilder:
+                        (context, child, progress) =>
+                            progress == null
+                                ? child
+                                : const CenteredLoadingIndicator(),
+                    errorBuilder:
+                        (_, _, _) => const Center(child: Text('图片加载失败')),
+                  ),
                 ),
               ),
             ),

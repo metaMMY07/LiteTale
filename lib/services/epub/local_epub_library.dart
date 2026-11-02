@@ -12,6 +12,8 @@ import 'epub_models.dart';
 import 'epub_parser.dart';
 import 'epub_artwork_renderer.dart';
 import 'epub_publication_document.dart';
+import 'local_epub_organization.dart';
+import 'epub_import_queue.dart';
 
 typedef EpubBookParser =
     ParsedEpubBook Function(Uint8List bytes, {String fallbackTitle});
@@ -50,6 +52,14 @@ class LocalEpubLibrary extends ChangeNotifier {
        _rasterizeArtwork = rasterizeArtwork ?? rasterizeEpubArtwork;
 
   static final instance = LocalEpubLibrary();
+
+  final organization = LocalEpubOrganizationStore();
+  EpubImportQueue? _imports;
+  EpubImportQueue get imports =>
+      _imports ??= EpubImportQueue(
+        importFile: importFile,
+        organization: organization,
+      );
 
   final EpubBookParser _parser;
   final bool _useIsolates;
@@ -142,6 +152,8 @@ class LocalEpubLibrary extends ChangeNotifier {
       _documentCache.clear();
       _loadWarnings = snapshot.warnings;
       _initializationError = null;
+      // A damaged organization record must not prevent reading valid books.
+      await organization.initialize(privateRoot);
       notifyListeners();
     } catch (_) {
       _initializationError = '本地书库初始化失败，请检查存储空间后重试';
@@ -411,6 +423,13 @@ class LocalEpubLibrary extends ChangeNotifier {
     _assetCache.clear();
     _publicationCache.clear();
     _documentCache.clear();
+    if (organization.isReady) {
+      try {
+        await organization.forgetBook(bookId);
+      } catch (_) {
+        _loadWarnings = [..._loadWarnings, '书籍已移除，但分类记录未能清理。'];
+      }
+    }
     notifyListeners();
     if (type != FileSystemEntityType.directory) return;
 
@@ -508,6 +527,13 @@ class LocalEpubLibrary extends ChangeNotifier {
       }
     });
     return completion.future;
+  }
+
+  @override
+  void dispose() {
+    _imports?.dispose();
+    organization.dispose();
+    super.dispose();
   }
 }
 

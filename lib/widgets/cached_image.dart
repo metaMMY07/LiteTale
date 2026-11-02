@@ -1,12 +1,8 @@
+import 'package:wild/services/reader_images.dart';
 import 'package:flutter/material.dart';
-import 'package:wild/sources/source_api.dart';
 import 'package:wild/sources/book_source.dart';
-import 'package:wild/sources/lnovel_source.dart';
-import 'package:wild/services/epub/local_epub_library.dart';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'dart:ui' as ui;
-import 'package:http/http.dart' as http;
 
 class CachedImageProvider extends ImageProvider<CachedImageProvider> {
   final String url;
@@ -36,42 +32,16 @@ class CachedImageProvider extends ImageProvider<CachedImageProvider> {
     ImageDecoderCallback decode,
   ) async {
     assert(key == this);
-    if (source == SourceId.localEpub) {
-      final bytes = await LocalEpubLibrary.instance.readAsset(url);
-      return decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+    final ref = ReaderImageRef(source: source, url: url);
+    final revision = sourceRevision.value;
+    final repository = ReaderImageRepository.instance;
+    final data = await repository.read(ref, revision: revision);
+    try {
+      return await decode(await ui.ImmutableBuffer.fromUint8List(data.bytes));
+    } on Object {
+      repository.invalidate(ref, revision: revision);
+      rethrow;
     }
-    final uri = Uri.tryParse(url);
-    if (uri == null || !['https', 'http'].contains(uri.scheme)) {
-      throw const FormatException('图片地址无效');
-    }
-    // A book owns its image request policy. Wenku8 illustrations can use an
-    // unrelated CDN hostname, so the hostname cannot identify the book source.
-    if (source != SourceId.wenku8) {
-      final response = await http
-          .get(
-            uri,
-            headers:
-                source == SourceId.lnovel
-                    ? LNovelSource.headers
-                    : source == SourceId.bili
-                    ? {
-                      'User-Agent': 'Mozilla/5.0',
-                      'Referer': 'https://www.bilinovel.net/',
-                    }
-                    : source.isRule ||
-                        source == SourceId.huanmeng ||
-                        source == SourceId.esj
-                    ? ruleImageHeaders(source)
-                    : {'Referer': 'https://www.lightnovel.app/'},
-          )
-          .timeout(const Duration(seconds: 25));
-      if (response.statusCode != 200) throw const FormatException('图片加载失败');
-      return decode(await ui.ImmutableBuffer.fromUint8List(response.bodyBytes));
-    }
-    final path = await downloadImage(url: url);
-    return decode(
-      await ui.ImmutableBuffer.fromUint8List(await File(path).readAsBytes()),
-    );
   }
 
   @override

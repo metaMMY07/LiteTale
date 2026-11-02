@@ -1,0 +1,49 @@
+name: iOS Glass REA Reference
+on:
+  workflow_dispatch:
+  push:
+    branches: ['build/ios-glass-*']
+    paths: ['.github/workflows/ios-glass-reference.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Fetch and verify the public Novella reference
+        run: |
+          set -euo pipefail
+          mkdir -p build/glass-reference
+          curl --fail --location --retry 2 https://github.com/celia-sh/Novella/releases/download/v2.6.0/Novella-2.6.0-release.ipa -o build/glass-reference/Novella.ipa
+          python3 - <<'PY'
+          import hashlib,pathlib,plistlib,zipfile
+          root=pathlib.Path('build/glass-reference')
+          with (root/'Novella.ipa').open('rb') as f:
+              assert hashlib.file_digest(f,'sha256').hexdigest()=='e138a10f177386de28110061051e5842da3e139eb780e35a225e947f98378cc1'
+          with zipfile.ZipFile(root/'Novella.ipa') as z:
+              info=plistlib.loads(z.read('Payload/Novella.app/Info.plist'))
+              (root/'Novella').write_bytes(z.read('Payload/Novella.app/'+info['CFBundleExecutable']))
+          PY
+      - name: REA static Mach-O inspection
+        run: |
+          set -euo pipefail
+          npx -y --package=rea-agents@6.5.0 rea inspect-macho "$PWD/build/glass-reference/Novella" --format json --full-output > build/glass-reference/rea-macho.json
+          xcrun nm -u build/glass-reference/Novella > build/glass-reference/native-imports.txt
+          xcrun otool -ov build/glass-reference/Novella > build/glass-reference/objc-metadata.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Novella-2.6.0-REA-static
+          path: |
+            build/glass-reference/*.json
+            build/glass-reference/*.txt
+          retention-days: 7
+          if-no-files-found: error
