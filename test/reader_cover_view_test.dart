@@ -1,4 +1,6 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/widgets/reader_cover_view.dart';
 
@@ -162,6 +164,62 @@ void main() {
     await turn;
     expect(changes, isEmpty);
     expect(c.isTurning, isFalse);
+  });
+  testWidgets('moving pages have no seam at a fractional device pixel ratio', (
+    tester,
+  ) async {
+    const ratio = 1.25;
+    tester.view.physicalSize = const Size(500, 750);
+    tester.view.devicePixelRatio = ratio;
+    addTearDown(tester.view.reset);
+    final c = ReaderCoverController();
+    final boundary = GlobalKey();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          backgroundColor: const Color(0xFFFF00FF),
+          body: RepaintBoundary(
+            key: boundary,
+            child: ReaderCoverView(
+              controller: c,
+              index: 1,
+              pageCount: 3,
+              paperDecoration: const BoxDecoration(color: Colors.white),
+              onPageChanged: (_) {},
+              pageBuilder: (_, i) => const SizedBox.expand(),
+            ),
+          ),
+        ),
+      ),
+    );
+    final turn = c.turn(1);
+    await tester.pump();
+    for (final ms in [17, 33, 49, 71, 83, 107]) {
+      await tester.pump(Duration(milliseconds: ms));
+      final transform = tester.widget<Transform>(
+        find.byKey(const ValueKey('cover-position-1')),
+      );
+      final dx = transform.transform.storage[12] * ratio;
+      expect(dx, closeTo(dx.roundToDouble(), .00001));
+      final image =
+          boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final frame = await image.toImage(pixelRatio: ratio);
+        final pixels = await frame.toByteData(
+          format: ui.ImageByteFormat.rawRgba,
+        );
+        // Magenta behind the papers exposes cracks; any painted shadow or
+        // separator also makes this otherwise plain white scanline fail.
+        final row = pixels!.buffer.asUint8List(
+          frame.width * (frame.height ~/ 2) * 4,
+          frame.width * 4,
+        );
+        expect(row.every((component) => component == 255), isTrue);
+        frame.dispose();
+      });
+    }
+    await tester.pumpAndSettle();
+    await turn;
   });
   testWidgets('a finger can take over a tap settle and cancel without a jump', (
     tester,

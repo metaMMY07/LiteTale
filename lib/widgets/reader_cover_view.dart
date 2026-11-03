@@ -193,6 +193,7 @@ class ReaderCoverViewState extends State<ReaderCoverView>
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       _width = constraints.maxWidth;
+      final pixelRatio = MediaQuery.devicePixelRatioOf(context);
       _papers.removeWhere(
         (index, _) => (index - _index).abs() > 1 || index >= widget.pageCount,
       );
@@ -266,6 +267,12 @@ class ReaderCoverViewState extends State<ReaderCoverView>
             animation: _progress,
             builder: (context, _) {
               final target = _index + _direction;
+              // Both sheets share the same physical-pixel displacement. A
+              // fractional raster edge can otherwise expose a hairline even
+              // without a painted divider or the old cover shadow.
+              final distance =
+                  (_progress.value * _width * pixelRatio).round() / pixelRatio;
+              final offset = -_direction * distance;
               return Stack(
                 fit: StackFit.expand,
                 children: [
@@ -285,8 +292,8 @@ class ReaderCoverViewState extends State<ReaderCoverView>
                               _direction == 0
                                   ? 0
                                   : i == _index
-                                  ? -_direction * _progress.value * _width
-                                  : _direction * (1 - _progress.value) * _width,
+                                  ? offset
+                                  : offset + _direction * _width,
                               0,
                             ),
                             child: children[i] ?? const SizedBox.expand(),
