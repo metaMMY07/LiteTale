@@ -1,3 +1,4 @@
+import 'package:wild/widgets/reader_chapter_sheet.dart';
 import 'package:wild/widgets/reader_controls.dart';
 import 'package:wild/widgets/reader_settings_panel.dart';
 import 'package:wild/widgets/platform_controls.dart';
@@ -331,32 +332,17 @@ class _ReaderViewState extends State<_ReaderView> {
     }
   }
 
-  void _showChapterList() {
-    final readerCubit = context.read<ReaderCubit>();
-    showAppBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (BuildContext context) {
-        return BlocProvider.value(
-          value: readerCubit,
-          child: DraggableScrollableSheet(
-            initialChildSize: 0.9,
-            maxChildSize: 0.9,
-            minChildSize: 0.5,
-            builder:
-                (context, scrollController) => _ChapterList(
-                  volumes: widget.state.volumes,
-                  currentAid: widget.state.aid,
-                  currentCid: widget.state.cid,
-                  onChapterSelected: (aid, cid) {
-                    Navigator.pop(context);
-                    readerCubit.loadChapter(aid: aid, cid: cid);
-                  },
-                ),
-          ),
-        );
-      },
+  Future<void> _showChapterList() async {
+    final cubit = context.read<ReaderCubit>();
+    final chapter = await showReaderChapterSheet(
+      context,
+      volumes: widget.state.volumes,
+      currentAid: widget.state.aid,
+      currentCid: widget.state.cid,
     );
+    if (mounted && !cubit.isClosed && chapter != null) {
+      await cubit.loadChapter(aid: chapter.aid, cid: chapter.cid);
+    }
   }
 
   void _showSettings() {
@@ -722,190 +708,5 @@ class _ReaderViewState extends State<_ReaderView> {
       }
     }
     return -1;
-  }
-}
-
-class _ChapterList extends StatefulWidget {
-  final List<Volume> volumes;
-  final String currentAid;
-  final String currentCid;
-  final Function(String aid, String cid) onChapterSelected;
-
-  const _ChapterList({
-    required this.volumes,
-    required this.currentAid,
-    required this.currentCid,
-    required this.onChapterSelected,
-  });
-
-  @override
-  State<_ChapterList> createState() => _ChapterListState();
-}
-
-class _ChapterListState extends State<_ChapterList> {
-  late ScrollController _scrollController;
-  int _currentChapterGlobalIndex = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _scrollController = ScrollController();
-    // 计算当前章节的全局索引
-    _currentChapterGlobalIndex = _calculateCurrentChapterIndex();
-    // 在下一帧滚动到当前章节
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        // 估算每个章节的高度（包括标题和间距）
-        const estimatedItemHeight = 56.0; // ListTile 的默认高度
-        const estimatedVolumeTitleHeight = 48.0; // 卷标题的高度
-        const estimatedSpacing = 16.0; // 间距
-
-        // 计算目标滚动位置
-        double targetScroll =
-            _currentChapterGlobalIndex *
-            (estimatedItemHeight + estimatedSpacing);
-        // 加上之前所有卷标题的高度
-        for (var i = 0; i < widget.volumes.length; i++) {
-          if (i < _findCurrentVolumeIndex()) {
-            targetScroll += estimatedVolumeTitleHeight + estimatedSpacing;
-          } else {
-            break;
-          }
-        }
-
-        // 滚动到目标位置，并稍微向上偏移一点以显示上下文
-        _scrollController.jumpTo(
-          (targetScroll - 100)
-              .clamp(
-                _scrollController.position.minScrollExtent,
-                _scrollController.position.maxScrollExtent,
-              )
-              .toDouble(),
-        );
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  int _findCurrentVolumeIndex() {
-    for (var i = 0; i < widget.volumes.length; i++) {
-      final volume = widget.volumes[i];
-      if (volume.chapters.any(
-        (chapter) =>
-            chapter.aid == widget.currentAid &&
-            chapter.cid == widget.currentCid,
-      )) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
-  int _calculateCurrentChapterIndex() {
-    int globalIndex = 0;
-    for (var volume in widget.volumes) {
-      for (var chapter in volume.chapters) {
-        if (chapter.aid == widget.currentAid &&
-            chapter.cid == widget.currentCid) {
-          return globalIndex;
-        }
-        globalIndex++;
-      }
-    }
-    return 0;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: Theme.of(context).dividerColor),
-              ),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.menu_book),
-                const SizedBox(width: 8),
-                const Text(
-                  '目录',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const Spacer(),
-                AppButton.textIcon(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close),
-                  label: const Text('关闭'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: Theme.of(context).colorScheme.secondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              itemCount: widget.volumes.length,
-              itemBuilder: (context, volumeIndex) {
-                final volume = widget.volumes[volumeIndex];
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(
-                        volume.title,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    ...volume.chapters.map((chapter) {
-                      final isSelected =
-                          chapter.aid == widget.currentAid &&
-                          chapter.cid == widget.currentCid;
-                      return Container(
-                        color:
-                            isSelected
-                                ? Colors.grey.withAlpha(80)
-                                : Colors.transparent,
-                        child: ListTile(
-                          onTap:
-                              () => widget.onChapterSelected(
-                                chapter.aid,
-                                chapter.cid,
-                              ),
-                          title: Text(
-                            chapter.title,
-                            style: TextStyle(
-                              fontWeight: isSelected ? FontWeight.bold : null,
-                            ),
-                          ),
-                        ),
-                      );
-                    }),
-                  ],
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }

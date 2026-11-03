@@ -61,6 +61,26 @@ class NovelInfoPage extends StatelessWidget {
         appBar: AppBar(
           title: const Text('小说详情'),
           actions: [
+            if (w8.sourceSupportsComments(novelId))
+              BlocBuilder<NovelInfoCubit, NovelInfoState>(
+                builder: (context, state) {
+                  if (state is! NovelInfoLoaded) return const SizedBox.shrink();
+                  return AppIconButton(
+                    key: const ValueKey('detail-comments'),
+                    tooltip: '书评',
+                    icon: const Icon(Icons.chat_bubble_outline_rounded),
+                    onPressed:
+                        () => Navigator.pushNamed(
+                          context,
+                          '/novel/reviews',
+                          arguments: {
+                            'aid': novelId,
+                            'title': state.novelInfo.title,
+                          },
+                        ),
+                  );
+                },
+              ),
             if (sourceOf(novelId) == SourceId.wenku8)
               BlocBuilder<NovelInfoCubit, NovelInfoState>(
                 builder: (context, state) {

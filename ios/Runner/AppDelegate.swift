@@ -43,6 +43,7 @@ import Photos
   private var appleBooks: AppleBooksChannel?
   private var paletteChannel: FlutterMethodChannel?
   private var readerImages: ReaderImageChannel?
+  private var readerPanel: AppleReaderPanelChannel?
 
   private var volumeEventSink: FlutterEventSink?
   private var audioSession: AVAudioSession?
@@ -73,6 +74,7 @@ import Photos
     paletteChannel = palette
     appleBooks = AppleBooksChannel(parent: controller, messenger: controller.binaryMessenger)
     readerImages = ReaderImageChannel(parent: controller, messenger: controller.binaryMessenger)
+    readerPanel = AppleReaderPanelChannel(parent: controller, messenger: controller.binaryMessenger)
     AppleThemeReveal.shared.install(messenger: controller.binaryMessenger, window: { [weak self] in self?.window })
 
     let channel = FlutterMethodChannel(name: "methods", binaryMessenger: controller.binaryMessenger)
@@ -144,6 +146,9 @@ import Photos
     volumeChannel.setStreamHandler(self)
 
     if let registrar = registrar(forPlugin: "LiteTaleAppleGlass") {
+      registrar.register(
+        AppleReaderSettingsFactory(messenger: controller.binaryMessenger, parent: controller),
+        withId: "litetale/reader_settings")
       registrar.register(
         AppleGlassFactory(messenger: controller.binaryMessenger, parent: controller),
         withId: "litetale/apple_glass"

@@ -1,3 +1,4 @@
+import 'package:wild/widgets/reader_chapter_sheet.dart';
 import 'package:wild/widgets/reader_controls.dart';
 import 'package:wild/widgets/reader_settings_panel.dart';
 import 'package:wild/widgets/platform_controls.dart';
@@ -123,25 +124,17 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
     super.dispose();
   }
 
-  void _showChapterList(BuildContext context) {
+  Future<void> _showChapterList(BuildContext context) async {
     final cubit = context.read<HtmlReaderCubit>();
-    showAppBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder:
-          (_) => BlocProvider.value(
-            value: cubit,
-            child: _ChapterList(
-              volumes: cubit.initialVolumes,
-              currentAid: cubit.initialAid,
-              currentCid: cubit.initialCid,
-              onChapterSelected: (aid, cid) {
-                cubit.loadChapter(aid: aid, cid: cid);
-                Navigator.pop(context);
-              },
-            ),
-          ),
+    final chapter = await showReaderChapterSheet(
+      context,
+      volumes: cubit.initialVolumes,
+      currentAid: cubit.initialAid,
+      currentCid: cubit.initialCid,
     );
+    if (mounted && !cubit.isClosed && chapter != null) {
+      await cubit.loadChapter(aid: chapter.aid, cid: chapter.cid);
+    }
   }
 
   void _showSettings(BuildContext context) {
@@ -714,162 +707,6 @@ class _ReaderContent extends StatelessWidget {
           },
         );
       },
-    );
-  }
-}
-
-class _ChapterList extends StatefulWidget {
-  final List<Volume> volumes;
-  final String currentAid;
-  final String currentCid;
-  final Function(String aid, String cid) onChapterSelected;
-
-  const _ChapterList({
-    required this.volumes,
-    required this.currentAid,
-    required this.currentCid,
-    required this.onChapterSelected,
-  });
-
-  @override
-  State<_ChapterList> createState() => _ChapterListState();
-}
-
-class _ChapterListState extends State<_ChapterList> {
-  late ScrollController _scrollController;
-  int _currentChapterGlobalIndex = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _scrollController = ScrollController();
-    _currentChapterGlobalIndex = _calculateCurrentChapterIndex();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        const estimatedItemHeight = 56.0;
-        const estimatedVolumeTitleHeight = 48.0;
-        const estimatedSpacing = 16.0;
-
-        double targetScroll =
-            _currentChapterGlobalIndex *
-            (estimatedItemHeight + estimatedSpacing);
-        for (var i = 0; i < widget.volumes.length; i++) {
-          if (i < _findCurrentVolumeIndex()) {
-            targetScroll += estimatedVolumeTitleHeight + estimatedSpacing;
-          } else {
-            break;
-          }
-        }
-
-        _scrollController.jumpTo(
-          (targetScroll - 100)
-              .clamp(
-                _scrollController.position.minScrollExtent,
-                _scrollController.position.maxScrollExtent,
-              )
-              .toDouble(),
-        );
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  int _findCurrentVolumeIndex() {
-    for (var i = 0; i < widget.volumes.length; i++) {
-      final volume = widget.volumes[i];
-      if (volume.chapters.any(
-        (chapter) =>
-            chapter.aid == widget.currentAid &&
-            chapter.cid == widget.currentCid,
-      )) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
-  int _calculateCurrentChapterIndex() {
-    int globalIndex = 0;
-    for (var volume in widget.volumes) {
-      for (var chapter in volume.chapters) {
-        if (chapter.aid == widget.currentAid &&
-            chapter.cid == widget.currentCid) {
-          return globalIndex;
-        }
-        globalIndex++;
-      }
-    }
-    return 0;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.8,
-      ),
-      child: Column(
-        children: [
-          AppBar(
-            title: const Text('目录'),
-            automaticallyImplyLeading: false,
-            actions: [
-              AppIconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ],
-          ),
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              itemCount: widget.volumes.length,
-              itemBuilder: (context, volumeIndex) {
-                final volume = widget.volumes[volumeIndex];
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(
-                        volume.title,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                    ),
-                    ...volume.chapters.map((chapter) {
-                      final isSelected =
-                          chapter.aid == widget.currentAid &&
-                          chapter.cid == widget.currentCid;
-                      return ListTile(
-                        title: Text(
-                          chapter.title,
-                          style: TextStyle(
-                            color:
-                                isSelected
-                                    ? Theme.of(context).colorScheme.primary
-                                    : null,
-                          ),
-                        ),
-                        selected: isSelected,
-                        onTap:
-                            () => widget.onChapterSelected(
-                              chapter.aid,
-                              chapter.cid,
-                            ),
-                      );
-                    }),
-                  ],
-                );
-              },
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

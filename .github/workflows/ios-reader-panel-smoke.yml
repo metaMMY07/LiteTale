@@ -1,0 +1,63 @@
+name: iOS reader panel smoke
+on:
+  workflow_dispatch:
+  push:
+    branches: ['build/ios-preview-*reader-menu*']
+permissions:
+  contents: read
+jobs:
+  native-form:
+    runs-on: macos-15
+    timeout-minutes: 35
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      CARGOKIT_RUST_TOOLCHAIN: '1.90.0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare Xcode
+        run: |
+          sudo xcode-select --switch "$DEVELOPER_DIR"
+          sudo xcodebuild -runFirstLaunch
+          nohup xcrun simctl list devices available --json > /tmp/litetale-reader-simulator.log 2>&1 &
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.3'
+          channel: stable
+          architecture: arm64
+          cache: true
+      - name: Prepare native dependencies
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal
+          rustup default 1.90.0
+          if [ "$(uname -m)" = arm64 ]; then TARGET=aarch64-apple-ios-sim; else TARGET=x86_64-apple-ios; fi
+          rustup target add "$TARGET" --toolchain 1.90.0
+          flutter config --no-analytics
+          flutter precache --ios
+          flutter pub get --enforce-lockfile
+          cd ios && pod install
+      - name: Boot iOS 26 phone
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json'],timeout=300))['devices']
+          runtimes=sorted([r for r in devices if 'iOS-26' in r],reverse=True)
+          choices=[d for r in runtimes[:1] for d in devices[r] if 'iPhone' in d['name']]
+          choices.sort(key=lambda d: ('iPhone 17' not in d['name'],d['name']))
+          assert choices, 'iOS 26 required'
+          d=choices[0]
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('SIMULATOR_ID='+d['udid']+'\n')
+          if d['state']!='Booted':subprocess.run(['xcrun','simctl','boot',d['udid']],check=True,timeout=90)
+          subprocess.run(['xcrun','simctl','bootstatus',d['udid'],'-b'],check=True,timeout=300)
+          PY
+      - name: Check actual native reader form and modal lifecycle offline
+        timeout-minutes: 22
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios-reader-panel
+          flutter drive --driver=test_driver/ios_reader_panel.dart --target=integration_test/ios_reader_panel_test.dart -d "$SIMULATOR_ID" --no-pub 2>&1 | tee build/ios-reader-panel/smoke.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LiteTale-native-reader-form-${{ github.run_number }}
+          path: build/ios-reader-panel
+          retention-days: 7

@@ -20,6 +20,8 @@ import 'package:wild/settings/settings_widgets.dart'
     show settingsAction, chooseSetting;
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/apple_reader_panel.dart';
+import 'package:wild/widgets/reader_settings_binding.dart';
 
 Future<void> showReaderSettingsPanel(
   BuildContext context, {
@@ -27,6 +29,21 @@ Future<void> showReaderSettingsPanel(
   bool localEpub = false,
   AutoScrollConfigCubit? autoScroll,
 }) async {
+  if (usesAppleGlass && await AppleReaderPanel.available) {
+    if (!context.mounted || ModalRoute.of(context)?.isCurrent == false) return;
+    final binding = ReaderSettingsBinding(
+      context,
+      onLayoutChanged: onLayoutChanged,
+      autoScroll: autoScroll,
+    );
+    await AppleReaderPanel.show(
+      context,
+      configuration: binding.snapshot,
+      onChange: binding.change,
+    );
+    return;
+  }
+  if (!context.mounted) return;
   final panel = MultiBlocProvider(
     providers: [
       BlocProvider.value(value: context.read<FontSizeCubit>()),
@@ -133,6 +150,29 @@ class ReaderSettingsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (usesAppleGlass) {
+      return FutureBuilder<bool>(
+        future: AppleReaderPanel.available,
+        builder: (context, available) {
+          if (available.data == true) {
+            final binding = ReaderSettingsBinding(
+              context,
+              onLayoutChanged: onLayoutChanged,
+              autoScroll: autoScroll,
+            );
+            return AppleReaderSettingsView(
+              configuration: binding.snapshot,
+              onChange: binding.change,
+            );
+          }
+          return _buildFlutter(context);
+        },
+      );
+    }
+    return _buildFlutter(context);
+  }
+
+  Widget _buildFlutter(BuildContext context) {
     final size = context.watch<FontSizeCubit>();
     final line = context.watch<LineHeightCubit>();
     final spacing = context.watch<ParagraphSpacingCubit>();

@@ -117,20 +117,24 @@ class _BookDetailsViewState extends State<BookDetailsView> {
             children: [
               if (widget.onBookmark != null) ...[
                 SizedBox(
+                  key: const ValueKey('detail-bookmark'),
                   width: 56,
+                  height: 56,
                   child: AppButton.tonal(
                     onPressed: _busy ? null : _bookmark,
                     style: FilledButton.styleFrom(
                       minimumSize: const Size(56, 56),
                       padding: EdgeInsets.zero,
                     ),
-                    child: Semantics(
-                      label: widget.inShelf ? '移出书架' : '加入书架',
-                      button: true,
-                      child: Icon(
-                        widget.inShelf
-                            ? Icons.bookmark_rounded
-                            : Icons.bookmark_border_rounded,
+                    child: Center(
+                      child: Semantics(
+                        label: widget.inShelf ? '移出书架' : '加入书架',
+                        button: true,
+                        child: Icon(
+                          widget.inShelf
+                              ? Icons.bookmark_rounded
+                              : Icons.bookmark_border_rounded,
+                        ),
                       ),
                     ),
                   ),
@@ -180,15 +184,6 @@ class _BookDetailsViewState extends State<BookDetailsView> {
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
-              ),
-            ),
-          if (widget.onComments != null)
-            Align(
-              alignment: AlignmentDirectional.centerEnd,
-              child: AppButton.textIcon(
-                onPressed: widget.onComments,
-                icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
-                label: const Text('书评'),
               ),
             ),
         ],

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:ui' as ui;
+import 'dart:typed_data';
 import 'package:flutter/painting.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
@@ -185,6 +186,39 @@ class ReaderBackgroundCubit extends Cubit<ReaderBackgroundState> {
       // 处理错误
       rethrow;
     }
+  }
+
+  /// The native iOS reader form presents its own photo picker above the sheet.
+  /// Use the same managed names and preference/cache updates as the app picker.
+  Future<void> importBackgroundImage(
+    Uint8List bytes, {
+    required bool dark,
+  }) async {
+    if (_rootPath == null) throw StateError('阅读背景尚未初始化');
+    if (bytes.isEmpty || bytes.length > 64 * 1024 * 1024) {
+      throw const FormatException('背景图片大小无效');
+    }
+    final name =
+        dark ? 'dark_reader_background.png' : 'light_reader_background.png';
+    final file = File('$_rootPath/$name');
+    await file.writeAsBytes(bytes, flush: true);
+    await FileImage(file).evict();
+    emit(
+      dark
+          ? state.copyWith(
+            darkBackgroundExists: true,
+            enabled: true,
+            builtin: false,
+            darkFile: name,
+          )
+          : state.copyWith(
+            lightBackgroundExists: true,
+            enabled: true,
+            builtin: false,
+            lightFile: name,
+          ),
+    );
+    await _save();
   }
 
   Future<void> deleteLightBackground() async {

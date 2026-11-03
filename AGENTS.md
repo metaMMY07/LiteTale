@@ -1,5 +1,7 @@
 # LiteTale 工作约定
 
+- 2026-11-03 v1.2.2：先读 `docs/READER_MENU_FIX_1.2.2.md`。用户要求尽快封装交其验证，Android89；详情收藏56×56居中，书评仅图标放右上角与下载并列。iOS阅读设置整张SwiftUI Form/系统sheet，不能恢复多UISlider平台视图+Flutter长列表的混合裁剪方案（实际出现中间标签丢失）。Flutter模态代理暂停底层手势/音量，session隔离关闭/返回；目录选择等关闭完成后才加载，Android目录使用sheet传入的同一个ScrollController。SwiftUI表单保留LiteTale自己的选项、系统色和原生玻璃滑杆；我的/显示内阅读设置亦复用。原翻页/音量策略、封面和主毛玻璃底栏不重做。REA参考与模拟器/实体边界见文档。
+
 - 2026-11-03 v1.2.1：先读 `docs/READER_CONTROLS_1.2.1.md`。用户确认点击/音量没问题，360ms和AppDelegate音量实现不改。普通滑动越过完整页后携带剩余距离，不等收尾锁页；父索引回显与真正外部seek须区分并清理确认记录。新统一ReaderSettingsPanel/浮动ReaderToolbar，分页底部只松手跳本章页，不把EPUB有界窗口算整书总数。iOS滑杆必须走UIKit UISlider原生液态玻璃而非Cupertino圆头，自定义thumb会覆盖原生效果；范围/章节旧事件过滤，横向/点击recognizer不抢纵向列表。iOS系统黑白灰+systemBlue/可选原生色，保留custom RGB重启；不能用Material seed预览冒充iOS配色，Windows fallback截图不算UIKit实测。Android使用原Material You色盘/分组，应用毛玻璃底栏、书源/封面/详情不动。55相关检查/16目标分析通过，实体手感和玻璃外观交用户验证，内部Android88。
 
 - 2026-11-03 手势/音量追加：先读 `docs/READER_GESTURE_VOLUME_FIX_1.2.0.md`。用户保留点击节奏；修复后台移除拖动后resumed未重建的首滑失效，拖动松手用SDK分页弹簧承接速度，点击/音量360ms不动。iOS改typed KVO/slider.value实际回读及有限失败，基线回调不按250ms超时变成反向键；原音量/新输出路由/旧清理隔离；音频通知在主队列按独立监听代数过滤旧回调。ReaderVolumeState纯Swift策略随设备构建运行6组检查，不能将其或模拟器说成真机音量验收。仍v1.2.0且交付文件不加build，Android内部87；来源、配色、封面/详情/页脚不重做。
