@@ -242,6 +242,25 @@ void main() {
   );
 
   testWidgets(
+    'native volume reset failure is visible instead of silently dropping keys',
+    (tester) async {
+      final platform = _VolumePlatform(tester);
+      final volume = _volume();
+      addTearDown(volume.close);
+      await volume.updateVolumeControl(true);
+      final turns = <String>[];
+      await tester.pumpWidget(_app(volume, turns));
+      await tester.pump();
+      await platform.fail('reader_volume_unavailable');
+      await tester.pump();
+      expect(find.text('音量键翻页暂不可用，请关闭后重新开启'), findsOneWidget);
+      expect(turns, isEmpty);
+      expect(volume.isEnabled, isTrue);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
     'volume uses the existing curl turn API once per completed spread',
     (tester) async {
       tester.view.physicalSize = const Size(1200, 800);
@@ -365,6 +384,13 @@ class _VolumePlatform {
 
   final WidgetTester tester;
   final calls = <String>[];
+
+  Future<void> fail(String code) =>
+      tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+        'volume_button',
+        const StandardMethodCodec().encodeErrorEnvelope(code: code),
+        (_) {},
+      );
 
   Future<void> send(Object value) =>
       tester.binding.defaultBinaryMessenger.handlePlatformMessage(

@@ -249,4 +249,135 @@ void main() {
     expect(changes, isEmpty);
     expect(c.isTurning, isFalse);
   });
+
+  testWidgets('first accepted drag includes movement before touch slop', (
+    tester,
+  ) async {
+    final c = ReaderCoverController();
+    await mount(tester, c, (_) {});
+    final gesture = await tester.startGesture(const Offset(500, 300));
+    await gesture.moveBy(const Offset(-40, 0));
+    await tester.pump();
+    final dx =
+        tester
+            .widget<Transform>(find.byKey(const ValueKey('cover-position-1')))
+            .transform
+            .storage[12];
+    expect(dx, closeTo(-40, 1));
+    await gesture.cancel();
+    await tester.pumpAndSettle();
+  });
+
+  for (final interrupted in [false, true]) {
+    testWidgets(
+      'first swipe after resume works without a tap (drag=$interrupted)',
+      (tester) async {
+        final c = ReaderCoverController();
+        final changes = <int>[];
+        await mount(tester, c, changes.add);
+        TestGesture? old;
+        if (interrupted) {
+          old = await tester.startGesture(const Offset(600, 300));
+          await old.moveBy(const Offset(-160, 0));
+          await tester.pump();
+        }
+        for (final state in [
+          AppLifecycleState.inactive,
+          AppLifecycleState.hidden,
+          AppLifecycleState.paused,
+          AppLifecycleState.hidden,
+          AppLifecycleState.inactive,
+          AppLifecycleState.resumed,
+        ]) {
+          tester.binding.handleAppLifecycleStateChanged(state);
+          await tester.pump();
+        }
+        await old?.cancel();
+        expect(changes, isEmpty);
+        expect(c.isTurning, isFalse);
+        await tester.timedDragFrom(
+          const Offset(600, 300),
+          const Offset(-280, 0),
+          const Duration(milliseconds: 240),
+        );
+        await tester.pumpAndSettle();
+        expect(changes, [2]);
+      },
+    );
+  }
+
+  testWidgets(
+    'drag release continues with the finger velocity without braking',
+    (tester) async {
+      final c = ReaderCoverController();
+      final changes = <int>[];
+      await mount(tester, c, changes.add);
+      final gesture = await tester.startGesture(const Offset(650, 300));
+      double x() =>
+          tester
+              .widget<Transform>(find.byKey(const ValueKey('cover-position-1')))
+              .transform
+              .storage[12];
+      var lastDelta = 0.0;
+      for (var i = 1; i <= 6; i++) {
+        final before = x();
+        await gesture.moveBy(
+          const Offset(-40, 0),
+          timeStamp: Duration(milliseconds: i * 20),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+        lastDelta = before - x();
+      }
+      final releaseX = x();
+      await gesture.up(timeStamp: const Duration(milliseconds: 120));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 20));
+      final firstDelta = releaseX - x();
+      expect(firstDelta, greaterThan(lastDelta * .3));
+      expect(firstDelta, lessThan(lastDelta * 2));
+      await tester.pumpAndSettle();
+      expect(changes, [2]);
+    },
+  );
+
+  testWidgets('a reader mounted before resume accepts its very first swipe', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    final c = ReaderCoverController();
+    final changes = <int>[];
+    await mount(tester, c, changes.add);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.timedDragFrom(
+      const Offset(600, 300),
+      const Offset(-280, 0),
+      const Duration(milliseconds: 240),
+    );
+    await tester.pumpAndSettle();
+    expect(changes, [2]);
+  });
+
+  testWidgets('fast drag releases input when the target edge is reached', (
+    tester,
+  ) async {
+    final c = ReaderCoverController();
+    final changes = <int>[];
+    await mount(tester, c, changes.add);
+    final gesture = await tester.startGesture(const Offset(780, 300));
+    for (var i = 1; i <= 5; i++) {
+      await gesture.moveBy(
+        const Offset(-150, 0),
+        timeStamp: Duration(milliseconds: i * 20),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await gesture.up(timeStamp: const Duration(milliseconds: 100));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(changes, [2]);
+    expect(c.isTurning, isFalse);
+    await tester.pump(const Duration(seconds: 1));
+    expect(changes, [2]);
+  });
 }

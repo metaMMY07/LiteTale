@@ -82,7 +82,15 @@ class _ReaderVolumeTurnScopeState extends State<ReaderVolumeTurnScope>
         // preference changes. Never dispatch it to the covered reader.
         if (_canListen) widget.onTurn(event);
       },
-      onError: (Object _, StackTrace __) {
+      onError: (Object error, StackTrace _) {
+        if (mounted &&
+            _canListen &&
+            error is PlatformException &&
+            error.code == 'reader_volume_unavailable') {
+          ScaffoldMessenger.maybeOf(
+            context,
+          )?.showSnackBar(const SnackBar(content: Text('音量键翻页暂不可用，请关闭后重新开启')));
+        }
         // A missing/closed platform stream must not break the reading route.
       },
     );

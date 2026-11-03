@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/reader_raster_readiness.dart';
 
@@ -51,8 +52,8 @@ class ReaderCoverViewState extends State<ReaderCoverView>
   int _index = 0, _direction = 0, _generation = 0;
   int? _queued;
   double _width = 1, _drag = 0;
-  bool _settling = false;
-  bool get _busy => _settling || _direction != 0;
+  bool _settling = false, _dragging = false;
+  bool get _busy => _settling || _dragging || _direction != 0;
   bool get _active =>
       widget.active &&
       ModalRoute.of(context)?.isCurrent != false &&
@@ -92,6 +93,8 @@ class ReaderCoverViewState extends State<ReaderCoverView>
     _generation++;
     _progress.stop();
     _direction = 0;
+    _drag = 0;
+    _dragging = false;
     _settling = false;
     _queued = null;
     _progress.value = 0;
@@ -99,7 +102,12 @@ class ReaderCoverViewState extends State<ReaderCoverView>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed && mounted) setState(_cancel);
+    if (!mounted) return;
+    // The inactive build removes recognizers. Resume must rebuild too; waiting
+    // for a tap used to leave the first resumed swipe without any listener.
+    setState(() {
+      if (state != AppLifecycleState.resumed) _cancel();
+    });
   }
 
   @override
@@ -129,28 +137,51 @@ class ReaderCoverViewState extends State<ReaderCoverView>
     await _settle(true);
   }
 
-  Future<void> _settle(bool commit) async {
+  Future<void> _settle(bool commit, {double? velocity}) async {
     if (_direction == 0) return;
     _settling = true;
     final generation = ++_generation;
     final direction = _direction;
     final reduce = MediaQuery.disableAnimationsOf(context);
     if (!reduce) {
-      final distance = ((commit ? 1.0 : 0.0) - _progress.value).abs();
       try {
-        await _progress
-            .animateTo(
-              commit ? 1 : 0,
-              duration: Duration(
-                milliseconds: (_turnDuration.inMilliseconds * distance)
-                    .round()
-                    .clamp(90, _turnDuration.inMilliseconds),
-              ),
-              // Spread movement across the whole turn instead of travelling
-              // almost the entire screen in the first 60-90 milliseconds.
-              curve: Curves.easeInOutCubic,
-            )
-            .orCancel;
+        if (velocity != null) {
+          // The same spring/tolerance as Flutter's page scrolling, with the
+          // release speed in viewport units. Never restart the tap ease-in
+          // while the page is already moving with a finger.
+          final pixels = _width * MediaQuery.devicePixelRatioOf(context);
+          await _progress
+              .animateWith(
+                _DragPageSimulation(
+                  ScrollSpringSimulation(
+                    const PageScrollPhysics().spring,
+                    _progress.value,
+                    commit ? 1 : 0,
+                    velocity,
+                    tolerance: Tolerance(
+                      distance: 1 / pixels,
+                      velocity: 20 / pixels,
+                    ),
+                  ),
+                  commit ? 1 : 0,
+                ),
+              )
+              .orCancel;
+        } else {
+          // Preserve the accepted click/volume-key timing exactly.
+          final distance = ((commit ? 1.0 : 0.0) - _progress.value).abs();
+          await _progress
+              .animateTo(
+                commit ? 1 : 0,
+                duration: Duration(
+                  milliseconds: (_turnDuration.inMilliseconds * distance)
+                      .round()
+                      .clamp(90, _turnDuration.inMilliseconds),
+                ),
+                curve: Curves.easeInOutCubic,
+              )
+              .orCancel;
+        }
       } on TickerCanceled {
         return;
       }
@@ -205,23 +236,26 @@ class ReaderCoverViewState extends State<ReaderCoverView>
       final children = {for (final i in indices) i: _paper(i)};
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
+        dragStartBehavior: DragStartBehavior.down,
         onHorizontalDragStart:
             !_active
                 ? null
                 : (_) {
+                  if (!_active) return;
                   if (_settling) {
                     _generation++;
                     _progress.stop();
                     _settling = false;
                     _queued = null;
                   }
+                  _dragging = true;
                   _drag = -_direction * _progress.value * _width;
                 },
         onHorizontalDragUpdate:
             !_active
                 ? null
                 : (details) {
-                  if (_settling) return;
+                  if (!_active || _settling || !_dragging) return;
                   _drag += details.delta.dx;
                   final direction = _drag < 0 ? 1 : -1;
                   final target = _index + direction;
@@ -240,13 +274,16 @@ class ReaderCoverViewState extends State<ReaderCoverView>
                   _progress.value = (_drag.abs() / _width).clamp(0, 1);
                 },
         onHorizontalDragCancel: () {
-          if (!_settling) unawaited(_settle(false));
+          if (!_dragging) return;
+          _dragging = false;
+          if (!_settling) unawaited(_settle(false, velocity: 0));
         },
         onHorizontalDragEnd:
             !_active
                 ? null
                 : (details) {
-                  if (_settling) return;
+                  if (!_active || _settling || !_dragging) return;
+                  _dragging = false;
                   if (_direction == 0) {
                     if (_drag.abs() > 36) {
                       widget.onBoundaryTurn?.call(_drag < 0 ? 1 : -1);
@@ -259,6 +296,7 @@ class ReaderCoverViewState extends State<ReaderCoverView>
                     _settle(
                       forward > 350 ||
                           (forward >= -350 && _progress.value > .22),
+                      velocity: forward / _width,
                     ),
                   );
                 },
@@ -309,4 +347,23 @@ class ReaderCoverViewState extends State<ReaderCoverView>
       );
     },
   );
+}
+
+/// End a fast release as soon as its target edge is visually reached, rather
+/// than holding input while an off-screen spring overshoot settles invisibly.
+class _DragPageSimulation extends Simulation {
+  _DragPageSimulation(this.spring, this.target);
+  final ScrollSpringSimulation spring;
+  final double target;
+
+  @override
+  bool isDone(double time) =>
+      spring.isDone(time) ||
+      (target == 1 ? spring.x(time) >= 1 : spring.x(time) <= 0);
+
+  @override
+  double x(double time) => isDone(time) ? target : spring.x(time).clamp(0, 1);
+
+  @override
+  double dx(double time) => isDone(time) ? 0 : spring.dx(time);
 }

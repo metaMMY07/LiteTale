@@ -1,5 +1,7 @@
 # LiteTale 工作约定
 
+- 2026-11-03 手势/音量追加：先读 `docs/READER_GESTURE_VOLUME_FIX_1.2.0.md`。用户保留点击节奏；修复后台移除拖动后resumed未重建的首滑失效，拖动松手用SDK分页弹簧承接速度，点击/音量360ms不动。iOS改typed KVO/slider.value实际回读及有限失败，基线回调不按250ms超时变成反向键；原音量/新输出路由/旧清理隔离。ReaderVolumeState纯Swift策略随设备构建运行6组检查，不能将其或模拟器说成真机音量验收。仍v1.2.0且交付文件不加build，Android内部87；来源、配色、封面/详情/页脚不重做。
+
 - 2026-11-03 视频翻页追加：先读 `docs/READER_SLIDE_FOOTER_1.2.0.md`。用户明确覆盖旧“无时间/页码”要求；用户随后澄清要去掉的是翻页中两张页面交界的竖线，并非横屏中缝；普通动画已无阴影分隔且两页共用物理像素对齐位移。普通分页现在为两页同步水平平移，360ms缓起缓停，拖动可接管点击收尾，仅完成才提交。时间/本章页数放独立ReaderFooter，分钟更新不触动正文；共用布局预留页脚，固定图文与热点一起等比适配。本地页码必须按所属完整章节，不按有界预读窗口算整书总数。Android独立仿真选项/iOS Apple Books仍保留原逻辑，封面/详情/配色不动。本轮交付仍v1.2.0且文件名/关于页不显示build；内部平台代码只用于覆盖安装。
 
 - 2026-11-02 最新追加：用户授权iOS详情分类标签改胶囊，并指出Android旧配色没完全恢复。先读 `docs/IOS_CAPSULE_ANDROID_PALETTE_1.2.0_FIX3.md`。只改详情标签，其他已验收布局不重做。胶囊须Flutter StadiumBorder与原生surface/玻璃同半径，不能只套外裁剪。Android底栏选中色恢复1.0.0 primary/primaryContainer及旧毛玻璃底色，materialSurface不再额外灰色混合，保留动态色/自选色/新卡片几何。Android导入ios-*色名映射旧预设，iOS色盘不动。13针对性检查通过，版本1.2.0+85；84APK和iOS26只有封面渐变，不包含此追加项。

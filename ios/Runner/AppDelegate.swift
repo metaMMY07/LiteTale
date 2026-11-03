@@ -48,13 +48,12 @@ import Photos
   private var audioSession: AVAudioSession?
   private var volumeView: MPVolumeView?
   private var silentPlayer: AVAudioPlayer?
-  private var previousVolume: Float = 0.5  // 使用者的原始音量，重設目標
-  private var isObservingVolume = false
+  private var volumeObservation: NSKeyValueObservation?
+  private var volumeState: ReaderVolumeState?
   private var volumeGeneration = 0
-  private var volumeBaseline: Float = 0.5
-  private var lastObservedVolume: Float = 0.5
-  private var expectedReset: Float?
-  private var resetDeadline: CFAbsoluteTime = 0
+  private var volumeResetSequence = 0
+  private var volumeResetWork: DispatchWorkItem?
+  private var volumeInterrupted = false
 
   override func application(
     _ application: UIApplication,
@@ -117,7 +116,11 @@ import Photos
                 }
                 result(nil as Any?)
             } else if call.method == "reassertAudioSession" {
-                self.assertAudioSessionCategory()
+                if self.volumeEventSink != nil {
+                    self.assertAudioSessionCategory()
+                    self.silentPlayer?.play()
+                    self.armVolumeSlider(generation: self.volumeGeneration, attempts: 10)
+                }
                 result(nil as Any?)
             } else {
                 result(FlutterMethodNotImplemented)
@@ -209,7 +212,9 @@ import Photos
   private func assertAudioSessionCategory() {
     let session = AVAudioSession.sharedInstance()
     do {
-      try session.setCategory(.playback, options: .mixWithOthers)
+      if session.category != .playback || !session.categoryOptions.contains(.mixWithOthers) {
+        try session.setCategory(.playback, options: .mixWithOthers)
+      }
       try session.setActive(true)
     } catch {}
   }
@@ -218,61 +223,104 @@ import Photos
     guard let info = notification.userInfo,
           let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
           let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-    if type == .ended, volumeEventSink != nil {
+    if type == .began {
+      volumeInterrupted = true
+      volumeResetSequence += 1
+      volumeResetWork?.cancel()
+    } else if volumeEventSink != nil, UIApplication.shared.applicationState == .active {
+      volumeInterrupted = false
       assertAudioSessionCategory()
       silentPlayer?.play()
-      resetVolume(to: volumeBaseline)
+      armVolumeSlider(generation: volumeGeneration, attempts: 10)
     }
+  }
+
+  @objc private func handleAudioRouteChange(_ notification: Notification) {
+    guard volumeEventSink != nil, let session = audioSession,
+          let raw = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+          let reason = AVAudioSession.RouteChangeReason(rawValue: raw),
+          reason == .newDeviceAvailable || reason == .oldDeviceUnavailable else { return }
+    // Headphones and speakers can have different volumes. Never impose the
+    // previous output route's baseline on a newly selected one.
+    volumeGeneration += 1
+    volumeResetSequence += 1
+    volumeResetWork?.cancel()
+    volumeObservation?.invalidate()
+    volumeState = ReaderVolumeState(originalVolume: session.outputVolume)
+    installVolumeObservation(session)
+    armVolumeSlider(generation: volumeGeneration, attempts: 10)
   }
 
   private func setupVolumeObserver() {
-    assertAudioSessionCategory()
+    if volumeObservation != nil { removeVolumeObserver() }
     let session = AVAudioSession.sharedInstance()
+    // Capture before activating/changing category; activation can change the
+    // value reported by the old route's audio session.
+    volumeState = ReaderVolumeState(originalVolume: session.outputVolume)
     audioSession = session
     volumeGeneration += 1
-    previousVolume = session.outputVolume
-    lastObservedVolume = previousVolume
-    volumeBaseline = min(0.9375, max(0.0625, previousVolume))
-    let vv = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
-    vv.alpha = 0.01; vv.isUserInteractionEnabled = false; vv.accessibilityElementsHidden = true
-    window?.addSubview(vv)
-    volumeView = vv
+    volumeInterrupted = false
+    let view = MPVolumeView(frame: CGRect(x: -160, y: -44, width: 160, height: 44))
+    view.isUserInteractionEnabled = false
+    view.accessibilityElementsHidden = true
+    view.showsRouteButton = false
+    window?.insertSubview(view, at: 0)
+    view.setNeedsLayout()
+    view.layoutIfNeeded()
+    volumeView = view
 
-    NotificationCenter.default.addObserver(
-      self,
+    assertAudioSessionCategory()
+    NotificationCenter.default.addObserver(self,
       selector: #selector(handleAudioSessionInterruption(_:)),
-      name: AVAudioSession.interruptionNotification,
-      object: session
-    )
+      name: AVAudioSession.interruptionNotification, object: session)
+    NotificationCenter.default.addObserver(self,
+      selector: #selector(handleAudioRouteChange(_:)),
+      name: AVAudioSession.routeChangeNotification, object: session)
+    installVolumeObservation(session)
 
-    if !isObservingVolume {
-      session.addObserver(self, forKeyPath: "outputVolume", options: [.new, .old], context: nil)
-      isObservingVolume = true
+    if silentPlayer == nil, let player = try? AVAudioPlayer(data: makeSilentWavData()) {
+      player.numberOfLoops = -1
+      player.volume = 0
+      player.play()
+      silentPlayer = player
     }
+    armVolumeSlider(generation: volumeGeneration, attempts: 10)
+  }
 
-    // 播放靜音音效，保持 audio session 活躍以抑制系統音量 HUD
-    if silentPlayer == nil {
-      if let player = try? AVAudioPlayer(data: makeSilentWavData()) {
-        player.numberOfLoops = -1  // 無限循環
-        player.volume = 0
-        player.play()
-        silentPlayer = player
+  private func installVolumeObservation(_ session: AVAudioSession) {
+    let generation = volumeGeneration
+    volumeObservation = session.observe(\.outputVolume, options: [.new, .old]) {
+      [weak self] _, change in
+      guard let new = change.newValue else { return }
+      let old = change.oldValue
+      let handle = { [weak self] in
+        guard let self, generation == self.volumeGeneration,
+              !self.volumeInterrupted, self.volumeObservation != nil,
+              UIApplication.shared.applicationState == .active,
+              let sink = self.volumeEventSink,
+              let direction = self.volumeState?.observe(oldVolume: old, newVolume: new),
+              let baseline = self.volumeState?.baseline else { return }
+        // Restore on the main thread before notifying Flutter, rather than
+        // waiting for page layout or its animation to finish.
+        self.resetVolume(to: baseline)
+        sink(direction.rawValue)
       }
+      if Thread.isMainThread { handle() } else { DispatchQueue.main.async(execute: handle) }
     }
-
-    armVolumeSlider(generation: volumeGeneration, attempts: 5)
   }
 
   private func armVolumeSlider(generation: Int, attempts: Int) {
-    guard generation == volumeGeneration, volumeEventSink != nil else { return }
+    guard generation == volumeGeneration, volumeEventSink != nil,
+          UIApplication.shared.applicationState == .active,
+          !volumeInterrupted, let baseline = volumeState?.baseline else { return }
     if findVolumeSlider(volumeView) != nil {
-      if abs((audioSession?.outputVolume ?? volumeBaseline) - volumeBaseline) > 0.0005 {
-        resetVolume(to: volumeBaseline)
-      }
+      resetVolume(to: baseline)
     } else if attempts > 0 {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
         self?.armVolumeSlider(generation: generation, attempts: attempts - 1)
       }
+    } else {
+      failVolumeControl()
     }
   }
 
@@ -284,61 +332,76 @@ import Photos
   }
 
   private func resetVolume(to value: Float) {
-    guard let slider = findVolumeSlider(volumeView) else { return }
-    guard abs((audioSession?.outputVolume ?? value) - value) > 0.0005 else { return }
-    expectedReset = value; resetDeadline = CFAbsoluteTimeGetCurrent() + 0.25
-    slider.setValue(value, animated: false)
-    slider.sendActions(for: .valueChanged)
+    guard let session = audioSession, volumeEventSink != nil,
+          UIApplication.shared.applicationState == .active,
+          !volumeInterrupted else { return }
+    if abs(session.outputVolume - value) <= ReaderVolumeState.tolerance { return }
+    volumeResetSequence += 1
+    volumeResetWork?.cancel()
+    applyVolumeReset(value, generation: volumeGeneration,
+      sequence: volumeResetSequence, attempts: 4)
+  }
+
+  private func applyVolumeReset(_ value: Float, generation: Int, sequence: Int, attempts: Int) {
+    guard generation == volumeGeneration, sequence == volumeResetSequence,
+          UIApplication.shared.applicationState == .active,
+          !volumeInterrupted, volumeEventSink != nil, let session = audioSession else { return }
+    guard let slider = findVolumeSlider(volumeView) else {
+      armVolumeSlider(generation: generation, attempts: 10)
+      return
+    }
+    // MPVolumeView's slider value setter updates the system route. Do not
+    // duplicate it with a synthetic valueChanged event.
+    slider.value = value
+    let work = DispatchWorkItem { [weak self] in
+      guard let self, generation == self.volumeGeneration,
+            sequence == self.volumeResetSequence, self.volumeEventSink != nil else { return }
+      if abs(session.outputVolume - value) <= ReaderVolumeState.tolerance { return }
+      if attempts > 0 {
+        self.applyVolumeReset(value, generation: generation, sequence: sequence, attempts: attempts - 1)
+      } else {
+        self.failVolumeControl()
+      }
+    }
+    volumeResetWork = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
+  }
+
+  private func failVolumeControl() {
+    let sink = volumeEventSink
+    volumeEventSink = nil
+    removeVolumeObserver()
+    sink?(FlutterError(code: "reader_volume_unavailable",
+      message: "音量键翻页暂不可用，请关闭后重新开启", details: nil))
   }
 
   private func removeVolumeObserver() {
+    guard volumeObservation != nil || audioSession != nil || volumeView != nil else { return }
     volumeGeneration += 1
-    expectedReset = nil
-    NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: audioSession)
-    if isObservingVolume {
-      audioSession?.removeObserver(self, forKeyPath: "outputVolume")
-      isObservingVolume = false
-    }
+    volumeResetSequence += 1
+    volumeResetWork?.cancel()
+    volumeResetWork = nil
+    let generation = volumeGeneration
+    let session = audioSession
+    let original = volumeState?.originalVolume
+    NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: session)
+    NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: session)
+    volumeObservation?.invalidate()
+    volumeObservation = nil
     silentPlayer?.stop()
     silentPlayer = nil
-    resetVolume(to: previousVolume)
     let oldView = volumeView
+    if let original, let slider = findVolumeSlider(oldView) { slider.value = original }
     volumeView = nil
-    oldView?.removeFromSuperview()
-    try? audioSession?.setActive(false, options: .notifyOthersOnDeactivation)
+    volumeState = nil
     audioSession = nil
-  }
-
-  override func observeValue(
-    forKeyPath keyPath: String?,
-    of object: Any?,
-    change: [NSKeyValueChangeKey: Any]?,
-    context: UnsafeMutableRawPointer?
-  ) {
-    guard keyPath == "outputVolume", let newVolume = change?[.newKey] as? Float else {
-      super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
-      return
+    // Keep the control alive for its asynchronous system-volume write. A new
+    // reader may already own the session when this cleanup runs.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+      oldView?.removeFromSuperview()
+      guard let self, generation == self.volumeGeneration, self.volumeEventSink == nil else { return }
+      try? session?.setActive(false, options: .notifyOthersOnDeactivation)
     }
-    let oldVolume = change?[.oldKey] as? Float
-    let generation = volumeGeneration
-    let handle = { [weak self] in
-      guard let self, generation == self.volumeGeneration,
-            self.isObservingVolume, let sink = self.volumeEventSink else { return }
-      if let target = self.expectedReset,
-         CFAbsoluteTimeGetCurrent() <= self.resetDeadline,
-         abs(newVolume - target) < 0.0005 {
-        self.expectedReset = nil
-        self.lastObservedVolume = newVolume
-        return
-      }
-      self.expectedReset = nil
-      let previous = oldVolume ?? self.lastObservedVolume
-      self.lastObservedVolume = newVolume
-      if newVolume > previous + 0.0005 { sink("UP") }
-      else if newVolume < previous - 0.0005 { sink("DOWN") }
-      self.resetVolume(to: self.volumeBaseline)
-    }
-    if Thread.isMainThread { handle() } else { DispatchQueue.main.async(execute: handle) }
   }
 
 }
