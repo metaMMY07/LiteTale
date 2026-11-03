@@ -434,6 +434,33 @@ class ReaderCubit extends Cubit<ReaderState> {
     }
   }
 
+  /// Online counts are chapter-local. Local EPUBs use the owning chapter's
+  /// complete pagination, never the changing 64-page preloading window.
+  String get footerPageLabel {
+    final currentState = state;
+    if (currentState is! ReaderLoaded || currentState.pages.isEmpty) return '';
+    final layout = currentState.layout;
+    final first = layout.firstPage(
+      layout.viewIndex(currentState.currentPageIndex),
+    );
+    final last = (first + (layout.isSpread ? 1 : 0)).clamp(
+      0,
+      currentState.pages.length - 1,
+    );
+    String range(int from, int to, int count) =>
+        from == to ? '${from + 1}/$count' : '${from + 1}–${to + 1}/$count';
+    final window = _bookWindow;
+    if (window == null) {
+      return '本章 ${range(first, last, currentState.pages.length)}';
+    }
+    final left = window.refs[first], right = window.refs[last];
+    if (identical(left.owner, right.owner)) {
+      return '本章 ${range(left.localIndex, right.localIndex, left.owner.pages.length)}';
+    }
+    return '${left.localIndex + 1}/${left.owner.pages.length} · '
+        '${right.localIndex + 1}/${right.owner.pages.length}';
+  }
+
   void onPageChanged(int index) {
     if (state is ReaderLoaded) {
       final currentState = state as ReaderLoaded;

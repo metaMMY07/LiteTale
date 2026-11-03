@@ -65,7 +65,7 @@ void main() {
       ),
     ),
   );
-  testWidgets('tap turn moves only the cover, commits once after settling', (
+  testWidgets('tap slides both adjacent sheets, commits once after settling', (
     tester,
   ) async {
     final controller = ReaderCoverController();
@@ -83,13 +83,21 @@ void main() {
       find.byKey(const ValueKey('cover-position-2')),
     );
     expect(current.transform.storage[12], lessThan(0));
-    expect(next.transform.storage[12], 0);
+    expect(next.transform.storage[12], greaterThan(0));
+    expect(next.transform.storage[12] - current.transform.storage[12], 800);
+    // Unlike the old strong ease-out, the beginning must remain readable.
+    expect(current.transform.storage[12].abs(), lessThan(160));
+    await tester.pump(const Duration(milliseconds: 120));
+    final halfway = tester.widget<Transform>(
+      find.byKey(const ValueKey('cover-position-1')),
+    );
+    expect(halfway.transform.storage[12].abs(), inExclusiveRange(280, 520));
     await tester.pumpAndSettle();
     await turn;
     expect(changes, [2]);
     expect(controller.isTurning, isFalse);
   });
-  testWidgets('previous brings the preceding page over a stationary current', (
+  testWidgets('previous slides both sheets right, symmetrically to next', (
     tester,
   ) async {
     final c = ReaderCoverController();
@@ -110,7 +118,7 @@ void main() {
           .widget<Transform>(find.byKey(const ValueKey('cover-position-1')))
           .transform
           .storage[12],
-      0,
+      greaterThan(0),
     );
     await tester.pumpAndSettle();
     await turn;
@@ -151,6 +159,34 @@ void main() {
     final turn = c.turn(1);
     await tester.pump();
     await tester.pumpWidget(const SizedBox());
+    await turn;
+    expect(changes, isEmpty);
+    expect(c.isTurning, isFalse);
+  });
+  testWidgets('a finger can take over a tap settle and cancel without a jump', (
+    tester,
+  ) async {
+    final c = ReaderCoverController();
+    final changes = <int>[];
+    await mount(tester, c, changes.add);
+    final turn = c.turn(1);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    double x() =>
+        tester
+            .widget<Transform>(find.byKey(const ValueKey('cover-position-1')))
+            .transform
+            .storage[12];
+    final before = x();
+    final gesture = await tester.startGesture(const Offset(400, 300));
+    await gesture.moveBy(const Offset(20, 0));
+    await tester.pump();
+    expect((x() - before).abs(), lessThan(25));
+    // Hold the page still; the cancelled ticker must not commit behind it.
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(changes, isEmpty);
+    await gesture.cancel();
+    await tester.pumpAndSettle();
     await turn;
     expect(changes, isEmpty);
     expect(c.isTurning, isFalse);

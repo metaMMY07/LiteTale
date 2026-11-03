@@ -16,6 +16,7 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:wild/services/reader_typography.dart';
 import 'package:wild/widgets/reader_system_ui_scope.dart';
 import 'package:wild/widgets/reader_paper_view.dart';
+import 'package:wild/widgets/reader_footer.dart';
 import 'package:wild/cubits/screen_keep_on.dart';
 import 'package:wild/utils/controller_event.dart';
 import 'package:wild/widgets/reader_volume_turn_scope.dart';
@@ -622,6 +623,18 @@ class _ReaderViewState extends State<_ReaderView> {
                           ),
                         );
                       },
+                    ),
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: ReaderFooter(
+                      layout: widget.state.layout,
+                      pageLabel: context.read<ReaderCubit>().footerPageLabel,
+                      color: textColor,
+                      fontFamily:
+                          context.read<FontSettingsCubit>().state.readerFamily,
                     ),
                   ),
                   // 控制栏直接显示或隐藏。

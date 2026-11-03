@@ -2,9 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/reader_raster_readiness.dart';
 
-/// Standard cover-page model studied in Legado-E CoverPageDelegate:
-/// next reveals the stationary next sheet; previous slides the preceding sheet
-/// back over the current one. See docs/research/READER_COVER_IMAGES_RESEARCH_2026-11-02.md.
+/// Two opaque sheets travel together, matching the supplied reading video.
+/// The historical cover-view API stays compatible with tap/volume controls.
+/// A completed turn alone commits progress; dragging can take over a settle.
 class ReaderCoverController {
   ReaderCoverViewState? _view;
   bool get isTurning => _view?._busy ?? false;
@@ -45,6 +45,7 @@ class ReaderCoverView extends StatefulWidget {
 
 class ReaderCoverViewState extends State<ReaderCoverView>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  static const _turnDuration = Duration(milliseconds: 360);
   late final _progress = AnimationController(vsync: this);
   final _papers = <int, Widget>{};
   int _index = 0, _direction = 0, _generation = 0;
@@ -141,9 +142,13 @@ class ReaderCoverViewState extends State<ReaderCoverView>
             .animateTo(
               commit ? 1 : 0,
               duration: Duration(
-                milliseconds: (260 * distance).round().clamp(60, 260),
+                milliseconds: (_turnDuration.inMilliseconds * distance)
+                    .round()
+                    .clamp(90, _turnDuration.inMilliseconds),
               ),
-              curve: const Cubic(.23, 1, .32, 1),
+              // Spread movement across the whole turn instead of travelling
+              // almost the entire screen in the first 60-90 milliseconds.
+              curve: Curves.easeInOutCubic,
             )
             .orCancel;
       } on TickerCanceled {
@@ -203,7 +208,13 @@ class ReaderCoverViewState extends State<ReaderCoverView>
             !_active
                 ? null
                 : (_) {
-                  if (!_settling) _drag = 0;
+                  if (_settling) {
+                    _generation++;
+                    _progress.stop();
+                    _settling = false;
+                    _queued = null;
+                  }
+                  _drag = -_direction * _progress.value * _width;
                 },
         onHorizontalDragUpdate:
             !_active
@@ -213,7 +224,15 @@ class ReaderCoverViewState extends State<ReaderCoverView>
                   _drag += details.delta.dx;
                   final direction = _drag < 0 ? 1 : -1;
                   final target = _index + direction;
-                  if (target < 0 || target >= widget.pageCount) return;
+                  if (target < 0 || target >= widget.pageCount) {
+                    if (_direction != 0) {
+                      setState(() {
+                        _direction = 0;
+                        _progress.value = 0;
+                      });
+                    }
+                    return;
+                  }
                   if (_direction != direction) {
                     setState(() => _direction = direction);
                   }
@@ -247,53 +266,30 @@ class ReaderCoverViewState extends State<ReaderCoverView>
             animation: _progress,
             builder: (context, _) {
               final target = _index + _direction;
-              final front = _direction < 0 ? target : _index;
-              final back = _direction > 0 ? target : _index;
-              final order = [
-                ...indices.where((i) => i != front && i != back),
-                if (back != front) back,
-                front,
-              ];
-              final x =
-                  _direction < 0
-                      ? (_progress.value - 1) * _width
-                      : -_progress.value * _width;
               return Stack(
                 fit: StackFit.expand,
                 children: [
-                  for (final i in order)
+                  for (final i in indices)
                     Positioned.fill(
                       key: ValueKey('cover-sheet-$i'),
                       child: Offstage(
                         offstage:
                             _direction == 0
                                 ? i != _index
-                                : i != front && i != back,
+                                : i != _index && i != target,
                         child: IgnorePointer(
                           ignoring: _busy || i != _index,
                           child: Transform.translate(
                             key: ValueKey('cover-position-$i'),
                             offset: Offset(
-                              _direction == 0 || i != front ? 0 : x,
+                              _direction == 0
+                                  ? 0
+                                  : i == _index
+                                  ? -_direction * _progress.value * _width
+                                  : _direction * (1 - _progress.value) * _width,
                               0,
                             ),
                             child: children[i] ?? const SizedBox.expand(),
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (_direction != 0)
-                    Positioned(
-                      top: 0,
-                      bottom: 0,
-                      left: x + _width,
-                      width: 16,
-                      child: const IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [Color(0x35000000), Colors.transparent],
-                            ),
                           ),
                         ),
                       ),

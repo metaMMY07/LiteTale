@@ -53,7 +53,7 @@ class AboutPage extends StatelessWidget {
                 // 版本号
                 Center(
                   child: Text(
-                    '版本 ${AppInfo.fullVersion}',
+                    '版本 ${AppInfo.version}',
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),

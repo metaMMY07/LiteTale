@@ -17,6 +17,7 @@ class ReaderViewportLayout {
   }) : isSpread = size.width > size.height && size.shortestSide >= 600,
        viewportSize = size {
     leafWidth = size.width / (isSpread ? 2 : 1);
+    footerHeight = math.max(16, textScaler.scale(11) * 1.25);
     final bookInset = isSpread ? (leafWidth * 0.105).clamp(24.0, 80.0) : 0.0;
     headerHeight = isSpread ? math.max(28, textScaler.scale(12) * 1.2) : 0;
     insets = EdgeInsets.fromLTRB(
@@ -24,7 +25,7 @@ class ReaderViewportLayout {
       systemPadding.top +
           (isSpread ? math.max(20, topBarHeight / 2) : topBarHeight),
       rightPadding + bookInset,
-      systemPadding.bottom + bottomBarHeight,
+      systemPadding.bottom + math.max(bottomBarHeight, footerHeight + 24),
     );
   }
 
@@ -36,6 +37,9 @@ class ReaderViewportLayout {
   late final double leafWidth;
   late final EdgeInsets insets;
   late final double headerHeight;
+  late final double footerHeight;
+
+  double get footerBottom => systemPadding.bottom + 12;
 
   double get contentWidth => leafWidth - insets.horizontal;
   double get contentHeight =>

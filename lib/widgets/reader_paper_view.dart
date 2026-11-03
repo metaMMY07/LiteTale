@@ -35,21 +35,42 @@ class ReaderPaperView extends StatelessWidget {
   // Catalog titles are normal Unicode, never chapter-obfuscated glyph codes.
   final String titleFontFamily;
 
-  Widget _leaf(int index, {required bool showTitle}) => ReaderPaperLeaf(
-    key: ValueKey('reader-leaf-$index'),
-    page: index < pages.length ? pages[index] : null,
-    layout: layout,
-    chapterTitle:
-        showTitle
-            ? (index < pages.length
-                ? pages[index].chapterTitle ?? chapterTitle
-                : '')
-            : '',
-    source: source,
-    textStyle: textStyle,
-    paragraphSpacing: paragraphSpacing,
-    titleFontFamily: titleFontFamily,
-  );
+  Widget _leaf(int index, {required bool showTitle}) {
+    final page = index < pages.length ? pages[index] : null;
+    final leaf = ReaderPaperLeaf(
+      key: ValueKey('reader-leaf-$index'),
+      page: page,
+      layout: layout,
+      chapterTitle:
+          showTitle
+              ? (index < pages.length
+                  ? pages[index].chapterTitle ?? chapterTitle
+                  : '')
+              : '',
+      source: source,
+      textStyle: textStyle,
+      paragraphSpacing: paragraphSpacing,
+      titleFontFamily: titleFontFamily,
+    );
+    // Fixed artwork has no text margins. Scale the complete page and its image
+    // hotspots together so the footer never masks an illustration.
+    if (page?.cssPage?.fixedLayout == true || page?.artworkText != null) {
+      return Padding(
+        padding: EdgeInsets.only(
+          bottom: layout.footerBottom + layout.footerHeight + 8,
+        ),
+        child: FittedBox(
+          fit: BoxFit.contain,
+          child: SizedBox(
+            width: layout.leafWidth,
+            height: layout.viewportSize.height,
+            child: leaf,
+          ),
+        ),
+      );
+    }
+    return leaf;
+  }
 
   @override
   Widget build(BuildContext context) {
