@@ -54,6 +54,8 @@ import Photos
   private var volumeResetSequence = 0
   private var volumeResetWork: DispatchWorkItem?
   private var volumeInterrupted = false
+  private var volumeListenGeneration = 0
+  private var volumeNotificationTokens: [NSObjectProtocol] = []
 
   override func application(
     _ application: UIApplication,
@@ -253,6 +255,7 @@ import Photos
 
   private func setupVolumeObserver() {
     if volumeObservation != nil { removeVolumeObserver() }
+    volumeListenGeneration += 1
     let session = AVAudioSession.sharedInstance()
     // Capture before activating/changing category; activation can change the
     // value reported by the old route's audio session.
@@ -270,12 +273,22 @@ import Photos
     volumeView = view
 
     assertAudioSessionCategory()
-    NotificationCenter.default.addObserver(self,
-      selector: #selector(handleAudioSessionInterruption(_:)),
-      name: AVAudioSession.interruptionNotification, object: session)
-    NotificationCenter.default.addObserver(self,
-      selector: #selector(handleAudioRouteChange(_:)),
-      name: AVAudioSession.routeChangeNotification, object: session)
+    let listener = volumeListenGeneration
+    let center = NotificationCenter.default
+    // Audio notifications can originate off the main thread. Keep all view,
+    // audio-policy and listener-state mutations ordered with the KVO bridge.
+    volumeNotificationTokens = [
+      center.addObserver(forName: AVAudioSession.interruptionNotification,
+        object: session, queue: .main) { [weak self] note in
+        guard let self, listener == self.volumeListenGeneration else { return }
+        self.handleAudioSessionInterruption(note)
+      },
+      center.addObserver(forName: AVAudioSession.routeChangeNotification,
+        object: session, queue: .main) { [weak self] note in
+        guard let self, listener == self.volumeListenGeneration else { return }
+        self.handleAudioRouteChange(note)
+      },
+    ]
     installVolumeObservation(session)
 
     if silentPlayer == nil, let player = try? AVAudioPlayer(data: makeSilentWavData()) {
@@ -377,6 +390,7 @@ import Photos
 
   private func removeVolumeObserver() {
     guard volumeObservation != nil || audioSession != nil || volumeView != nil else { return }
+    volumeListenGeneration += 1
     volumeGeneration += 1
     volumeResetSequence += 1
     volumeResetWork?.cancel()
@@ -384,8 +398,8 @@ import Photos
     let generation = volumeGeneration
     let session = audioSession
     let original = volumeState?.originalVolume
-    NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: session)
-    NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: session)
+    for token in volumeNotificationTokens { NotificationCenter.default.removeObserver(token) }
+    volumeNotificationTokens.removeAll()
     volumeObservation?.invalidate()
     volumeObservation = nil
     silentPlayer?.stop()
