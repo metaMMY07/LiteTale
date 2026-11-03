@@ -66,7 +66,7 @@ final class AppleReaderPanelChannel: NSObject {
         result(nil)
       } else if call.method == "present", #available(iOS 15.0, *),
                 let configuration = args["configuration"] as? [String: Any] {
-        guard activeSession == nil, let parent, parent.presentedViewController == nil else {
+        guard activeSession == nil, let presenter = self.parent, presenter.presentedViewController == nil else {
           result(FlutterError(code: "panel_busy", message: "Another panel is already presented", details: nil)); return
         }
         let controller = AppleReaderFormController(configuration: configuration)
@@ -93,7 +93,7 @@ final class AppleReaderPanelChannel: NSObject {
         controller.onInteractiveDismiss = { [weak self] in self?.finish(session, selection: nil) }
         navigation.presentationController?.delegate = controller
         activeSession = session; activeController = navigation
-        parent.present(navigation, animated: true)
+        presenter.present(navigation, animated: true)
         result(nil)
       } else {
         result(FlutterMethodNotImplemented)
@@ -429,9 +429,9 @@ private final class AppleReaderFormController: UIViewController, UIAdaptivePrese
         let size = CGSize(width: max(1, image.size.width * scale), height: max(1, image.size.height * scale))
         let normalized = UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
         guard let data = normalized.pngData(), data.count <= 64 * 1024 * 1024 else {
-          model.showError?("背景图片过大或无法读取"); return
+          self.model.showError?("背景图片过大或无法读取"); return
         }
-        model.commit(row, FlutterStandardTypedData(bytes: data))
+        self.model.commit(row, FlutterStandardTypedData(bytes: data))
       }
     }
   }
