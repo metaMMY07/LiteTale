@@ -171,4 +171,30 @@ void main() {
       await cubit.close();
     },
   );
+  test(
+    'online chapter scrub seeks a spread without refetching the chapter',
+    () async {
+      final view =
+          TestWidgetsFlutterBinding.ensureInitialized()
+              .platformDispatcher
+              .views
+              .first;
+      view.physicalSize = const Size(1200, 800);
+      view.devicePixelRatio = 1;
+      addTearDown(view.reset);
+      var reads = 0;
+      final cubit = fixture.reader(({required aid, required cid}) async {
+        reads++;
+        return SourceChapter(List.filled(300, '正文段落，保持位置并继续阅读。').join('\n'));
+      }, ReadingProgressQueue(write: (_) async {}));
+      addTearDown(cubit.close);
+      await cubit.loadChapter();
+      final before = reads;
+      final progress = cubit.chapterProgress;
+      expect(progress.count, greaterThan(2));
+      await cubit.seekChapterPage(3);
+      expect((cubit.state as ReaderLoaded).currentPageIndex, 2);
+      expect(reads, before);
+    },
+  );
 }

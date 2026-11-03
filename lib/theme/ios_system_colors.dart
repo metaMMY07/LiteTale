@@ -71,6 +71,10 @@ class IosSystemColors {
         : dynamicColor.color;
   }
 
-  static Color accent(String preference, Brightness brightness) =>
-      color(iosAccentKey(preference), brightness);
+  static Color accent(String preference, Brightness brightness) {
+    if (RegExp(r'^custom:#[0-9a-fA-F]{6}$').hasMatch(preference)) {
+      return Color(0xFF000000 | int.parse(preference.substring(8), radix: 16));
+    }
+    return color(iosAccentKey(preference), brightness);
+  }
 }

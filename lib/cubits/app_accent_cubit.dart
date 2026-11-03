@@ -77,7 +77,9 @@ class AppAccentCubit extends Cubit<String> {
       if (!isClosed && revision == _revision && _validAccent(value)) {
         emit(
           defaultTargetPlatform == TargetPlatform.iOS
-              ? iosAccentKey(value)
+              ? (_customAccentPattern.hasMatch(value)
+                  ? value
+                  : iosAccentKey(value))
               : defaultTargetPlatform == TargetPlatform.android
               ? _androidAccentKey(value)
               : value,

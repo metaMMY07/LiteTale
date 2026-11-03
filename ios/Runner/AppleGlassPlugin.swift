@@ -29,6 +29,12 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
   private weak var parentController: UIViewController?
   private var tabs: UITabBarController?
   private var segments: UISegmentedControl?
+  private var slider: UISlider?
+  private var sliderEditing = false
+  private var sliderDiscardTouch = false
+  private var sliderRevision = 0
+  private var sliderGestureRevision = 0
+  private var sliderRestingValue: Float = 0
   private var surface: UIVisualEffectView?
   private var surfaceTint: UInt32?
   private var surfaceCapsule = false
@@ -55,6 +61,17 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       let control = UISegmentedControl(items: ["推荐", "分类", "排行", "全部"])
       control.addTarget(self, action: #selector(selectSegment), for: .valueChanged)
       segments = control
+      addSubview(control)
+    } else if kind == "slider" {
+      let control = UISlider()
+      control.isContinuous = true
+      control.addTarget(self, action: #selector(sliderStart), for: .touchDown)
+      control.addTarget(self, action: #selector(sliderChange), for: .valueChanged)
+      control.addTarget(self, action: #selector(sliderEnd), for: [.touchUpInside, .touchUpOutside])
+      control.addTarget(self, action: #selector(sliderCancel), for: .touchCancel)
+      // UIKit owns the iOS 26 glass thumb, stretch and release behavior.
+      // A thumb image or thumbTintColor would override the system material.
+      slider = control
       addSubview(control)
     } else if kind == "surface" {
       surfaceCapsule = config["capsule"] as? Bool ?? false
@@ -166,6 +183,31 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     let color = UIColor(red: CGFloat((argb >> 16) & 255) / 255,
       green: CGFloat((argb >> 8) & 255) / 255, blue: CGFloat(argb & 255) / 255, alpha: 1)
     tintColor = color
+    if let slider {
+      let low = (config["min"] as? NSNumber)?.floatValue ?? 0
+      let high = (config["max"] as? NSNumber)?.floatValue ?? 1
+      let value = (config["value"] as? NSNumber)?.floatValue ?? low
+      guard low.isFinite, high.isFinite, value.isFinite, high > low else { return }
+      let revision = config["revision"] as? Int ?? 0
+      let enabled = config["enabled"] as? Bool ?? true
+      if sliderEditing && (revision != sliderRevision || !enabled) {
+        sliderDiscardTouch = true
+        sliderCancel()
+      }
+      sliderRevision = revision
+      if slider.minimumValue != low { slider.minimumValue = low }
+      if slider.maximumValue != high { slider.maximumValue = high }
+      sliderRestingValue = min(high, max(low, value))
+      if slider.isEnabled != enabled { slider.isEnabled = enabled }
+      if slider.tintColor != color { slider.tintColor = color }
+      if slider.minimumTrackTintColor != color { slider.minimumTrackTintColor = color }
+      // Flutter echoes drag values to update the label. Feeding these back
+      // into a tracking UIKit control interrupts its own presentation physics.
+      if !sliderEditing && !slider.isTracking {
+        slider.setValue(sliderRestingValue, animated: false)
+      }
+      return
+    }
     if let surface {
       surfaceCapsule = config["capsule"] as? Bool ?? false
       setNeedsLayout()
@@ -262,6 +304,9 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
         surface.layer.cornerRadius = 0
       }
     }
+    else if let slider {
+      slider.frame = bounds.insetBy(dx: 2, dy: 0)
+    }
     else if let button = menuButton { button.frame = bounds }
     else if let tabs {
       tabs.view.frame = bounds
@@ -298,6 +343,47 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
   }
   @objc private func changeTheme() { channel.invokeMethod("action", arguments: ["action": "theme"]) }
   @objc private func openSearch() { channel.invokeMethod("action", arguments: ["action": "search"]) }
+
+  private func sliderAction(_ action: String) {
+    guard let slider else { return }
+    channel.invokeMethod("action", arguments: ["action": action,
+      "value": Double(slider.value), "revision": sliderGestureRevision])
+  }
+
+  @objc private func sliderStart() {
+    guard slider?.isEnabled == true, !sliderEditing else { return }
+    sliderDiscardTouch = false
+    sliderEditing = true
+    sliderGestureRevision = sliderRevision
+    sliderAction("start")
+  }
+
+  @objc private func sliderChange() {
+    guard let slider, slider.isEnabled, !sliderDiscardTouch else { return }
+    // VoiceOver adjustments send valueChanged without touchDown/touchUp.
+    let accessibilityAdjustment = !sliderEditing && !slider.isTracking
+    if !sliderEditing { sliderStart() }
+    sliderAction("change")
+    if accessibilityAdjustment { sliderEnd() }
+  }
+
+  @objc private func sliderEnd() {
+    if sliderDiscardTouch {
+      sliderDiscardTouch = false
+      slider?.setValue(sliderRestingValue, animated: false)
+      return
+    }
+    guard sliderEditing else { return }
+    sliderEditing = false
+    sliderAction("end")
+  }
+
+  @objc private func sliderCancel() {
+    guard sliderEditing else { return }
+    sliderEditing = false
+    sliderAction("cancel")
+    if slider?.isTracking == false { slider?.setValue(sliderRestingValue, animated: false) }
+  }
 
   deinit {
     if kind == "toolbar" { AppleThemeReveal.shared.cancel() }

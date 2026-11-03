@@ -1,5 +1,7 @@
 # LiteTale 工作约定
 
+- 2026-11-03 v1.2.1：先读 `docs/READER_CONTROLS_1.2.1.md`。用户确认点击/音量没问题，360ms和AppDelegate音量实现不改。普通滑动越过完整页后携带剩余距离，不等收尾锁页；父索引回显与真正外部seek须区分并清理确认记录。新统一ReaderSettingsPanel/浮动ReaderToolbar，分页底部只松手跳本章页，不把EPUB有界窗口算整书总数。iOS滑杆必须走UIKit UISlider原生液态玻璃而非Cupertino圆头，自定义thumb会覆盖原生效果；范围/章节旧事件过滤，横向/点击recognizer不抢纵向列表。iOS系统黑白灰+systemBlue/可选原生色，保留custom RGB重启；不能用Material seed预览冒充iOS配色，Windows fallback截图不算UIKit实测。Android使用原Material You色盘/分组，应用毛玻璃底栏、书源/封面/详情不动。55相关检查/16目标分析通过，实体手感和玻璃外观交用户验证，内部Android88。
+
 - 2026-11-03 手势/音量追加：先读 `docs/READER_GESTURE_VOLUME_FIX_1.2.0.md`。用户保留点击节奏；修复后台移除拖动后resumed未重建的首滑失效，拖动松手用SDK分页弹簧承接速度，点击/音量360ms不动。iOS改typed KVO/slider.value实际回读及有限失败，基线回调不按250ms超时变成反向键；原音量/新输出路由/旧清理隔离；音频通知在主队列按独立监听代数过滤旧回调。ReaderVolumeState纯Swift策略随设备构建运行6组检查，不能将其或模拟器说成真机音量验收。仍v1.2.0且交付文件不加build，Android内部87；来源、配色、封面/详情/页脚不重做。
 
 - 2026-11-03 视频翻页追加：先读 `docs/READER_SLIDE_FOOTER_1.2.0.md`。用户明确覆盖旧“无时间/页码”要求；用户随后澄清要去掉的是翻页中两张页面交界的竖线，并非横屏中缝；普通动画已无阴影分隔且两页共用物理像素对齐位移。普通分页现在为两页同步水平平移，360ms缓起缓停，拖动可接管点击收尾，仅完成才提交。时间/本章页数放独立ReaderFooter，分钟更新不触动正文；共用布局预留页脚，固定图文与热点一起等比适配。本地页码必须按所属完整章节，不按有界预读窗口算整书总数。Android独立仿真选项/iOS Apple Books仍保留原逻辑，封面/详情/配色不动。本轮交付仍v1.2.0且文件名/关于页不显示build；内部平台代码只用于覆盖安装。

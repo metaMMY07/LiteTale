@@ -118,4 +118,43 @@ void main() {
     expect(page.textEnd, greaterThan(offset));
     await cubit.close();
   });
+  test(
+    'scrub counts and seeks the full chapter beyond a bounded EPUB window',
+    () async {
+      view.physicalSize = const Size(400, 600);
+      view.devicePixelRatio = 1;
+      addTearDown(view.reset);
+      final doc = ReaderDocument([
+        for (var i = 0; i < 350; i++)
+          ReaderBlock(runs: [ReaderRun('段落$i：向远方继续前进。' * 5)]),
+      ]);
+      final saved = <ReadingProgress>[];
+      final queue = ReadingProgressQueue(write: (p) async => saved.add(p));
+      final cubit = fixture.reader(
+        ({required aid, required cid}) async =>
+            cid == 'a'
+                ? SourceChapter(doc.content, document: doc)
+                : const SourceChapter('邻章'),
+        queue,
+        bookId: bookId,
+        chapterVolumes: volumes,
+      );
+      addTearDown(cubit.close);
+      await cubit.loadChapter();
+      final progress = cubit.chapterProgress;
+      expect(progress.index, 0);
+      expect(progress.count, greaterThan(64));
+      expect(
+        (cubit.state as ReaderLoaded).pages.length,
+        lessThan(progress.count),
+      );
+      await cubit.seekChapterPage(progress.count - 3);
+      await queue.flush();
+      expect(cubit.chapterProgress.count, progress.count);
+      expect(cubit.chapterProgress.index, progress.count - 3);
+      expect((cubit.state as ReaderLoaded).cid, 'a');
+      expect(saved.last.page, progress.count - 3);
+      expect(saved.last.chapterId, 'a');
+    },
+  );
 }

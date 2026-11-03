@@ -380,4 +380,137 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     expect(changes, [2]);
   });
+  testWidgets(
+    'successive swipes carry on before the previous release finishes',
+    (tester) async {
+      final c = ReaderCoverController();
+      final changes = <int>[];
+      await mount(tester, c, changes.add);
+      var gesture = await tester.startGesture(const Offset(650, 280));
+      await gesture.moveBy(const Offset(-310, 0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pump(const Duration(milliseconds: 35));
+      expect(c.isTurning, isTrue);
+      // Grab while page 2 is still only partly visible; go beyond its edge.
+      gesture = await tester.startGesture(const Offset(650, 280));
+      await gesture.moveBy(const Offset(-760, 0));
+      await tester.pump();
+      expect(changes, contains(2));
+      final third = tester.widget<Transform>(
+        find.byKey(const ValueKey('cover-position-3')),
+      );
+      expect(third.transform.storage[12], lessThan(800));
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(changes.last, 3);
+      expect(c.isTurning, isFalse);
+    },
+  );
+
+  testWidgets(
+    'one held drag can cross more than one page without losing its remainder',
+    (tester) async {
+      final c = ReaderCoverController();
+      final changes = <int>[];
+      await mount(tester, c, changes.add);
+      final gesture = await tester.startGesture(const Offset(700, 280));
+      await gesture.moveBy(const Offset(-900, 0));
+      await tester.pump();
+      expect(changes, [2]);
+      expect(
+        tester
+            .widget<Transform>(find.byKey(const ValueKey('cover-position-2')))
+            .transform
+            .storage[12],
+        closeTo(-100, 1),
+      );
+      await gesture.moveBy(const Offset(-720, 0));
+      await tester.pump();
+      expect(changes, [2, 3]);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(changes, [2, 3]);
+    },
+  );
+
+  testWidgets('a parent page echo does not cancel a continuing drag', (
+    tester,
+  ) async {
+    final c = ReaderCoverController();
+    final changes = <int>[];
+    var index = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder:
+              (context, update) => ReaderCoverView(
+                controller: c,
+                index: index,
+                pageCount: 5,
+                paperDecoration: const BoxDecoration(color: Colors.white),
+                revision: 'same-pages',
+                onPageChanged: (v) {
+                  changes.add(v);
+                  update(() => index = v);
+                },
+                pageBuilder: (_, i) => Text('paper-$i'),
+              ),
+        ),
+      ),
+    );
+    final gesture = await tester.startGesture(const Offset(700, 280));
+    await gesture.moveBy(const Offset(-900, 0));
+    await tester.pump();
+    await gesture.moveBy(const Offset(-800, 0));
+    await tester.pump();
+    expect(changes, [1, 2]);
+    expect(c.isTurning, isTrue);
+    await gesture.moveBy(const Offset(130, 0));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(changes.last, 2);
+  });
+  testWidgets(
+    'an external page seek still works after acknowledged drag commits',
+    (tester) async {
+      final c = ReaderCoverController();
+      var index = 0;
+      late StateSetter parent;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, update) {
+              parent = update;
+              return ReaderCoverView(
+                controller: c,
+                index: index,
+                pageCount: 5,
+                revision: 'same-pages',
+                paperDecoration: const BoxDecoration(color: Colors.white),
+                onPageChanged: (v) => update(() => index = v),
+                pageBuilder: (_, i) => Text('paper-$i'),
+              );
+            },
+          ),
+        ),
+      );
+      final gesture = await tester.startGesture(const Offset(700, 280));
+      await gesture.moveBy(const Offset(-900, 0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(index, 1);
+      parent(() => index = 0);
+      await tester.pump();
+      expect(
+        tester
+            .widget<Transform>(find.byKey(const ValueKey('cover-position-0')))
+            .transform
+            .storage[12],
+        0,
+      );
+      expect(c.isTurning, isFalse);
+    },
+  );
 }

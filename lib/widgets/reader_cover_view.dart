@@ -51,6 +51,7 @@ class ReaderCoverViewState extends State<ReaderCoverView>
   final _papers = <int, Widget>{};
   int _index = 0, _direction = 0, _generation = 0;
   int? _queued;
+  final _reportedIndices = <int>{};
   double _width = 1, _drag = 0;
   bool _settling = false, _dragging = false;
   bool get _busy => _settling || _dragging || _direction != 0;
@@ -76,12 +77,16 @@ class ReaderCoverViewState extends State<ReaderCoverView>
       widget.controller._view = this;
     }
     if (widget.revision != oldWidget.revision ||
-        widget.index != _index ||
+        (widget.index != oldWidget.index &&
+            widget.index != _index &&
+            !_reportedIndices.remove(widget.index)) ||
         !widget.active) {
       _cancel();
       _index = widget.index;
+      _reportedIndices.clear();
       if (widget.revision != oldWidget.revision) _papers.clear();
     }
+    if (widget.index == _index) _reportedIndices.clear();
     if (widget.isSpread &&
         oldWidget.leafCount?.isOdd == true &&
         (widget.leafCount ?? 0) > oldWidget.leafCount!) {
@@ -199,11 +204,44 @@ class ReaderCoverViewState extends State<ReaderCoverView>
       _settling = false;
       _progress.value = 0;
     });
-    if (commit) widget.onPageChanged(_index);
+    if (commit) _reportPage(_index);
     if (queued != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(turn(queued));
       });
+    }
+  }
+
+  void _reportPage(int index) {
+    // Parent rebuilds may echo an earlier fully crossed page while a second
+    // gesture is already moving. Such an echo is not an external seek.
+    _reportedIndices.add(index);
+    _reportedIndices.removeWhere((i) => (i - _index).abs() > 3);
+    widget.onPageChanged(index);
+  }
+
+  void _updateDrag(double delta) {
+    _drag += delta;
+    final crossed = <int>[];
+    // Carry unused distance through a page edge. The next paper can enter in
+    // this same gesture, including when it grabbed an unfinished release.
+    while (_drag.abs() >= _width) {
+      final direction = _drag < 0 ? 1 : -1;
+      final target = _index + direction;
+      if (target < 0 || target >= widget.pageCount) break;
+      _index = target;
+      _drag += direction * _width;
+      crossed.add(_index);
+    }
+    final direction = _drag == 0 ? 0 : (_drag < 0 ? 1 : -1);
+    final target = _index + direction;
+    setState(() {
+      _direction = target < 0 || target >= widget.pageCount ? 0 : direction;
+      _progress.value =
+          _direction == 0 ? 0 : (_drag.abs() / _width).clamp(0, 1);
+    });
+    for (final index in crossed) {
+      _reportPage(index);
     }
   }
 
@@ -256,22 +294,7 @@ class ReaderCoverViewState extends State<ReaderCoverView>
                 ? null
                 : (details) {
                   if (!_active || _settling || !_dragging) return;
-                  _drag += details.delta.dx;
-                  final direction = _drag < 0 ? 1 : -1;
-                  final target = _index + direction;
-                  if (target < 0 || target >= widget.pageCount) {
-                    if (_direction != 0) {
-                      setState(() {
-                        _direction = 0;
-                        _progress.value = 0;
-                      });
-                    }
-                    return;
-                  }
-                  if (_direction != direction) {
-                    setState(() => _direction = direction);
-                  }
-                  _progress.value = (_drag.abs() / _width).clamp(0, 1);
+                  _updateDrag(details.delta.dx);
                 },
         onHorizontalDragCancel: () {
           if (!_dragging) return;

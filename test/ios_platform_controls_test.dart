@@ -1,3 +1,4 @@
+import 'package:wild/cubits/app_accent_cubit.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -150,5 +151,34 @@ void main() {
       expect(iosAccentKey('iris'), 'ios-purple');
       expect(iosAccentKey('rose'), 'ios-pink');
     },
+  );
+  testWidgets(
+    'iOS custom accents survive restart without recoloring semantic surfaces',
+    (tester) async {
+      var saved = 'custom:#9A7CE0';
+      final accent = AppAccentCubit(
+        read: () async => saved,
+        write: (v) async => saved = v,
+      );
+      addTearDown(accent.close);
+      await accent.load();
+      expect(accent.state, saved);
+      for (final brightness in Brightness.values) {
+        final theme = iosGlassTheme(
+          brightness,
+          accent: IosSystemColors.accent(accent.state, brightness),
+        );
+        expect(theme.colorScheme.primary, const Color(0xFF9A7CE0));
+        expect(
+          theme.colorScheme.surface,
+          IosSystemColors.color('surface', brightness),
+        );
+        expect(
+          theme.colorScheme.onSurface,
+          IosSystemColors.color('label', brightness),
+        );
+      }
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );
 }

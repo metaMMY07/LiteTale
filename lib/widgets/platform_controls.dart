@@ -394,6 +394,8 @@ class AppSlider extends StatelessWidget {
     this.label,
     this.onChangeStart,
     this.onChangeEnd,
+    this.onChangeCancel,
+    this.interactionRevision,
     this.activeColor,
     this.inactiveColor,
   });
@@ -401,11 +403,13 @@ class AppSlider extends StatelessWidget {
   final int? divisions;
   final String? label;
   final ValueChanged<double>? onChanged, onChangeStart, onChangeEnd;
+  final VoidCallback? onChangeCancel;
+  final Object? interactionRevision;
   final Color? activeColor, inactiveColor;
   @override
   Widget build(BuildContext context) =>
       usesAppleGlass
-          ? CupertinoSlider(
+          ? AppleGlassSlider(
             value: value.clamp(min, max),
             min: min,
             max: max,
@@ -413,6 +417,8 @@ class AppSlider extends StatelessWidget {
             onChanged: onChanged,
             onChangeStart: onChangeStart,
             onChangeEnd: onChangeEnd,
+            onChangeCancel: onChangeCancel,
+            interactionRevision: interactionRevision,
             activeColor: activeColor ?? Theme.of(context).colorScheme.primary,
           )
           : Slider(

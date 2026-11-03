@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -406,6 +407,85 @@ class AppleGlassSegments extends StatelessWidget {
   );
 }
 
+/// Uses the system control, including iOS 26's glass thumb and its physics.
+/// Do not supply a custom thumb image/tint: that replaces the native material.
+class AppleGlassSlider extends StatelessWidget {
+  const AppleGlassSlider({
+    super.key,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.onChanged,
+    this.divisions,
+    this.onChangeStart,
+    this.onChangeEnd,
+    this.onChangeCancel,
+    this.activeColor,
+    this.interactionRevision,
+  });
+  final double value, min, max;
+  final int? divisions;
+  final ValueChanged<double>? onChanged, onChangeStart, onChangeEnd;
+  final VoidCallback? onChangeCancel;
+  final Color? activeColor;
+  final Object? interactionRevision;
+
+  double _value(Object? raw) {
+    var v = (raw as num).toDouble().clamp(min, max);
+    if (divisions != null && divisions! > 0) {
+      final step = (max - min) / divisions!;
+      v = min + ((v - min) / step).round() * step;
+    }
+    return v.clamp(min, max);
+  }
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 44,
+    child: _AppleChrome(
+      parameters: {
+        'kind': 'slider',
+        'min': min,
+        'max': max,
+        'value': value.clamp(min, max),
+        'enabled': onChanged != null,
+        'revision': Object.hash(min, max, interactionRevision),
+        'accent':
+            (activeColor ?? Theme.of(context).colorScheme.primary).toARGB32(),
+        'dark': Theme.of(context).brightness == Brightness.dark,
+      },
+      onAction: (action, raw) {
+        if (action == 'cancel') {
+          onChangeCancel?.call();
+          return;
+        }
+        if (onChanged == null || raw is! num || !raw.toDouble().isFinite) {
+          return;
+        }
+        final v = _value(raw);
+        switch (action) {
+          case 'start':
+            onChangeStart?.call(v);
+          case 'change':
+            onChanged?.call(v);
+          case 'end':
+            onChangeEnd?.call(v);
+        }
+      },
+      fallback: CupertinoSlider(
+        value: value.clamp(min, max),
+        min: min,
+        max: max,
+        divisions: divisions,
+        onChanged: onChanged,
+        onChangeStart: onChangeStart,
+        onChangeEnd: onChangeEnd,
+        activeColor: activeColor ?? Theme.of(context).colorScheme.primary,
+      ),
+    ),
+  );
+}
+
 class _AppleChrome extends StatefulWidget {
   const _AppleChrome({
     required this.parameters,
@@ -430,9 +510,15 @@ class _AppleChromeState extends State<_AppleChrome> {
       if (!mounted || ModalRoute.of(context)?.isCurrent == false) return;
       if (call.method == 'action') {
         final args = Map<Object?, Object?>.from(call.arguments as Map);
+        if (widget.parameters['kind'] == 'slider' &&
+            args['revision'] != widget.parameters['revision']) {
+          return;
+        }
         widget.onAction(args['action'] as String, args['value']);
       }
     });
+    // UIKit creation is asynchronous; sync any value/range changed meanwhile.
+    if (widget.parameters['kind'] == 'slider') _update();
   }
 
   @override
@@ -470,6 +556,17 @@ class _AppleChromeState extends State<_AppleChrome> {
       creationParams: widget.parameters,
       creationParamsCodec: const StandardMessageCodec(),
       onPlatformViewCreated: _created,
+      // A slider owns horizontal drags and taps, but the surrounding settings
+      // sheet must retain vertical scrolling and its expand/collapse gesture.
+      gestureRecognizers:
+          widget.parameters['kind'] == 'slider'
+              ? <Factory<OneSequenceGestureRecognizer>>{
+                Factory<HorizontalDragGestureRecognizer>(
+                  () => HorizontalDragGestureRecognizer(),
+                ),
+                Factory<TapGestureRecognizer>(() => TapGestureRecognizer()),
+              }
+              : const <Factory<OneSequenceGestureRecognizer>>{},
       // The floating bar overlaps tappable book covers. Keep those recognizers
       // out of its gesture arena so a tab press reaches UIKit immediately.
       hitTestBehavior:

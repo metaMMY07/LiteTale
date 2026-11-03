@@ -38,6 +38,7 @@ class ReaderCubit extends Cubit<ReaderState> {
   bool _warmingBook = false;
   bool _reflowingBook = false;
   int _request = 0;
+  int _seekGeneration = 0;
   ReadRequest? _readRequest;
   String? _loadedContent;
   ReaderDocument? _loadedDocument;
@@ -461,7 +462,54 @@ class ReaderCubit extends Cubit<ReaderState> {
         '${right.localIndex + 1}/${right.owner.pages.length}';
   }
 
+  /// The full owning chapter, never the rolling EPUB preload window.
+  ({int index, int count, Object revision}) get chapterProgress {
+    final loaded = state;
+    if (loaded is! ReaderLoaded || loaded.pages.isEmpty) {
+      return (index: 0, count: 1, revision: this);
+    }
+    final ref = _bookWindow?.refs[loaded.currentPageIndex];
+    return (
+      index: ref?.localIndex ?? loaded.currentPageIndex,
+      count: ref?.owner.pages.length ?? loaded.pages.length,
+      revision: Object.hash(
+        loaded.aid,
+        loaded.cid,
+        loaded.layout,
+        ref?.owner.pages ?? loaded.pages,
+      ),
+    );
+  }
+
+  Future<void> seekChapterPage(int page) async {
+    final intent = ++_seekGeneration, request = _request;
+    final loaded = state;
+    if (loaded is! ReaderLoaded) return;
+    final window = _bookWindow, flow = _bookFlow;
+    if (window == null || flow == null) {
+      if (page < 0 || page >= loaded.pages.length) return;
+      onPageChanged(loaded.layout.firstPage(loaded.layout.viewIndex(page)));
+      return;
+    }
+    if (_reflowingBook) return;
+    final ref = window.refs[loaded.currentPageIndex];
+    if (page < 0 || page >= ref.owner.pages.length) return;
+    final next = await flow.open(ref.owner.chapter.cid, initialPage: page);
+    // A stale scrub must never put a reader back into the old chapter.
+    if (isClosed ||
+        !flow.current ||
+        !identical(flow, _bookFlow) ||
+        intent != _seekGeneration ||
+        request != _request ||
+        state is! ReaderLoaded) {
+      return;
+    }
+    _publishBook(next, loaded.layout, loaded.fontFamily, state.showControls);
+    _warmLocalBook();
+  }
+
   void onPageChanged(int index) {
+    _seekGeneration++;
     if (state is ReaderLoaded) {
       final currentState = state as ReaderLoaded;
       if (index < 0 || index >= currentState.pages.length) return;

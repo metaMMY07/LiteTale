@@ -1,3 +1,5 @@
+import 'package:wild/widgets/reader_controls.dart';
+import 'package:wild/widgets/reader_settings_panel.dart';
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/services/hardware_turn_buffer.dart';
@@ -12,7 +14,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/novel/paragraph_spacing_cubit.dart';
 import 'package:wild/pages/novel/reader_cubit.dart';
 import 'package:wild/pages/novel/theme_cubit.dart';
-import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:wild/services/reader_typography.dart';
 import 'package:wild/widgets/reader_system_ui_scope.dart';
 import 'package:wild/widgets/reader_paper_view.dart';
@@ -20,7 +21,6 @@ import 'package:wild/widgets/reader_footer.dart';
 import 'package:wild/cubits/screen_keep_on.dart';
 import 'package:wild/utils/controller_event.dart';
 import 'package:wild/widgets/reader_volume_turn_scope.dart';
-import 'package:wild/widgets/reader_volume_turn_setting.dart';
 import 'dart:io';
 
 import '../../src/rust/wenku8/models.dart';
@@ -35,7 +35,6 @@ import 'package:wild/cubits/reader_background_cubit.dart';
 import 'package:wild/widgets/reader_cover_view.dart';
 import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/widgets/page_curl_view.dart';
-import 'package:wild/widgets/reader_curl_setting.dart';
 import 'package:wild/settings/settings_preferences.dart';
 import 'package:wild/settings/reading_session_scope.dart';
 
@@ -361,12 +360,12 @@ class _ReaderViewState extends State<_ReaderView> {
   }
 
   void _showSettings() {
-    final readerCubit = context.read<ReaderCubit>();
-    showAppBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (BuildContext context) {
-        return _ReaderSettings(readerCubit);
+    final cubit = context.read<ReaderCubit>();
+    showReaderSettingsPanel(
+      context,
+      localEpub: _bookSource == SourceId.localEpub,
+      onLayoutChanged: () async {
+        if (!cubit.isClosed) await cubit.reloadCurrentPage();
       },
     );
   }
@@ -484,7 +483,6 @@ class _ReaderViewState extends State<_ReaderView> {
     _lastLayoutPadding = mediaQuery.padding;
     _lastTextScaler = mediaQuery.textScaler;
     _lastBoldText = mediaQuery.boldText;
-    final topPadding = mediaQuery.padding.top;
 
     final ThemeCubit themeCubit = context.read<ThemeCubit>();
     bool isDarkMode;
@@ -637,58 +635,48 @@ class _ReaderViewState extends State<_ReaderView> {
                           context.read<FontSettingsCubit>().state.readerFamily,
                     ),
                   ),
-                  // 控制栏直接显示或隐藏。
-                  if (state.showControls)
+                  if (state.showControls) ...[
                     Positioned(
                       top: 0,
                       left: 0,
                       right: 0,
-                      child: Container(
-                        color: Colors.black.withValues(alpha: 0.7),
-                        padding: EdgeInsets.fromLTRB(
-                          16,
-                          topPadding + 8,
-                          16,
-                          16,
-                        ),
-                        child: Row(
-                          children: [
-                            AppIconButton(
-                              icon: const Icon(
-                                Icons.arrow_back,
-                                color: Colors.white,
-                              ),
-                              onPressed: () => Navigator.pop(context),
-                            ),
-                            Expanded(
-                              child: Text(
-                                widget.title,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 18,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            AppIconButton(
-                              icon: const Icon(
-                                Icons.menu_book,
-                                color: Colors.white,
-                              ),
-                              onPressed: _showChapterList,
-                            ),
-                            AppIconButton(
-                              icon: const Icon(
-                                Icons.settings,
-                                color: Colors.white,
-                              ),
-                              onPressed: _showSettings,
-                            ),
-                          ],
-                        ),
+                      child: ReaderToolbar(
+                        title: widget.title,
+                        onBack: () => Navigator.pop(context),
+                        onCatalog: _showChapterList,
+                        onSettings: _showSettings,
                       ),
                     ),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: Builder(
+                        builder: (context) {
+                          final cubit = context.read<ReaderCubit>();
+                          final progress = cubit.chapterProgress;
+                          return ReaderPageScrubber(
+                            index: progress.index,
+                            count: progress.count,
+                            revision: progress.revision,
+                            onSeek: (page) async {
+                              try {
+                                await cubit.seekChapterPage(page);
+                              } catch (_) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('未能跳转到该页，请重试'),
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ],
               ),
             );
@@ -918,596 +906,6 @@ class _ChapterListState extends State<_ChapterList> {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _ReaderSettings extends StatefulWidget {
-  final ReaderCubit readerCubit;
-
-  const _ReaderSettings(this.readerCubit);
-
-  @override
-  State<_ReaderSettings> createState() => _ReaderSettingsState();
-}
-
-class _ReaderSettingsState extends State<_ReaderSettings> {
-  late final paragraphSpacingCubit = context.read<ParagraphSpacingCubit>();
-  late final fontSizeCubit = context.read<FontSizeCubit>();
-  late final lineHeightCubit = context.read<LineHeightCubit>();
-  late final topBarHeightCubit = context.read<TopBarHeightCubit>();
-  late final bottomBarHeightCubit = context.read<BottomBarHeightCubit>();
-  late final leftPaddingCubit = context.read<LeftPaddingCubit>();
-  late final rightPaddingCubit = context.read<RightPaddingCubit>();
-  late final readerTypeCubit = context.read<ReaderTypeCubit>();
-  late final readerBackgroundCubit = context.read<ReaderBackgroundCubit>();
-
-  void _showColorPicker(
-    BuildContext context,
-    Color initialColor,
-    Function(Color) onColorChanged,
-  ) {
-    showAdaptiveDialog(
-      context: context,
-      builder: (BuildContext context) {
-        Color pickerColor = initialColor;
-        return AlertDialog.adaptive(
-          title: const Text('选择颜色'),
-          content: SingleChildScrollView(
-            child: ColorPicker(
-              pickerColor: pickerColor,
-              onColorChanged: (Color color) {
-                pickerColor = color;
-              },
-              pickerAreaHeightPercent: 0.8,
-              enableAlpha: false,
-              labelTypes: const [],
-              displayThumbColor: true,
-            ),
-          ),
-          actions: <Widget>[
-            AppButton.text(
-              child: const Text('取消'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            ),
-            AppButton.text(
-              child: const Text('确定'),
-              onPressed: () async {
-                onColorChanged(pickerColor);
-                Navigator.of(context).pop();
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return BlocBuilder<ThemeCubit, ReaderTheme>(
-      builder: (context, theme) {
-        return Container(
-          height: MediaQuery.of(context).size.height / 3 * 2,
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            top: 16,
-            bottom: MediaQuery.of(context).padding.bottom + 16,
-          ),
-          decoration: BoxDecoration(
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-          ),
-          child: ListView(
-            children: [
-              Text(
-                '设置',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 16),
-              // 阅读器类型设置
-              Row(
-                children: [
-                  Text('阅读器类型'),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: BlocBuilder<ReaderTypeCubit, ReaderType>(
-                      builder: (context, type) {
-                        return AppSegmentedButton<ReaderType>(
-                          segments: const [
-                            ButtonSegment<ReaderType>(
-                              value: ReaderType.normal,
-                              label: Text('普通阅读器'),
-                              icon: Icon(Icons.book),
-                            ),
-                            ButtonSegment<ReaderType>(
-                              value: ReaderType.html,
-                              label: Text('HTML阅读器'),
-                              icon: Icon(Icons.html),
-                            ),
-                          ],
-                          selected: {type},
-                          onSelectionChanged: (Set<ReaderType> types) async {
-                            await readerTypeCubit.updateType(types.first);
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const Divider(),
-              if (sourceOf(widget.readerCubit.initialAid) != SourceId.localEpub)
-                const ReaderCurlSetting()
-              else
-                const ListTile(
-                  leading: Icon(Icons.menu_book_outlined),
-                  title: Text('普通翻页'),
-                  subtitle: Text('本地 EPUB 保留原书排版，支持滑动、点击和音量键翻页'),
-                ),
-              const Divider(),
-              const ReaderVolumeTurnSetting(),
-              const Divider(),
-              // 字体大小设置
-              BlocBuilder<FontSizeCubit, double>(
-                builder: (context, fontSize) {
-                  return Row(
-                    children: [
-                      Text('字体大小'),
-                      Expanded(
-                        child: AppSlider(
-                          value: fontSize,
-                          min: 14,
-                          max: 24,
-                          divisions: 10,
-                          label: fontSize.round().toString(),
-                          onChanged: (value) async {
-                            await fontSizeCubit.updateFontSize(value);
-                            await widget.readerCubit.reloadCurrentPage();
-                          },
-                        ),
-                      ),
-                      Text('${fontSize.round()}', style: TextStyle()),
-                    ],
-                  );
-                },
-              ),
-              // 段落间距设置
-              BlocBuilder<ParagraphSpacingCubit, double>(
-                builder: (context, spacing) {
-                  return Row(
-                    children: [
-                      Text('段落间距', style: TextStyle()),
-                      Expanded(
-                        child: AppSlider(
-                          value: spacing,
-                          min: 2,
-                          max: 32,
-                          divisions: 2,
-                          label: spacing.round().toString(),
-                          onChanged: (value) async {
-                            await paragraphSpacingCubit.updateSpacing(value);
-                            await widget.readerCubit.reloadCurrentPage();
-                          },
-                        ),
-                      ),
-                      Text('${spacing.round()}', style: TextStyle()),
-                    ],
-                  );
-                },
-              ),
-              // 行高设置
-              BlocBuilder<LineHeightCubit, double>(
-                builder: (context, lineHeight) {
-                  return Row(
-                    children: [
-                      Text('行高', style: TextStyle()),
-                      Expanded(
-                        child: AppSlider(
-                          value: lineHeight,
-                          min: 1.0,
-                          max: 2.0,
-                          divisions: 20,
-                          label: lineHeight.toStringAsFixed(1),
-                          onChanged: (value) async {
-                            await lineHeightCubit.updateLineHeight(value);
-                            await widget.readerCubit.reloadCurrentPage();
-                          },
-                        ),
-                      ),
-                      Text(lineHeight.toStringAsFixed(1), style: TextStyle()),
-                    ],
-                  );
-                },
-              ),
-              // 顶部间距设置
-              BlocBuilder<TopBarHeightCubit, double>(
-                builder: (context, height) {
-                  return Row(
-                    children: [
-                      Text('顶部边距'),
-                      Expanded(
-                        child: AppSlider(
-                          value: height,
-                          min: 0,
-                          max: 100,
-                          divisions: 20,
-                          label: height.round().toString(),
-                          onChanged: (value) async {
-                            await topBarHeightCubit.updateHeight(value);
-                            await widget.readerCubit.reloadCurrentPage();
-                          },
-                        ),
-                      ),
-                      Text('${height.round()}', style: TextStyle()),
-                    ],
-                  );
-                },
-              ),
-              // 底部间距设置
-              BlocBuilder<BottomBarHeightCubit, double>(
-                builder: (context, height) {
-                  return Row(
-                    children: [
-                      Text('底部边距'),
-                      Expanded(
-                        child: AppSlider(
-                          value: height,
-                          min: 0,
-                          max: 100,
-                          divisions: 20,
-                          label: height.round().toString(),
-                          onChanged: (value) async {
-                            await bottomBarHeightCubit.updateHeight(value);
-                            await widget.readerCubit.reloadCurrentPage();
-                          },
-                        ),
-                      ),
-                      Text('${height.round()}', style: TextStyle()),
-                    ],
-                  );
-                },
-              ),
-              // 左边距设置
-              BlocBuilder<LeftPaddingCubit, double>(
-                builder: (context, padding) {
-                  return Row(
-                    children: [
-                      Text('左边距'),
-                      Expanded(
-                        child: AppSlider(
-                          value: padding,
-                          min: 0,
-                          max: 50,
-                          divisions: 25,
-                          label: padding.round().toString(),
-                          onChanged: (value) async {
-                            await leftPaddingCubit.updatePadding(value);
-                            await widget.readerCubit.reloadCurrentPage();
-                          },
-                        ),
-                      ),
-                      Text('${padding.round()}', style: TextStyle()),
-                    ],
-                  );
-                },
-              ),
-              // 右边距设置
-              BlocBuilder<RightPaddingCubit, double>(
-                builder: (context, padding) {
-                  return Row(
-                    children: [
-                      Text('右边距'),
-                      Expanded(
-                        child: AppSlider(
-                          value: padding,
-                          min: 0,
-                          max: 50,
-                          divisions: 25,
-                          label: padding.round().toString(),
-                          onChanged: (value) async {
-                            await rightPaddingCubit.updatePadding(value);
-                            await widget.readerCubit.reloadCurrentPage();
-                          },
-                        ),
-                      ),
-                      Text('${padding.round()}', style: TextStyle()),
-                    ],
-                  );
-                },
-              ),
-              const Divider(),
-              // 主题模式选择
-              Row(
-                children: [
-                  Text('主题模式', style: TextStyle()),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: AppSegmentedButton<ReaderThemeMode>(
-                      segments: const [
-                        ButtonSegment<ReaderThemeMode>(
-                          value: ReaderThemeMode.auto,
-                          label: Text('自动'),
-                          icon: Icon(Icons.brightness_auto),
-                        ),
-                        ButtonSegment<ReaderThemeMode>(
-                          value: ReaderThemeMode.light,
-                          label: Text('浅色'),
-                          icon: Icon(Icons.light_mode),
-                        ),
-                        ButtonSegment<ReaderThemeMode>(
-                          value: ReaderThemeMode.dark,
-                          label: Text('深色'),
-                          icon: Icon(Icons.dark_mode),
-                        ),
-                      ],
-                      selected: {theme.themeMode},
-                      onSelectionChanged: (Set<ReaderThemeMode> modes) async {
-                        await context.read<ThemeCubit>().setThemeMode(
-                          modes.first,
-                        );
-                        await widget.readerCubit.reloadCurrentPage();
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              // 浅色主题颜色设置
-              Row(
-                children: [
-                  Text('浅色主题', style: TextStyle(fontWeight: FontWeight.bold)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: AppButton.outlinedIcon(
-                      icon: Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          color: theme.lightBackgroundColor,
-                          border: Border.all(color: Colors.grey),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      label: const Text('背景颜色'),
-                      onPressed:
-                          () => _showColorPicker(
-                            context,
-                            theme.lightBackgroundColor,
-                            (color) async {
-                              await context
-                                  .read<ThemeCubit>()
-                                  .updateLightBackgroundColor(color);
-                              await widget.readerCubit.reloadCurrentPage();
-                            },
-                          ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: AppButton.outlinedIcon(
-                      icon: Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          color: theme.lightTextColor,
-                          border: Border.all(color: Colors.grey),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      label: const Text('文字颜色'),
-                      onPressed:
-                          () => _showColorPicker(
-                            context,
-                            theme.lightTextColor,
-                            (color) async {
-                              await context
-                                  .read<ThemeCubit>()
-                                  .updateLightTextColor(color);
-                              await widget.readerCubit.reloadCurrentPage();
-                            },
-                          ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              // 深色主题颜色设置
-              Row(
-                children: [
-                  Text('深色主题', style: TextStyle(fontWeight: FontWeight.bold)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: AppButton.outlinedIcon(
-                      icon: Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          color: theme.darkBackgroundColor,
-                          border: Border.all(color: Colors.grey),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      label: const Text('背景颜色'),
-                      onPressed:
-                          () => _showColorPicker(
-                            context,
-                            theme.darkBackgroundColor,
-                            (color) async {
-                              await context
-                                  .read<ThemeCubit>()
-                                  .updateDarkBackgroundColor(color);
-                              await widget.readerCubit.reloadCurrentPage();
-                            },
-                          ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: AppButton.outlinedIcon(
-                      icon: Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          color: theme.darkTextColor,
-                          border: Border.all(color: Colors.grey),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      label: const Text('文字颜色'),
-                      onPressed:
-                          () => _showColorPicker(context, theme.darkTextColor, (
-                            color,
-                          ) async {
-                            await context
-                                .read<ThemeCubit>()
-                                .updateDarkTextColor(color);
-                            await widget.readerCubit.reloadCurrentPage();
-                          }),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              // 背景透明度设置
-              BlocBuilder<ReaderBackgroundCubit, ReaderBackgroundState>(
-                builder: (context, backgroundState) {
-                  return Row(
-                    children: [
-                      Text('背景透明度'),
-                      Expanded(
-                        child: AppSlider(
-                          value: backgroundState.opacity,
-                          min: 0.0,
-                          max: 1.0,
-                          divisions: 25,
-                          label: '${(backgroundState.opacity * 100).round()}%',
-                          onChanged: (value) async {
-                            await readerBackgroundCubit.updateOpacity(value);
-                            await widget.readerCubit.reloadCurrentPage();
-                          },
-                        ),
-                      ),
-                      Text(
-                        '${(backgroundState.opacity * 100).round()}%',
-                        style: TextStyle(),
-                      ),
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 16),
-              // 背景图片设置
-              Row(
-                children: [
-                  Text('背景图片设置', style: TextStyle(fontWeight: FontWeight.bold)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              BlocBuilder<ReaderBackgroundCubit, ReaderBackgroundState>(
-                builder: (context, backgroundState) {
-                  return Column(
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: AppButton.outlinedIcon(
-                              icon: Icon(
-                                backgroundState.lightBackgroundExists
-                                    ? Icons.image
-                                    : Icons.add_photo_alternate,
-                              ),
-                              label: Text(
-                                backgroundState.lightBackgroundExists
-                                    ? '更新浅色背景'
-                                    : '设置浅色背景',
-                              ),
-                              onPressed: () async {
-                                await readerBackgroundCubit
-                                    .updateLightBackground();
-                                await widget.readerCubit.reloadCurrentPage();
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          if (backgroundState.lightBackgroundExists)
-                            AppButton.outlinedIcon(
-                              icon: const Icon(Icons.delete),
-                              label: const Text('删除'),
-                              onPressed: () async {
-                                await readerBackgroundCubit
-                                    .deleteLightBackground();
-                                await widget.readerCubit.reloadCurrentPage();
-                              },
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: AppButton.outlinedIcon(
-                              icon: Icon(
-                                backgroundState.darkBackgroundExists
-                                    ? Icons.image
-                                    : Icons.add_photo_alternate,
-                              ),
-                              label: Text(
-                                backgroundState.darkBackgroundExists
-                                    ? '更新深色背景'
-                                    : '设置深色背景',
-                              ),
-                              onPressed: () async {
-                                await readerBackgroundCubit
-                                    .updateDarkBackground();
-                                await widget.readerCubit.reloadCurrentPage();
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          if (backgroundState.darkBackgroundExists)
-                            AppButton.outlinedIcon(
-                              icon: const Icon(Icons.delete),
-                              label: const Text('删除'),
-                              onPressed: () async {
-                                await readerBackgroundCubit
-                                    .deleteDarkBackground();
-                                await widget.readerCubit.reloadCurrentPage();
-                              },
-                            ),
-                        ],
-                      ),
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 16),
-              // 重置按钮
-              AppButton.text(
-                onPressed: () async {
-                  await context.read<ThemeCubit>().resetToDefault();
-                  await topBarHeightCubit.updateHeight(56);
-                  await bottomBarHeightCubit.updateHeight(56);
-                  await leftPaddingCubit.updatePadding(16);
-                  await rightPaddingCubit.updatePadding(16);
-                  await widget.readerCubit.reloadCurrentPage();
-                },
-                child: const Text('重置为默认'),
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 }
