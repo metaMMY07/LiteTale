@@ -6,6 +6,7 @@
 [![license](https://img.shields.io/github/license/metaMMY07/LiteTale)](LICENSE)
 [![release](https://img.shields.io/badge/release-v1.2.0-blue)](https://github.com/metaMMY07/LiteTale/releases)
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
+[![v1.2.0 build85 downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/v1.2.0-build85/total?label=v1.2.0%20build85%20downloads)](https://github.com/metaMMY07/LiteTale/releases/tag/v1.2.0-build85)
 </div>
 
 ## 最新正式版 LiteTale 1.2.0
