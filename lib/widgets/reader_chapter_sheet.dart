@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/apple_reader_panel.dart';
+import 'package:wild/widgets/reader_draggable_sheet.dart';
 
 /// Directory selection returns a value. Dismissing either platform's sheet
 /// never pops the reader, and chapter loading starts after dismissal completes.
@@ -55,17 +56,15 @@ Future<Chapter?> showReaderChapterSheet(
     elevation: 0,
     constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width),
     builder:
-        (_) => DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: .55,
-          minChildSize: .35,
-          maxChildSize: .94,
+        (_) => ReaderDraggableSheet(
+          handleKey: const ValueKey('reader-chapter-drag-handle'),
           builder:
-              (context, controller) => ReaderChapterPanel(
+              (context, controller, handle) => ReaderChapterPanel(
                 volumes: volumes,
                 currentAid: currentAid,
                 currentCid: currentCid,
                 scrollController: controller,
+                dragHandle: handle,
                 onSelect: (chapter) => Navigator.pop(context, chapter),
               ),
         ),
@@ -80,11 +79,13 @@ class ReaderChapterPanel extends StatefulWidget {
     required this.currentCid,
     required this.scrollController,
     required this.onSelect,
+    this.dragHandle,
   });
   final List<Volume> volumes;
   final String currentAid, currentCid;
   final ScrollController scrollController;
   final ValueChanged<Chapter> onSelect;
+  final Widget? dragHandle;
   @override
   State<ReaderChapterPanel> createState() => _ReaderChapterPanelState();
 }
@@ -135,18 +136,19 @@ class _ReaderChapterPanelState extends State<ReaderChapterPanel> {
           top: false,
           child: Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Container(
-                  key: const ValueKey('reader-chapter-drag-handle'),
-                  width: 36,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: colors.onSurfaceVariant.withValues(alpha: .4),
-                    borderRadius: BorderRadius.circular(8),
+              widget.dragHandle ??
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Container(
+                      key: const ValueKey('reader-chapter-drag-handle'),
+                      width: 36,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: colors.onSurfaceVariant.withValues(alpha: .4),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
                   ),
-                ),
-              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 8, 4),
                 child: Row(

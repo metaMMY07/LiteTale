@@ -22,6 +22,7 @@ import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/apple_reader_panel.dart';
 import 'package:wild/widgets/reader_settings_binding.dart';
+import 'package:wild/widgets/reader_draggable_sheet.dart';
 
 Future<void> showReaderSettingsPanel(
   BuildContext context, {
@@ -59,14 +60,13 @@ Future<void> showReaderSettingsPanel(
       BlocProvider.value(value: context.read<ReaderCurlCubit>()),
       BlocProvider.value(value: context.read<VolumeControlCubit>()),
     ],
-    child: DraggableScrollableSheet(
-      expand: false,
+    child: ReaderDraggableSheet(
+      handleKey: const ValueKey('reader-settings-drag-handle'),
       initialChildSize: MediaQuery.sizeOf(context).height < 500 ? .9 : .55,
-      minChildSize: .35,
-      maxChildSize: .94,
       builder:
-          (context, controller) => ReaderSettingsPanel(
+          (context, controller, handle) => ReaderSettingsPanel(
             scrollController: controller,
+            dragHandle: handle,
             onLayoutChanged: onLayoutChanged,
             localEpub: localEpub,
             autoScroll: autoScroll,
@@ -101,11 +101,13 @@ class ReaderSettingsPanel extends StatelessWidget {
     this.onLayoutChanged,
     this.localEpub = false,
     this.autoScroll,
+    this.dragHandle,
   });
   final ScrollController? scrollController;
   final Future<void> Function()? onLayoutChanged;
   final bool localEpub;
   final AutoScrollConfigCubit? autoScroll;
+  final Widget? dragHandle;
 
   Future<void> _save(BuildContext context, Future<void> Function() action) =>
       settingsAction(context, () async {
@@ -226,17 +228,18 @@ class ReaderSettingsPanel extends StatelessWidget {
             controller: scrollController,
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             children: [
-              Center(
-                child: Container(
-                  key: const ValueKey('reader-settings-drag-handle'),
-                  width: 36,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: colors.onSurface.withValues(alpha: .3),
-                    borderRadius: BorderRadius.circular(8),
+              dragHandle ??
+                  Center(
+                    child: Container(
+                      key: const ValueKey('reader-settings-drag-handle'),
+                      width: 36,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: colors.onSurface.withValues(alpha: .3),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
                   ),
-                ),
-              ),
               const ReaderSettingLabel('排版'),
               ReaderSettingGroup(
                 children: [

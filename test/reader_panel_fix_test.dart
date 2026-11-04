@@ -11,6 +11,7 @@ import 'package:wild/widgets/reader_chapter_sheet.dart';
 import 'package:wild/widgets/reader_settings_binding.dart';
 import 'package:wild/widgets/reader_settings_panel.dart';
 import 'package:wild/theme/material_you.dart';
+import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/sources/book_source.dart';
 import 'reader_controls_test.dart' show providers;
 import 'book_cover_details_test.dart' show info, volumes;
@@ -45,7 +46,22 @@ void main() {
                           if (directory) {
                             showReaderChapterSheet(
                               context,
-                              volumes: volumes,
+                              volumes: [
+                                ...volumes,
+                                Volume(
+                                  id: 'long',
+                                  title: '后续章节',
+                                  chapters: List.generate(
+                                    100,
+                                    (i) => Chapter(
+                                      aid: 'bili:1',
+                                      cid: 'next-$i',
+                                      title: '后续第$i章',
+                                      url: '',
+                                    ),
+                                  ),
+                                ),
+                              ],
                               currentAid: 'bili:1',
                               currentCid: 'two',
                             );
@@ -97,8 +113,17 @@ void main() {
           );
           // The current chapter's highlight is row-local, not a coloured ink
           // feature on the outer modal that can leak into the heading on scroll.
-          final list = find.byType(ListView);
-          await tester.drag(list, const Offset(0, -250));
+          final before = tester.getSize(find.byType(ReaderChapterPanel)).height;
+          await tester.drag(
+            find.byKey(const ValueKey('reader-chapter-drag-handle')),
+            const Offset(0, -180),
+          );
+          await tester.pumpAndSettle();
+          expect(
+            tester.getSize(find.byType(ReaderChapterPanel)).height,
+            greaterThan(before + 100),
+          );
+          await tester.drag(find.byType(ListView), const Offset(0, -250));
           await tester.pumpAndSettle();
         }
         Navigator.of(tester.element(find.byType(BottomSheet))).pop();

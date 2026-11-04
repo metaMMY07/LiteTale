@@ -1,5 +1,7 @@
 # LiteTale 工作约定
 
+- 2026-11-04 拖动条追加：Android90移除外层handle后内部仅装饰条，用户指出目录不能拉起。`ReaderDraggableSheet` 持有同一DraggableScrollableController，横条28dp触摸区直接jumpTo调整size，内容仍用SDK滚动控制器；不能只把handle放进ListView，因为当前章offset>0时上拉会先滚列表。目录/设置共用，保留单handle与行内Ink裁剪。长目录中从handle上拉测试通过，最终Android内部91；iOS原生颜色源码沿用4dcf快照，构建身份须分别记录。
+
 - 2026-11-04 v1.2.2 面板颜色修复：先读 `docs/READER_PANEL_APPEARANCE_FIX_2026-11-04.md`。iOS 整张原生 Form 保留；UIKit sheet/hosting 与 SwiftUI colorScheme 使用同一配置，分组背景按指定深浅色 traits 解析，隐藏 Form 隐式滚动背景，避免白底白字。原生设置回复需同步外观，不能只更新文字。Android 阅读目录/设置自己已有拖动条，showModalBottomSheet 必须显式 showDragHandle:false，避免继承全局第二条。目录选中背景/Ink 由行内裁剪 Material 承载，不能画到外层 sheet；滚动边界不画有色 overscroll。原阅读/音量/封面/书源及底栏不变，版本仍1.2.2、Android内部90。验证与交付边界见文档。
 
 - 2026-11-03 v1.2.2：先读 `docs/READER_MENU_FIX_1.2.2.md`。用户要求尽快封装交其验证，Android89；详情收藏56×56居中，书评仅图标放右上角与下载并列。iOS阅读设置整张SwiftUI Form/系统sheet，不能恢复多UISlider平台视图+Flutter长列表的混合裁剪方案（实际出现中间标签丢失）。Flutter模态代理暂停底层手势/音量，session隔离关闭/返回；目录选择等关闭完成后才加载，Android目录使用sheet传入的同一个ScrollController。SwiftUI表单保留LiteTale自己的选项、系统色和原生玻璃滑杆；我的/显示内阅读设置亦复用。原翻页/音量策略、封面和主毛玻璃底栏不重做。REA参考与模拟器/实体边界见文档。
