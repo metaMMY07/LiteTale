@@ -84,6 +84,8 @@ Future<void> showReaderSettingsPanel(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      showDragHandle: false,
+      elevation: 0,
       useSafeArea: true,
       constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width),
       builder: (_) => panel,
@@ -226,6 +228,7 @@ class ReaderSettingsPanel extends StatelessWidget {
             children: [
               Center(
                 child: Container(
+                  key: const ValueKey('reader-settings-drag-handle'),
                   width: 36,
                   height: 5,
                   decoration: BoxDecoration(

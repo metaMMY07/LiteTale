@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -11,6 +13,29 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../test/reader_controls_test.dart' show providers;
 import '../test/book_cover_details_test.dart' show volumes;
 
+Future<double> panelBrightness(List<int> png) async {
+  final codec = await ui.instantiateImageCodec(Uint8List.fromList(png));
+  final image = (await codec.getNextFrame()).image;
+  final data = (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+  var total = 0.0, count = 0;
+  // Sample inside the native medium sheet, avoiding its rounded edges and the
+  // home indicator. This catches a white Form underneath correct white labels.
+  for (var y = (image.height * .72).round(); y < image.height * .94; y += 8) {
+    for (var x = (image.width * .1).round(); x < image.width * .9; x += 8) {
+      final offset = (y * image.width + x) * 4;
+      total +=
+          (data.getUint8(offset) +
+              data.getUint8(offset + 1) +
+              data.getUint8(offset + 2)) /
+          (3 * 255);
+      count++;
+    }
+  }
+  image.dispose();
+  codec.dispose();
+  return total / count;
+}
+
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
@@ -22,38 +47,44 @@ void main() {
       expect(await AppleReaderPanel.available, true);
       late BuildContext reader;
       var selected = '';
+      final brightness = ValueNotifier(Brightness.dark);
+      addTearDown(brightness.dispose);
       await tester.pumpWidget(
         providers(
-          MaterialApp(
-            theme: iosGlassTheme(Brightness.dark),
-            home: Scaffold(
-              body: Builder(
-                builder: (context) {
-                  reader = context;
-                  return Column(
-                    children: [
-                      const Text('当前阅读页'),
-                      TextButton(
-                        onPressed: () => showReaderSettingsPanel(context),
-                        child: const Text('打开设置'),
-                      ),
-                      TextButton(
-                        onPressed: () async {
-                          final chapter = await showReaderChapterSheet(
-                            context,
-                            volumes: volumes,
-                            currentAid: 'bili:1',
-                            currentCid: 'two',
-                          );
-                          selected = chapter?.cid ?? '';
-                        },
-                        child: const Text('打开目录'),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ),
+          ValueListenableBuilder<Brightness>(
+            valueListenable: brightness,
+            builder:
+                (context, mode, _) => MaterialApp(
+                  theme: iosGlassTheme(mode),
+                  home: Scaffold(
+                    body: Builder(
+                      builder: (context) {
+                        reader = context;
+                        return Column(
+                          children: [
+                            const Text('当前阅读页'),
+                            TextButton(
+                              onPressed: () => showReaderSettingsPanel(context),
+                              child: const Text('打开设置'),
+                            ),
+                            TextButton(
+                              onPressed: () async {
+                                final chapter = await showReaderChapterSheet(
+                                  context,
+                                  volumes: volumes,
+                                  currentAid: 'bili:1',
+                                  currentCid: 'two',
+                                );
+                                selected = chapter?.cid ?? '';
+                              },
+                              child: const Text('打开目录'),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ),
           ),
         ),
       );
@@ -64,11 +95,21 @@ void main() {
       final data = await AppleReaderPanel.channel
           .invokeMapMethod<String, Object?>('testInspect');
       expect(data!['nativeForm'], true);
+      expect(data['appearance'], {
+        'dark': true,
+        'controllerStyle': 2,
+        'hostingStyle': 2,
+      });
       expect(
         data['titles'],
         containsAll(['字号', '行高', '段间距', '左侧留白', '右侧留白', '上边距', '下边距', '音量键翻页']),
       );
-      await binding.takeScreenshot('native-reader-settings-medium');
+      expect(
+        await panelBrightness(
+          await binding.takeScreenshot('native-reader-settings-medium'),
+        ),
+        lessThan(.35),
+      );
       await AppleReaderPanel.channel.invokeMethod<void>('testInspect', {
         'expand': true,
       });
@@ -114,6 +155,28 @@ void main() {
       await Future<void>.delayed(const Duration(seconds: 1));
       expect(ModalRoute.of(reader)!.isCurrent, true);
       expect(tester.takeException(), null);
+
+      brightness.value = Brightness.light;
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('打开设置'));
+      await tester.pumpAndSettle();
+      await Future<void>.delayed(const Duration(seconds: 1));
+      final light = await AppleReaderPanel.channel
+          .invokeMapMethod<String, Object?>('testInspect');
+      expect(light!['appearance'], {
+        'dark': false,
+        'controllerStyle': 1,
+        'hostingStyle': 1,
+      });
+      expect(
+        await panelBrightness(
+          await binding.takeScreenshot('native-reader-settings-light'),
+        ),
+        greaterThan(.7),
+      );
+      await AppleReaderPanel.channel.invokeMethod<void>('testClose');
+      await Future<void>.delayed(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );

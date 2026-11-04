@@ -9,6 +9,8 @@ import 'package:wild/widgets/apple_reader_panel.dart';
 import 'package:wild/widgets/book_details_view.dart';
 import 'package:wild/widgets/reader_chapter_sheet.dart';
 import 'package:wild/widgets/reader_settings_binding.dart';
+import 'package:wild/widgets/reader_settings_panel.dart';
+import 'package:wild/theme/material_you.dart';
 import 'package:wild/sources/book_source.dart';
 import 'reader_controls_test.dart' show providers;
 import 'book_cover_details_test.dart' show info, volumes;
@@ -25,6 +27,89 @@ class _Size extends FontSizeCubit {
 }
 
 void main() {
+  for (final directory in [true, false]) {
+    testWidgets(
+      'Android ${directory ? 'directory' : 'settings'} has only one drag handle',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        await tester.pumpWidget(
+          providers(
+            MaterialApp(
+              theme: materialYouTheme(Brightness.dark),
+              home: Scaffold(
+                body: Builder(
+                  builder:
+                      (context) => TextButton(
+                        onPressed: () {
+                          if (directory) {
+                            showReaderChapterSheet(
+                              context,
+                              volumes: volumes,
+                              currentAid: 'bili:1',
+                              currentCid: 'two',
+                            );
+                          } else {
+                            showReaderSettingsPanel(context);
+                          }
+                        },
+                        child: const Text('open'),
+                      ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+        // The Material You theme enables its own handle. These draggable panels
+        // already draw one, so the route must not add another outside the panel.
+        expect(
+          tester.widget<BottomSheet>(find.byType(BottomSheet)).showDragHandle,
+          false,
+        );
+        expect(
+          find.byKey(
+            ValueKey(
+              directory
+                  ? 'reader-chapter-drag-handle'
+                  : 'reader-settings-drag-handle',
+            ),
+          ),
+          findsOneWidget,
+        );
+        if (directory) {
+          expect(find.byType(StretchingOverscrollIndicator), findsNothing);
+          final tile = find.widgetWithText(ListTile, '第二章');
+          final material = tester.widget<Material>(
+            find.ancestor(of: tile, matching: find.byType(Material)).first,
+          );
+          expect(material.clipBehavior, isNot(Clip.none));
+          expect(
+            tester
+                .getRect(
+                  find
+                      .ancestor(of: tile, matching: find.byType(Material))
+                      .first,
+                )
+                .height,
+            lessThan(80),
+          );
+          // The current chapter's highlight is row-local, not a coloured ink
+          // feature on the outer modal that can leak into the heading on scroll.
+          final list = find.byType(ListView);
+          await tester.drag(list, const Offset(0, -250));
+          await tester.pumpAndSettle();
+        }
+        Navigator.of(tester.element(find.byType(BottomSheet))).pop();
+        await tester.pumpAndSettle();
+        expect(find.text('open'), findsOneWidget);
+        expect(tester.takeException(), null);
+        debugDefaultTargetPlatformOverride = null;
+      },
+    );
+  }
+
   testWidgets('every native setting has its own label and validated identity', (
     tester,
   ) async {

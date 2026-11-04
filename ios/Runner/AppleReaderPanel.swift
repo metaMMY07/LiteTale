@@ -44,7 +44,8 @@ final class AppleReaderPanelChannel: NSObject {
             scroll.setContentOffset(CGPoint(x: 0, y: maxY * CGFloat(min(1, max(0, fraction)))), animated: false)
           }
           result(["titles": form.model.sections.flatMap { $0.rows.map { $0.title } },
-            "scrollHeight": scroll?.contentSize.height ?? 0, "nativeForm": true])
+            "scrollHeight": scroll?.contentSize.height ?? 0, "nativeForm": true,
+            "appearance": form.appearanceSnapshot])
         } else if call.method == "testCommit", let id = input["id"] as? String,
                   let value = input["value"],
                   let row = form.model.sections.flatMap({ $0.rows }).first(where: { $0.id == id }) {
@@ -150,7 +151,6 @@ private final class AppleReaderSettingsHost: NSObject, FlutterPlatformView {
         result(FlutterMethodNotImplemented); return
       }
       controller.model.apply(configuration)
-      controller.overrideUserInterfaceStyle = controller.model.dark ? .dark : .light
       result(nil)
     }
   }
@@ -200,8 +200,16 @@ private final class ReaderFormModel: ObservableObject {
   @Published var sections: [ReaderFormSection] = []
   @Published var pending = Set<String>()
   var accent = UIColor.systemBlue
-  var dark = false
+  @Published var dark = false
   var title = "阅读设置"
+  var appearanceChanged: (() -> Void)?
+  var interfaceStyle: UIUserInterfaceStyle { dark ? .dark : .light }
+  var background: UIColor {
+    UIColor.systemGroupedBackground.resolvedColor(with: UITraitCollection(userInterfaceStyle: interfaceStyle))
+  }
+  var rowBackground: UIColor {
+    UIColor.secondarySystemGroupedBackground.resolvedColor(with: UITraitCollection(userInterfaceStyle: interfaceStyle))
+  }
   var sendChange: (([String: Any], @escaping FlutterResult) -> Void)?
   var chooseColor: ((ReaderFormRow) -> Void)?
   var choosePhoto: ((ReaderFormRow) -> Void)?
@@ -216,6 +224,7 @@ private final class ReaderFormModel: ObservableObject {
       ReaderFormSection(id: index, title: section["title"] as? String ?? "",
         rows: (section["rows"] as? [[String: Any]] ?? []).map { ReaderFormRow(data: $0) })
     }
+    appearanceChanged?()
   }
 
   func commit(_ row: ReaderFormRow, _ value: Any) {
@@ -246,10 +255,13 @@ private struct ReaderNativeForm: View {
             Section(header: Text(section.title)) {
               ForEach(section.rows) { row in
                 ReaderNativeRow(model: model, row: row, width: geometry.size.width).id(row.id)
+                  .listRowBackground(Color(model.rowBackground))
               }
             }
           }
         }
+        .modifier(ReaderFormScrollBackground())
+        .background(Color(model.background))
         .tint(Color(model.accent))
         .onAppear {
           if let selected = model.sections.flatMap({ $0.rows }).first(where: { $0.kind == "chapter" && $0.boolean }) {
@@ -258,6 +270,18 @@ private struct ReaderNativeForm: View {
         }
       }
     }
+    // UIKit's presenting window can have the opposite appearance from the app.
+    // Give SwiftUI's labels AND list surfaces the same explicit environment.
+    .environment(\.colorScheme, model.dark ? .dark : .light)
+    .preferredColorScheme(model.dark ? .dark : .light)
+  }
+}
+
+@available(iOS 15.0, *)
+private struct ReaderFormScrollBackground: ViewModifier {
+  @ViewBuilder func body(content: Content) -> some View {
+    if #available(iOS 16.0, *) { content.scrollContentBackground(.hidden) }
+    else { content }
   }
 }
 
@@ -367,6 +391,7 @@ private final class AppleReaderFormController: UIViewController, UIAdaptivePrese
     super.init(nibName: nil, bundle: nil)
     model.apply(configuration)
     overrideUserInterfaceStyle = model.dark ? .dark : .light
+    model.appearanceChanged = { [weak self] in self?.updateAppearance() }
     model.chooseColor = { [weak self] row in self?.pickColor(row) }
     model.choosePhoto = { [weak self] row in self?.pickPhoto(row) }
     model.selectChapter = { [weak self] id in self?.onClose?(["id": id]) }
@@ -379,12 +404,12 @@ private final class AppleReaderFormController: UIViewController, UIAdaptivePrese
   required init?(coder: NSCoder) { fatalError("Use reader configuration") }
   override func viewDidLoad() {
     super.viewDidLoad()
-    view.backgroundColor = .systemGroupedBackground
     title = model.title
     if navigationController != nil {
       navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in self?.onClose?(nil) })
     }
     let content = UIHostingController(rootView: ReaderNativeForm(model: model))
+    content.overrideUserInterfaceStyle = model.interfaceStyle
     content.view.backgroundColor = .clear
     addChild(content); view.addSubview(content.view)
     content.view.translatesAutoresizingMaskIntoConstraints = false
@@ -393,7 +418,25 @@ private final class AppleReaderFormController: UIViewController, UIAdaptivePrese
       content.view.topAnchor.constraint(equalTo: view.topAnchor), content.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
     ])
     content.didMove(toParent: self); hosting = content
+    updateAppearance()
   }
+  private func updateAppearance() {
+    // Resolve the root surface with the sheet's traits, never the light host
+    // window's traits. Reapply after a preference reply changes appearance.
+    overrideUserInterfaceStyle = model.interfaceStyle
+    hosting?.overrideUserInterfaceStyle = model.interfaceStyle
+    viewIfLoaded?.backgroundColor = model.background
+    viewIfLoaded?.tintColor = model.accent
+    navigationController?.overrideUserInterfaceStyle = model.interfaceStyle
+    navigationController?.viewIfLoaded?.backgroundColor = model.background
+    navigationController?.viewIfLoaded?.tintColor = model.accent
+  }
+  #if targetEnvironment(simulator)
+  var appearanceSnapshot: [String: Any] {
+    ["dark": model.dark, "controllerStyle": traitCollection.userInterfaceStyle.rawValue,
+      "hostingStyle": hosting?.traitCollection.userInterfaceStyle.rawValue ?? 0]
+  }
+  #endif
   func presentationControllerDidDismiss(_ presentationController: UIPresentationController) { onInteractiveDismiss?() }
   private func pickColor(_ row: ReaderFormRow) {
     colorRow = row

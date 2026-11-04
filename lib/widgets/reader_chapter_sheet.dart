@@ -50,6 +50,9 @@ Future<Chapter?> showReaderChapterSheet(
     isScrollControlled: true,
     useSafeArea: true,
     backgroundColor: Colors.transparent,
+    // The draggable content owns the one handle; the theme also enables one.
+    showDragHandle: false,
+    elevation: 0,
     constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width),
     builder:
         (_) => DraggableScrollableSheet(
@@ -135,6 +138,7 @@ class _ReaderChapterPanelState extends State<ReaderChapterPanel> {
               Padding(
                 padding: const EdgeInsets.only(top: 10),
                 child: Container(
+                  key: const ValueKey('reader-chapter-drag-handle'),
                   width: 36,
                   height: 5,
                   decoration: BoxDecoration(
@@ -162,44 +166,66 @@ class _ReaderChapterPanelState extends State<ReaderChapterPanel> {
                 ),
               ),
               Expanded(
-                child: ListView.builder(
-                  controller: widget.scrollController,
-                  itemExtent: extent,
-                  itemCount: _rows.length,
-                  itemBuilder: (context, index) {
-                    final row = _rows[index];
-                    if (row is String) {
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(
+                    context,
+                  ).copyWith(overscroll: false),
+                  child: ListView.builder(
+                    controller: widget.scrollController,
+                    itemExtent: extent,
+                    itemCount: _rows.length,
+                    itemBuilder: (context, index) {
+                      final row = _rows[index];
+                      if (row is String) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              row,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                          ),
+                        );
+                      }
+                      final chapter = row as Chapter;
+                      final selected =
+                          chapter.aid == widget.currentAid &&
+                          chapter.cid == widget.currentCid;
+                      // Ink must move and clip with this row. Painting on the
+                      // outer sheet's Material leaks selection colour on scroll.
                       return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            row,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.titleSmall,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        child: Material(
+                          color:
+                              selected
+                                  ? colors.secondaryContainer
+                                  : Colors.transparent,
+                          borderRadius: BorderRadius.circular(12),
+                          clipBehavior: Clip.antiAlias,
+                          child: ListTile(
+                            key: ValueKey('reader-chapter-$index'),
+                            title: Text(
+                              chapter.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            selected: selected,
+                            selectedColor: colors.onSecondaryContainer,
+                            tileColor: Colors.transparent,
+                            selectedTileColor: Colors.transparent,
+                            trailing: selected ? const Icon(Icons.check) : null,
+                            onTap: () => widget.onSelect(chapter),
                           ),
                         ),
                       );
-                    }
-                    final chapter = row as Chapter;
-                    final selected =
-                        chapter.aid == widget.currentAid &&
-                        chapter.cid == widget.currentCid;
-                    return ListTile(
-                      key: ValueKey('reader-chapter-$index'),
-                      title: Text(
-                        chapter.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      selected: selected,
-                      selectedColor: colors.onSecondaryContainer,
-                      selectedTileColor: colors.secondaryContainer,
-                      trailing: selected ? const Icon(Icons.check) : null,
-                      onTap: () => widget.onSelect(chapter),
-                    );
-                  },
+                    },
+                  ),
                 ),
               ),
             ],
