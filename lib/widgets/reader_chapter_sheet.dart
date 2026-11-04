@@ -58,6 +58,7 @@ Future<Chapter?> showReaderChapterSheet(
     builder:
         (_) => ReaderDraggableSheet(
           handleKey: const ValueKey('reader-chapter-drag-handle'),
+          snapToPages: Theme.of(context).platform == TargetPlatform.android,
           builder:
               (context, controller, handle) => ReaderChapterPanel(
                 volumes: volumes,

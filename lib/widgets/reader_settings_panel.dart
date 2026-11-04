@@ -62,6 +62,7 @@ Future<void> showReaderSettingsPanel(
     ],
     child: ReaderDraggableSheet(
       handleKey: const ValueKey('reader-settings-drag-handle'),
+      snapToPages: Theme.of(context).platform == TargetPlatform.android,
       initialChildSize: MediaQuery.sizeOf(context).height < 500 ? .9 : .55,
       builder:
           (context, controller, handle) => ReaderSettingsPanel(

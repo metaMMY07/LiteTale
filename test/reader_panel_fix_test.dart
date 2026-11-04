@@ -113,21 +113,42 @@ void main() {
           );
           // The current chapter's highlight is row-local, not a coloured ink
           // feature on the outer modal that can leak into the heading on scroll.
-          final before = tester.getSize(find.byType(ReaderChapterPanel)).height;
-          await tester.drag(
-            find.byKey(const ValueKey('reader-chapter-drag-handle')),
-            const Offset(0, -180),
-          );
-          await tester.pumpAndSettle();
-          expect(
-            tester.getSize(find.byType(ReaderChapterPanel)).height,
-            greaterThan(before + 100),
-          );
-          await tester.drag(find.byType(ListView), const Offset(0, -250));
-          await tester.pumpAndSettle();
         }
-        Navigator.of(tester.element(find.byType(BottomSheet))).pop();
+        final panel = find.byType(
+          directory ? ReaderChapterPanel : ReaderSettingsPanel,
+        );
+        final handle = find.byKey(
+          ValueKey(
+            directory
+                ? 'reader-chapter-drag-handle'
+                : 'reader-settings-drag-handle',
+          ),
+        );
+        final halfHeight = tester.getSize(panel).height;
+        final listController =
+            tester.widget<ListView>(find.byType(ListView)).controller!;
+        final chapterOffset = listController.offset;
+        // A light, short flick must finish expanding by itself; moving just
+        // 40px should not leave the panel just 40px taller than half screen.
+        await tester.fling(handle, const Offset(0, -40), 400);
         await tester.pumpAndSettle();
+        expect(tester.getSize(panel).height, closeTo(halfHeight * 2, 1));
+        expect(listController.offset, closeTo(chapterOffset, .01));
+        await tester.fling(handle, const Offset(0, 40), 400);
+        await tester.pumpAndSettle();
+        expect(tester.getSize(panel).height, closeTo(halfHeight, 1));
+        // A second gesture can reverse an unfinished snap instead of waiting
+        // until the full-screen animation ends.
+        await tester.fling(handle, const Offset(0, -40), 400);
+        await tester.pump(const Duration(milliseconds: 60));
+        expect(tester.getSize(panel).height, greaterThan(halfHeight));
+        await tester.fling(handle, const Offset(0, 40), 400);
+        await tester.pumpAndSettle();
+        expect(tester.getSize(panel).height, closeTo(halfHeight, 1));
+        // Swiping down from half closes only this modal, leaving the reader.
+        await tester.fling(handle, const Offset(0, 40), 400);
+        await tester.pumpAndSettle();
+        expect(find.byType(BottomSheet), findsNothing);
         expect(find.text('open'), findsOneWidget);
         expect(tester.takeException(), null);
         debugDefaultTargetPlatformOverride = null;

@@ -1,5 +1,7 @@
 # LiteTale 工作约定
 
+- 2026-11-04 Android 面板吸附：用户确认 iOS 已好，这次只改 Android。阅读目录/设置 `ReaderDraggableSheet.snapToPages` 仅 Android 开启，初始0.5、全屏1.0；横条轻扫后按方向自动到下一档，半屏下扫关闭，全屏下扫回半屏，250ms drawer curve，可中途重新接管；减少动态效果直达。列表使用SDK snap，横条程序jumpTo本身不触发SDK snap，必须在松手单独settle。iOS原生和旧fallback行为保持。18相关Widget检查（含40px短扫、反向接管、选章offset不变、关闭返回）与4目标分析通过；版本仍1.2.2，Android内部92，只封APK，不触发iOS构建。见 `docs/ANDROID_READER_SHEET_SNAP_2026-11-04.md`。
+
 - 2026-11-04 拖动条追加：Android90移除外层handle后内部仅装饰条，用户指出目录不能拉起。`ReaderDraggableSheet` 持有同一DraggableScrollableController，横条28dp触摸区直接jumpTo调整size，内容仍用SDK滚动控制器；不能只把handle放进ListView，因为当前章offset>0时上拉会先滚列表。目录/设置共用，保留单handle与行内Ink裁剪。长目录中从handle上拉测试通过，最终Android内部91；iOS原生颜色源码沿用4dcf快照，构建身份须分别记录。
 
 - 2026-11-04 v1.2.2 面板颜色修复：先读 `docs/READER_PANEL_APPEARANCE_FIX_2026-11-04.md`。iOS 整张原生 Form 保留；UIKit sheet/hosting 与 SwiftUI colorScheme 使用同一配置，分组背景按指定深浅色 traits 解析，隐藏 Form 隐式滚动背景，避免白底白字。原生设置回复需同步外观，不能只更新文字。Android 阅读目录/设置自己已有拖动条，showModalBottomSheet 必须显式 showDragHandle:false，避免继承全局第二条。目录选中背景/Ink 由行内裁剪 Material 承载，不能画到外层 sheet；滚动边界不画有色 overscroll。原阅读/音量/封面/书源及底栏不变，版本仍1.2.2、Android内部90。验证与交付边界见文档。

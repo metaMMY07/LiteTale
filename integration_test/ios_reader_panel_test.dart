@@ -60,26 +60,29 @@ void main() {
                     body: Builder(
                       builder: (context) {
                         reader = context;
-                        return Column(
-                          children: [
-                            const Text('当前阅读页'),
-                            TextButton(
-                              onPressed: () => showReaderSettingsPanel(context),
-                              child: const Text('打开设置'),
-                            ),
-                            TextButton(
-                              onPressed: () async {
-                                final chapter = await showReaderChapterSheet(
-                                  context,
-                                  volumes: volumes,
-                                  currentAid: 'bili:1',
-                                  currentCid: 'two',
-                                );
-                                selected = chapter?.cid ?? '';
-                              },
-                              child: const Text('打开目录'),
-                            ),
-                          ],
+                        return SafeArea(
+                          child: Column(
+                            children: [
+                              const Text('当前阅读页'),
+                              TextButton(
+                                onPressed:
+                                    () => showReaderSettingsPanel(context),
+                                child: const Text('打开设置'),
+                              ),
+                              TextButton(
+                                onPressed: () async {
+                                  final chapter = await showReaderChapterSheet(
+                                    context,
+                                    volumes: volumes,
+                                    currentAid: 'bili:1',
+                                    currentCid: 'two',
+                                  );
+                                  selected = chapter?.cid ?? '';
+                                },
+                                child: const Text('打开目录'),
+                              ),
+                            ],
+                          ),
                         );
                       },
                     ),
