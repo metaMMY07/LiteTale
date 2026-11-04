@@ -26,15 +26,19 @@ class ReaderDraggableSheet extends StatefulWidget {
 
 class _ReaderDraggableSheetState extends State<ReaderDraggableSheet> {
   final _controller = DraggableScrollableController();
-  static const _min = .35, _half = .5;
+  static const _half = .5;
   static const _snapDuration = Duration(milliseconds: 250);
   static const _drawerCurve = Cubic(.32, .72, 0, 1);
   double _handleStartSize = _half;
   double _handleDistance = 0;
+  double _edgeDrag = 0;
+  bool _dismissing = false;
+  double get _min => widget.snapToPages ? _half : .35;
   double get _max => widget.snapToPages ? 1 : .94;
 
   void _settle(double target) {
-    if (!mounted ||
+    if (_dismissing ||
+        !mounted ||
         !_controller.isAttached ||
         ModalRoute.of(context)?.isCurrent == false) {
       return;
@@ -54,6 +58,40 @@ class _ReaderDraggableSheetState extends State<ReaderDraggableSheet> {
     }
   }
 
+  void _dismiss() {
+    if (_dismissing || !mounted || ModalRoute.of(context)?.isCurrent == false) {
+      return;
+    }
+    _dismissing = true;
+    // Keep the extent at half. The route owns this one closing animation,
+    // rather than shrinking to a smaller extent and then sliding that away.
+    Navigator.of(context).pop();
+  }
+
+  bool _onScroll(ScrollNotification notification) {
+    if (!widget.snapToPages ||
+        _dismissing ||
+        !_controller.isAttached ||
+        notification.depth != 0 ||
+        notification.metrics.axis != Axis.vertical) {
+      return false;
+    }
+    if (notification is ScrollStartNotification ||
+        notification is ScrollEndNotification) {
+      _edgeDrag = 0;
+    } else if (notification is OverscrollNotification &&
+        notification.dragDetails != null &&
+        notification.overscroll < 0 &&
+        _controller.size <= _half + precisionErrorTolerance) {
+      _edgeDrag -= notification.overscroll;
+      if (_edgeDrag >= kTouchSlop) _dismiss();
+    } else if (notification is ScrollUpdateNotification &&
+        notification.dragDetails != null) {
+      _edgeDrag = 0;
+    }
+    return false;
+  }
+
   void _finishHandleDrag(DragEndDetails details) {
     if (!widget.snapToPages || !_controller.isAttached) return;
     final velocity = details.primaryVelocity ?? 0;
@@ -62,9 +100,11 @@ class _ReaderDraggableSheetState extends State<ReaderDraggableSheet> {
     if (direction > 0) {
       _settle(_max);
     } else if (direction < 0) {
-      _settle(
-        _handleStartSize > _half + precisionErrorTolerance ? _half : _min,
-      );
+      if (_handleStartSize > _half + precisionErrorTolerance) {
+        _settle(_half);
+      } else {
+        _dismiss();
+      }
     } else {
       _settle(_controller.size > (_half + _max) / 2 ? _max : _half);
     }
@@ -86,6 +126,7 @@ class _ReaderDraggableSheetState extends State<ReaderDraggableSheet> {
               widget.snapToPages ? _half : widget.initialChildSize,
           minChildSize: _min,
           maxChildSize: _max,
+          shouldCloseOnMinExtent: !widget.snapToPages,
           snap: widget.snapToPages,
           snapSizes: widget.snapToPages ? const [_half] : null,
           snapAnimationDuration:
@@ -95,60 +136,74 @@ class _ReaderDraggableSheetState extends State<ReaderDraggableSheet> {
                       : _snapDuration)
                   : null,
           builder:
-              (context, scrollController) => widget.builder(
-                context,
-                scrollController,
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onVerticalDragStart: (_) {
-                    if (_controller.isAttached) {
-                      _handleStartSize = _controller.size;
-                      _handleDistance = 0;
-                      _controller.jumpTo(_controller.size);
-                    }
-                  },
-                  onVerticalDragUpdate: (details) {
-                    final height = constraints.maxHeight;
-                    if (!_controller.isAttached ||
-                        !height.isFinite ||
-                        height <= 0) {
-                      return;
-                    }
-                    _handleDistance += details.delta.dy;
-                    _controller.jumpTo(
-                      (_controller.size - details.delta.dy / height).clamp(
-                        _min,
-                        _max,
-                      ),
-                    );
-                  },
-                  onVerticalDragEnd: _finishHandleDrag,
-                  onVerticalDragCancel: () {
-                    if (widget.snapToPages && _controller.isAttached) {
-                      _settle(
-                        _controller.size > (_half + _max) / 2 ? _max : _half,
-                      );
-                    }
-                  },
-                  child: SizedBox(
-                    width: double.infinity,
-                    height: 28,
-                    child: Center(
-                      child: Container(
-                        key: widget.handleKey,
-                        width: 36,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.onSurfaceVariant.withValues(alpha: .4),
-                          borderRadius: BorderRadius.circular(8),
+              (context, scrollController) =>
+                  NotificationListener<ScrollNotification>(
+                    onNotification: _onScroll,
+                    child: widget.builder(
+                      context,
+                      scrollController,
+                      GestureDetector(
+                        key: const ValueKey('reader-sheet-handle-region'),
+                        behavior: HitTestBehavior.opaque,
+                        onVerticalDragStart: (_) {
+                          if (_controller.isAttached) {
+                            _handleStartSize = _controller.size;
+                            _handleDistance = 0;
+                            _controller.jumpTo(_controller.size);
+                          }
+                        },
+                        onVerticalDragUpdate: (details) {
+                          final height = constraints.maxHeight;
+                          if (!_controller.isAttached ||
+                              !height.isFinite ||
+                              height <= 0) {
+                            return;
+                          }
+                          _handleDistance += details.delta.dy;
+                          _controller.jumpTo(
+                            (_controller.size - details.delta.dy / height)
+                                .clamp(_min, _max),
+                          );
+                        },
+                        onVerticalDragEnd: _finishHandleDrag,
+                        onVerticalDragCancel: () {
+                          if (widget.snapToPages && _controller.isAttached) {
+                            _settle(
+                              _controller.size > (_half + _max) / 2
+                                  ? _max
+                                  : _half,
+                            );
+                          }
+                        },
+                        child: ColoredBox(
+                          color:
+                              widget.snapToPages
+                                  ? Theme.of(
+                                    context,
+                                  ).colorScheme.surfaceContainerHigh
+                                  : Colors.transparent,
+                          child: SizedBox(
+                            width: double.infinity,
+                            height: widget.snapToPages ? 48 : 28,
+                            child: Center(
+                              child: Container(
+                                key: widget.handleKey,
+                                width: 36,
+                                height: 5,
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant
+                                      .withValues(alpha: .4),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ),
         ),
   );
 }

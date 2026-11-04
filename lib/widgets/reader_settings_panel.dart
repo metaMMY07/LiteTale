@@ -86,6 +86,7 @@ Future<void> showReaderSettingsPanel(
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       showDragHandle: false,
+      enableDrag: Theme.of(context).platform != TargetPlatform.android,
       elevation: 0,
       useSafeArea: true,
       constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width),
@@ -225,310 +226,345 @@ class ReaderSettingsPanel extends StatelessWidget {
         color: background,
         child: SafeArea(
           top: false,
-          child: ListView(
-            controller: scrollController,
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-            children: [
-              dragHandle ??
-                  Center(
-                    child: Container(
-                      key: const ValueKey('reader-settings-drag-handle'),
-                      width: 36,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: colors.onSurface.withValues(alpha: .3),
-                        borderRadius: BorderRadius.circular(8),
+          child: _ReaderSettingsViewport(
+            pinnedHandle:
+                Theme.of(context).platform == TargetPlatform.android
+                    ? dragHandle
+                    : null,
+            child: ListView(
+              controller: scrollController,
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              children: [
+                if (Theme.of(context).platform != TargetPlatform.android ||
+                    dragHandle == null)
+                  dragHandle ??
+                      Center(
+                        child: Container(
+                          key: const ValueKey('reader-settings-drag-handle'),
+                          width: 36,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: colors.onSurface.withValues(alpha: .3),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
                       ),
+                const ReaderSettingLabel('排版'),
+                ReaderSettingGroup(
+                  children: [
+                    slider(
+                      'reader-font-size',
+                      Icons.text_fields,
+                      '字号',
+                      '小说正文的文字大小',
+                      size.state,
+                      10,
+                      40,
+                      size.updateFontSize,
                     ),
-                  ),
-              const ReaderSettingLabel('排版'),
-              ReaderSettingGroup(
-                children: [
-                  slider(
-                    'reader-font-size',
-                    Icons.text_fields,
-                    '字号',
-                    '小说正文的文字大小',
-                    size.state,
-                    10,
-                    40,
-                    size.updateFontSize,
-                  ),
-                  slider(
-                    'reader-line-height',
-                    Icons.format_line_spacing,
-                    '行高',
-                    '段落中的行间距',
-                    line.state,
-                    1,
-                    2.5,
-                    line.updateLineHeight,
-                    decimals: 1,
-                    unit: '倍',
-                  ),
-                  slider(
-                    'reader-paragraph-spacing',
-                    Icons.space_bar,
-                    '段间距',
-                    '相邻段落之间的额外留白',
-                    spacing.state,
-                    0,
-                    60,
-                    spacing.updateSpacing,
-                  ),
-                  slider(
-                    'reader-left-padding',
-                    Icons.format_indent_increase,
-                    '左侧留白',
-                    '阅读内容左侧的页边距',
-                    left.state,
-                    0,
-                    80,
-                    left.updatePadding,
-                  ),
-                  slider(
-                    'reader-right-padding',
-                    Icons.format_indent_decrease,
-                    '右侧留白',
-                    '阅读内容右侧的页边距',
-                    right.state,
-                    0,
-                    80,
-                    right.updatePadding,
-                  ),
-                  slider(
-                    'reader-top-padding',
-                    Icons.vertical_align_top,
-                    '上边距',
-                    '正文上方的留白',
-                    top.state,
-                    0,
-                    80,
-                    top.updateHeight,
-                  ),
-                  slider(
-                    'reader-bottom-padding',
-                    Icons.vertical_align_bottom,
-                    '下边距',
-                    '正文下方的留白',
-                    bottom.state,
-                    0,
-                    80,
-                    bottom.updateHeight,
-                  ),
-                ],
-              ),
-              const ReaderSettingLabel('阅读方式'),
-              ReaderSettingGroup(
-                children: [
-                  ReaderSettingRow(
-                    icon: Icons.chrome_reader_mode_outlined,
-                    title: '阅读模式',
-                    description: '重新打开阅读器后生效',
-                    trailing: AppButton.text(
-                      child: Text(
-                        type.state == ReaderType.normal ? '分页' : '滚动',
-                      ),
-                      onPressed: () async {
-                        final v = await chooseSetting(context, '阅读模式', const {
-                          ReaderType.normal: '分页阅读',
-                          ReaderType.html: '连续滚动',
-                        }, type.state);
-                        if (v != null && context.mounted) {
-                          await settingsAction(
-                            context,
-                            () => type.updateType(v),
-                          );
-                        }
-                      },
+                    slider(
+                      'reader-line-height',
+                      Icons.format_line_spacing,
+                      '行高',
+                      '段落中的行间距',
+                      line.state,
+                      1,
+                      2.5,
+                      line.updateLineHeight,
+                      decimals: 1,
+                      unit: '倍',
                     ),
-                  ),
-                  if (!usesAppleGlass && !localEpub)
+                    slider(
+                      'reader-paragraph-spacing',
+                      Icons.space_bar,
+                      '段间距',
+                      '相邻段落之间的额外留白',
+                      spacing.state,
+                      0,
+                      60,
+                      spacing.updateSpacing,
+                    ),
+                    slider(
+                      'reader-left-padding',
+                      Icons.format_indent_increase,
+                      '左侧留白',
+                      '阅读内容左侧的页边距',
+                      left.state,
+                      0,
+                      80,
+                      left.updatePadding,
+                    ),
+                    slider(
+                      'reader-right-padding',
+                      Icons.format_indent_decrease,
+                      '右侧留白',
+                      '阅读内容右侧的页边距',
+                      right.state,
+                      0,
+                      80,
+                      right.updatePadding,
+                    ),
+                    slider(
+                      'reader-top-padding',
+                      Icons.vertical_align_top,
+                      '上边距',
+                      '正文上方的留白',
+                      top.state,
+                      0,
+                      80,
+                      top.updateHeight,
+                    ),
+                    slider(
+                      'reader-bottom-padding',
+                      Icons.vertical_align_bottom,
+                      '下边距',
+                      '正文下方的留白',
+                      bottom.state,
+                      0,
+                      80,
+                      bottom.updateHeight,
+                    ),
+                  ],
+                ),
+                const ReaderSettingLabel('阅读方式'),
+                ReaderSettingGroup(
+                  children: [
                     ReaderSettingRow(
-                      icon: Icons.auto_stories_outlined,
-                      title: '仿真翻页',
-                      description: '在线书源的纸张曲面与手势跟随',
-                      trailing: AppSwitch(
-                        value: curl.state,
-                        onChanged:
-                            type.state == ReaderType.html
-                                ? null
-                                : (v) => settingsAction(
-                                  context,
-                                  () => curl.setEnabled(v),
-                                ),
+                      icon: Icons.chrome_reader_mode_outlined,
+                      title: '阅读模式',
+                      description: '重新打开阅读器后生效',
+                      trailing: AppButton.text(
+                        child: Text(
+                          type.state == ReaderType.normal ? '分页' : '滚动',
+                        ),
+                        onPressed: () async {
+                          final v = await chooseSetting(context, '阅读模式', const {
+                            ReaderType.normal: '分页阅读',
+                            ReaderType.html: '连续滚动',
+                          }, type.state);
+                          if (v != null && context.mounted) {
+                            await settingsAction(
+                              context,
+                              () => type.updateType(v),
+                            );
+                          }
+                        },
                       ),
                     ),
-                  ReaderSettingRow(
-                    icon: Icons.volume_up_outlined,
-                    title: '音量键翻页',
-                    description:
-                        volume.isSupported
-                            ? '上键上一页，下键下一页'
-                            : '仅支持 Android 和 iOS',
-                    trailing: AppSwitch(
-                      key: const ValueKey('reader-volume-turn-setting'),
-                      value: volume.state,
-                      onChanged:
+                    if (!usesAppleGlass && !localEpub)
+                      ReaderSettingRow(
+                        icon: Icons.auto_stories_outlined,
+                        title: '仿真翻页',
+                        description: '在线书源的纸张曲面与手势跟随',
+                        trailing: AppSwitch(
+                          value: curl.state,
+                          onChanged:
+                              type.state == ReaderType.html
+                                  ? null
+                                  : (v) => settingsAction(
+                                    context,
+                                    () => curl.setEnabled(v),
+                                  ),
+                        ),
+                      ),
+                    ReaderSettingRow(
+                      icon: Icons.volume_up_outlined,
+                      title: '音量键翻页',
+                      description:
                           volume.isSupported
-                              ? (v) => settingsAction(
-                                context,
-                                () => volume.updateVolumeControl(v),
-                              )
-                              : null,
-                    ),
-                  ),
-                ],
-              ),
-              const ReaderSettingLabel('阅读器外观'),
-              ReaderSettingGroup(
-                children: [
-                  ReaderSettingRow(
-                    icon: Icons.brightness_auto_outlined,
-                    title: '深浅色',
-                    description: '独立保存浅色和深色纸张',
-                    trailing: AppButton.text(
-                      child: Text(switch (theme.state.themeMode) {
-                        ReaderThemeMode.auto => '自动',
-                        ReaderThemeMode.light => '浅色',
-                        ReaderThemeMode.dark => '深色',
-                      }),
-                      onPressed: () async {
-                        final v = await chooseSetting(context, '深浅色', const {
-                          ReaderThemeMode.auto: '跟随系统',
-                          ReaderThemeMode.light: '浅色',
-                          ReaderThemeMode.dark: '深色',
-                        }, theme.state.themeMode);
-                        if (v != null && context.mounted) {
-                          await _save(context, () => theme.setThemeMode(v));
-                        }
-                      },
-                    ),
-                  ),
-                  for (final dark in [false, true]) ...[
-                    ReaderSettingRow(
-                      icon: Icons.format_paint_outlined,
-                      title: dark ? '深色背景' : '浅色背景',
-                      description: '选择正文页面的背景色',
-                      trailing: _ColorButton(
-                        color:
-                            dark
-                                ? theme.state.darkBackgroundColor
-                                : theme.state.lightBackgroundColor,
-                        onPressed:
-                            () => _color(
-                              context,
-                              dark
-                                  ? theme.state.darkBackgroundColor
-                                  : theme.state.lightBackgroundColor,
-                              dark
-                                  ? theme.updateDarkBackgroundColor
-                                  : theme.updateLightBackgroundColor,
-                            ),
-                      ),
-                    ),
-                    ReaderSettingRow(
-                      icon: Icons.format_color_text,
-                      title: dark ? '深色文字' : '浅色文字',
-                      description: '选择正文文字的颜色',
-                      trailing: _ColorButton(
-                        color:
-                            dark
-                                ? theme.state.darkTextColor
-                                : theme.state.lightTextColor,
-                        onPressed:
-                            () => _color(
-                              context,
-                              dark
-                                  ? theme.state.darkTextColor
-                                  : theme.state.lightTextColor,
-                              dark
-                                  ? theme.updateDarkTextColor
-                                  : theme.updateLightTextColor,
-                            ),
+                              ? '上键上一页，下键下一页'
+                              : '仅支持 Android 和 iOS',
+                      trailing: AppSwitch(
+                        key: const ValueKey('reader-volume-turn-setting'),
+                        value: volume.state,
+                        onChanged:
+                            volume.isSupported
+                                ? (v) => settingsAction(
+                                  context,
+                                  () => volume.updateVolumeControl(v),
+                                )
+                                : null,
                       ),
                     ),
                   ],
-                  ReaderSettingRow(
-                    icon: Icons.image_outlined,
-                    title: '背景图片',
-                    description: '显示已设置的纸张背景',
-                    trailing: AppSwitch(
-                      value: paper.state.enabled,
-                      onChanged:
-                          (v) => _save(context, () => paper.setEnabled(v)),
-                    ),
-                  ),
-                  for (final dark in [false, true])
+                ),
+                const ReaderSettingLabel('阅读器外观'),
+                ReaderSettingGroup(
+                  children: [
                     ReaderSettingRow(
-                      icon: Icons.add_photo_alternate_outlined,
-                      title: dark ? '深色背景图片' : '浅色背景图片',
-                      description: '从相册选择图片',
+                      icon: Icons.brightness_auto_outlined,
+                      title: '深浅色',
+                      description: '独立保存浅色和深色纸张',
                       trailing: AppButton.text(
-                        child: const Text('选择'),
-                        onPressed:
-                            () => _save(
-                              context,
-                              dark
-                                  ? paper.updateDarkBackground
-                                  : paper.updateLightBackground,
-                            ),
+                        child: Text(switch (theme.state.themeMode) {
+                          ReaderThemeMode.auto => '自动',
+                          ReaderThemeMode.light => '浅色',
+                          ReaderThemeMode.dark => '深色',
+                        }),
+                        onPressed: () async {
+                          final v = await chooseSetting(context, '深浅色', const {
+                            ReaderThemeMode.auto: '跟随系统',
+                            ReaderThemeMode.light: '浅色',
+                            ReaderThemeMode.dark: '深色',
+                          }, theme.state.themeMode);
+                          if (v != null && context.mounted) {
+                            await _save(context, () => theme.setThemeMode(v));
+                          }
+                        },
                       ),
                     ),
-                  slider(
-                    'reader-background-opacity',
-                    Icons.opacity,
-                    '背景浓度',
-                    '背景图片的不透明度',
-                    paper.state.opacity,
-                    0,
-                    1,
-                    paper.updateOpacity,
-                    decimals: 2,
-                    unit: '',
+                    for (final dark in [false, true]) ...[
+                      ReaderSettingRow(
+                        icon: Icons.format_paint_outlined,
+                        title: dark ? '深色背景' : '浅色背景',
+                        description: '选择正文页面的背景色',
+                        trailing: _ColorButton(
+                          color:
+                              dark
+                                  ? theme.state.darkBackgroundColor
+                                  : theme.state.lightBackgroundColor,
+                          onPressed:
+                              () => _color(
+                                context,
+                                dark
+                                    ? theme.state.darkBackgroundColor
+                                    : theme.state.lightBackgroundColor,
+                                dark
+                                    ? theme.updateDarkBackgroundColor
+                                    : theme.updateLightBackgroundColor,
+                              ),
+                        ),
+                      ),
+                      ReaderSettingRow(
+                        icon: Icons.format_color_text,
+                        title: dark ? '深色文字' : '浅色文字',
+                        description: '选择正文文字的颜色',
+                        trailing: _ColorButton(
+                          color:
+                              dark
+                                  ? theme.state.darkTextColor
+                                  : theme.state.lightTextColor,
+                          onPressed:
+                              () => _color(
+                                context,
+                                dark
+                                    ? theme.state.darkTextColor
+                                    : theme.state.lightTextColor,
+                                dark
+                                    ? theme.updateDarkTextColor
+                                    : theme.updateLightTextColor,
+                              ),
+                        ),
+                      ),
+                    ],
+                    ReaderSettingRow(
+                      icon: Icons.image_outlined,
+                      title: '背景图片',
+                      description: '显示已设置的纸张背景',
+                      trailing: AppSwitch(
+                        value: paper.state.enabled,
+                        onChanged:
+                            (v) => _save(context, () => paper.setEnabled(v)),
+                      ),
+                    ),
+                    for (final dark in [false, true])
+                      ReaderSettingRow(
+                        icon: Icons.add_photo_alternate_outlined,
+                        title: dark ? '深色背景图片' : '浅色背景图片',
+                        description: '从相册选择图片',
+                        trailing: AppButton.text(
+                          child: const Text('选择'),
+                          onPressed:
+                              () => _save(
+                                context,
+                                dark
+                                    ? paper.updateDarkBackground
+                                    : paper.updateLightBackground,
+                              ),
+                        ),
+                      ),
+                    slider(
+                      'reader-background-opacity',
+                      Icons.opacity,
+                      '背景浓度',
+                      '背景图片的不透明度',
+                      paper.state.opacity,
+                      0,
+                      1,
+                      paper.updateOpacity,
+                      decimals: 2,
+                      unit: '',
+                    ),
+                  ],
+                ),
+                if (autoScroll != null) ...[
+                  const ReaderSettingLabel('自动滚动'),
+                  BlocBuilder<AutoScrollConfigCubit, AutoScrollConfig>(
+                    bloc: autoScroll,
+                    builder:
+                        (context, config) => ReaderSettingGroup(
+                          children: [
+                            slider(
+                              'reader-scroll-speed',
+                              Icons.speed,
+                              '滚动速度',
+                              '自动滚动的速度',
+                              config.scrollSpeed,
+                              .5,
+                              3,
+                              autoScroll!.updateScrollSpeed,
+                              decimals: 1,
+                              unit: '倍',
+                            ),
+                            slider(
+                              'reader-scroll-interval',
+                              Icons.timer_outlined,
+                              '滚动间隔',
+                              '自动滚动的参考间隔',
+                              config.scrollInterval.toDouble(),
+                              8,
+                              32,
+                              (v) =>
+                                  autoScroll!.updateScrollInterval(v.round()),
+                              unit: 'ms',
+                            ),
+                          ],
+                        ),
                   ),
                 ],
-              ),
-              if (autoScroll != null) ...[
-                const ReaderSettingLabel('自动滚动'),
-                BlocBuilder<AutoScrollConfigCubit, AutoScrollConfig>(
-                  bloc: autoScroll,
-                  builder:
-                      (context, config) => ReaderSettingGroup(
-                        children: [
-                          slider(
-                            'reader-scroll-speed',
-                            Icons.speed,
-                            '滚动速度',
-                            '自动滚动的速度',
-                            config.scrollSpeed,
-                            .5,
-                            3,
-                            autoScroll!.updateScrollSpeed,
-                            decimals: 1,
-                            unit: '倍',
-                          ),
-                          slider(
-                            'reader-scroll-interval',
-                            Icons.timer_outlined,
-                            '滚动间隔',
-                            '自动滚动的参考间隔',
-                            config.scrollInterval.toDouble(),
-                            8,
-                            32,
-                            (v) => autoScroll!.updateScrollInterval(v.round()),
-                            unit: 'ms',
-                          ),
-                        ],
-                      ),
-                ),
               ],
-            ],
+            ),
           ),
         ),
       ),
     );
   }
+}
+
+class _ReaderSettingsViewport extends StatelessWidget {
+  const _ReaderSettingsViewport({
+    required this.pinnedHandle,
+    required this.child,
+  });
+  final Widget? pinnedHandle;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) =>
+      pinnedHandle == null
+          ? child
+          : Column(
+            children: [
+              pinnedHandle!,
+              Expanded(
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(
+                    context,
+                  ).copyWith(overscroll: false),
+                  child: child,
+                ),
+              ),
+            ],
+          );
 }
 
 class ReaderSettingLabel extends StatelessWidget {

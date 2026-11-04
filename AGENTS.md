@@ -1,5 +1,7 @@
 # LiteTale 工作约定
 
+- 2026-11-04 Android 目录回归：最新用户要求覆盖上一轮“目录半屏吸附”。只改 Android：目录改为完整路由页面，保留 AppBar 返回、当前章节定位、选章结果和行内 Ink 裁剪；不再半屏或拖动展开。阅读设置继续半屏预览/轻扫全屏；48dp 横条区固定在列表外，滚动选项不能带走。Android 最小高度=半屏，不再缩到0.35后触发外层关闭；外层 enableDrag:false，半屏下扫只走一次路由关闭，全屏下扫先回半屏。正文列表仍使用 SDK 滚动交接，边缘下扫可收起，不画有色 overscroll。19相关检查/5目标分析通过，版本仍1.2.2、Android内部93；iOS原生及fallback行为保留，只封APK。见 `docs/ANDROID_DIRECTORY_SETTINGS_2026-11-04.md`。
+
 - 2026-11-04 Android 面板吸附：用户确认 iOS 已好，这次只改 Android。阅读目录/设置 `ReaderDraggableSheet.snapToPages` 仅 Android 开启，初始0.5、全屏1.0；横条轻扫后按方向自动到下一档，半屏下扫关闭，全屏下扫回半屏，250ms drawer curve，可中途重新接管；减少动态效果直达。列表使用SDK snap，横条程序jumpTo本身不触发SDK snap，必须在松手单独settle。iOS原生和旧fallback行为保持。18相关Widget检查（含40px短扫、反向接管、选章offset不变、关闭返回）与4目标分析通过；版本仍1.2.2，Android内部92，只封APK，不触发iOS构建。见 `docs/ANDROID_READER_SHEET_SNAP_2026-11-04.md`。
 
 - 2026-11-04 拖动条追加：Android90移除外层handle后内部仅装饰条，用户指出目录不能拉起。`ReaderDraggableSheet` 持有同一DraggableScrollableController，横条28dp触摸区直接jumpTo调整size，内容仍用SDK滚动控制器；不能只把handle放进ListView，因为当前章offset>0时上拉会先滚列表。目录/设置共用，保留单handle与行内Ink裁剪。长目录中从handle上拉测试通过，最终Android内部91；iOS原生颜色源码沿用4dcf快照，构建身份须分别记录。

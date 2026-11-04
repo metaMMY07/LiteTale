@@ -4,7 +4,7 @@ import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/apple_reader_panel.dart';
 import 'package:wild/widgets/reader_draggable_sheet.dart';
 
-/// Directory selection returns a value. Dismissing either platform's sheet
+/// Directory selection returns a value. Dismissing the directory presentation
 /// never pops the reader, and chapter loading starts after dismissal completes.
 Future<Chapter?> showReaderChapterSheet(
   BuildContext context, {
@@ -46,6 +46,18 @@ Future<Chapter?> showReaderChapterSheet(
     return chapters[selection?['id']];
   }
   if (!context.mounted) return null;
+  if (Theme.of(context).platform == TargetPlatform.android) {
+    return Navigator.of(context).push<Chapter>(
+      MaterialPageRoute<Chapter>(
+        builder:
+            (_) => _AndroidChapterPage(
+              volumes: volumes,
+              currentAid: currentAid,
+              currentCid: currentCid,
+            ),
+      ),
+    );
+  }
   return showModalBottomSheet<Chapter>(
     context: context,
     isScrollControlled: true,
@@ -58,7 +70,6 @@ Future<Chapter?> showReaderChapterSheet(
     builder:
         (_) => ReaderDraggableSheet(
           handleKey: const ValueKey('reader-chapter-drag-handle'),
-          snapToPages: Theme.of(context).platform == TargetPlatform.android,
           builder:
               (context, controller, handle) => ReaderChapterPanel(
                 volumes: volumes,
@@ -72,6 +83,44 @@ Future<Chapter?> showReaderChapterSheet(
   );
 }
 
+/// Android's directory is a complete page; only reading settings need a live
+/// preview of the paper underneath. Return the selected chapter to the reader.
+class _AndroidChapterPage extends StatefulWidget {
+  const _AndroidChapterPage({
+    required this.volumes,
+    required this.currentAid,
+    required this.currentCid,
+  });
+  final List<Volume> volumes;
+  final String currentAid, currentCid;
+  @override
+  State<_AndroidChapterPage> createState() => _AndroidChapterPageState();
+}
+
+class _AndroidChapterPageState extends State<_AndroidChapterPage> {
+  final _scrollController = ScrollController();
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    key: const ValueKey('reader-chapter-page'),
+    backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
+    appBar: AppBar(title: const Text('目录')),
+    body: ReaderChapterPanel(
+      volumes: widget.volumes,
+      currentAid: widget.currentAid,
+      currentCid: widget.currentCid,
+      scrollController: _scrollController,
+      fullScreen: true,
+      onSelect: (chapter) => Navigator.pop(context, chapter),
+    ),
+  );
+}
+
 class ReaderChapterPanel extends StatefulWidget {
   const ReaderChapterPanel({
     super.key,
@@ -81,12 +130,14 @@ class ReaderChapterPanel extends StatefulWidget {
     required this.scrollController,
     required this.onSelect,
     this.dragHandle,
+    this.fullScreen = false,
   });
   final List<Volume> volumes;
   final String currentAid, currentCid;
   final ScrollController scrollController;
   final ValueChanged<Chapter> onSelect;
   final Widget? dragHandle;
+  final bool fullScreen;
   @override
   State<ReaderChapterPanel> createState() => _ReaderChapterPanelState();
 }
@@ -130,44 +181,49 @@ class _ReaderChapterPanelState extends State<ReaderChapterPanel> {
       });
     }
     return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      borderRadius:
+          widget.fullScreen
+              ? BorderRadius.zero
+              : const BorderRadius.vertical(top: Radius.circular(28)),
       child: ColoredBox(
         color: colors.surfaceContainerLow,
         child: SafeArea(
           top: false,
           child: Column(
             children: [
-              widget.dragHandle ??
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Container(
-                      key: const ValueKey('reader-chapter-drag-handle'),
-                      width: 36,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: colors.onSurfaceVariant.withValues(alpha: .4),
-                        borderRadius: BorderRadius.circular(8),
+              if (!widget.fullScreen) ...[
+                widget.dragHandle ??
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Container(
+                        key: const ValueKey('reader-chapter-drag-handle'),
+                        width: 36,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: colors.onSurfaceVariant.withValues(alpha: .4),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
                     ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 8, 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '目录',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: '关闭目录',
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
                   ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 8, 4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '目录',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: '关闭目录',
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
                 ),
-              ),
+              ],
               Expanded(
                 child: ScrollConfiguration(
                   behavior: ScrollConfiguration.of(
