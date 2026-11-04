@@ -4,22 +4,20 @@
   <p>基于 Wild 的 Android 与 iOS 轻小说阅读器</p>
 
 [![license](https://img.shields.io/github/license/metaMMY07/LiteTale)](LICENSE)
-[![release](https://img.shields.io/badge/release-v1.2.0-blue)](https://github.com/metaMMY07/LiteTale/releases)
+[![release](https://img.shields.io/badge/release-v1.2.2-blue)](https://github.com/metaMMY07/LiteTale/releases)
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
-## 最新正式版 LiteTale 1.2.0
+## 最新正式版 LiteTale 1.2.2
 
-[Android 手机／平板 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.0-build85/LiteTale-v1.2.0-android-arm64-v8a.apk) · [Android x86_64 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.0-build85/LiteTale-v1.2.0-android-x86_64.apk) · [iPhone／iPad IPA（未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.0-build85/LiteTale-v1.2.0-ios-unsigned.ipa) · [更新内容](https://github.com/metaMMY07/LiteTale/releases/tag/v1.2.0-build85)
+[Android 手机／平板 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.2/LiteTale-v1.2.2-android-arm64-v8a.apk) · [Android x86_64 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.2/LiteTale-v1.2.2-android-x86_64.apk) · [iPhone／iPad IPA（未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.2/LiteTale-v1.2.2-ios-unsigned.ipa) · [更新内容](https://github.com/metaMMY07/LiteTale/releases/tag/v1.2.2)
 
 iOS 安装包需要自行签名后安装。
 
 ### 本次更新
 
-- 本地 EPUB 支持批量导入、分类与管理。
-- 阅读支持覆盖翻页，插图可预览、缩放和保存。
-- 优化多书源详情页、封面加载和评论体验。
-- iOS 优化液态玻璃界面；Android 恢复旧版主题配色并保留动态配色。
+- Android：章节目录恢复完整页面，阅读设置半屏与全屏轻扫操作优化。
+- iOS：修复阅读菜单深色模式显示，并调整面板交互。
 
 ### 界面预览
 
