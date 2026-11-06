@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -162,36 +164,113 @@ void main() {
     },
   );
   testWidgets(
-    'image preview zooms without changing the reader route underneath',
+    'preview taps use the visible image and close only the preview route',
     (tester) async {
-      const ref = ReaderImageRef(source: SourceId.localEpub, url: 'fixture');
-      final repo = ReaderImageRepository(
-        client: MockClient((_) async => http.Response('', 500)),
-      );
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
       final local = ReaderImageRef(
-        source: ref.source,
-        url: ref.url,
+        source: SourceId.localEpub,
+        url: 'preview-tap-fixture',
         readLocal: () async => epubFixturePng(),
       );
       await tester.pumpWidget(
-        MaterialApp(home: ReaderImageViewer(image: local, repository: repo)),
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder:
+                  (context) => Center(
+                    child: TextButton(
+                      onPressed: () => openReaderImage(context, local),
+                      child: const Text('阅读界面'),
+                    ),
+                  ),
+            ),
+          ),
+        ),
       );
-      for (var i = 0; i < 6; i++) {
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 40)),
-        );
-        await tester.pump(const Duration(milliseconds: 16));
+      final viewer = find.byType(ReaderImageViewer);
+      final picture = find.descendant(of: viewer, matching: find.byType(Image));
+      final reader = find.text('阅读界面');
+      Future<void> openPreview() async {
+        await tester.tap(reader);
+        for (var i = 0; i < 10 && picture.evaluate().isEmpty; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 40)),
+          );
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+        await tester.pumpAndSettle();
+        expect(picture, findsOneWidget);
       }
-      await tester.pumpAndSettle();
-      expect(find.text('图片预览'), findsOneWidget);
-      expect(find.byTooltip('保存到相册'), findsOneWidget);
-      expect(find.text('图片加载失败'), findsNothing);
-      await tester.tapAt(const Offset(400, 300));
+
+      await openPreview();
+      final center = tester.getCenter(picture);
+      const bottomMargin = Offset(200, 720);
+      expect(tester.getRect(picture).contains(bottomMargin), isFalse);
+      await tester.tapAt(center);
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(viewer, findsOneWidget);
+
+      // This point starts outside the image and becomes part of it after zoom.
+      await tester.tapAt(center);
       await tester.pump(const Duration(milliseconds: 70));
-      await tester.tapAt(const Offset(400, 300));
+      await tester.tapAt(center);
       await tester.pumpAndSettle();
+      expect(tester.getRect(picture).contains(bottomMargin), isTrue);
+      await tester.tapAt(bottomMargin);
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(viewer, findsOneWidget);
+
+      final zoomed = tester.getRect(picture);
+      await tester.dragFrom(center, const Offset(80, 0));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(picture).left, greaterThan(zoomed.left));
+      final ios = defaultTargetPlatform == TargetPlatform.iOS;
+      final actions = <String>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(ReaderImageExporter.channel, (
+        call,
+      ) async {
+        actions.add(call.method);
+        expect(call.arguments['bytes'], epubFixturePng());
+        return call.method == 'save' ? 'saved' : 'exported';
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(
+          ReaderImageExporter.channel,
+          null,
+        ),
+      );
+      await tester.tap(
+        find.byIcon(
+          ios ? CupertinoIcons.arrow_down_to_line : Icons.download_rounded,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byIcon(ios ? CupertinoIcons.share : Icons.ios_share_rounded),
+      );
+      await tester.pumpAndSettle();
+      expect(actions, ['save', 'export']);
+      expect(find.text('已导出图片'), findsOneWidget);
+      await tester.tap(find.byIcon(ios ? CupertinoIcons.xmark : Icons.close));
+      await tester.pumpAndSettle();
+      expect(reader, findsOneWidget);
+
+      await openPreview();
+      await tester.tapAt(bottomMargin);
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      expect(viewer, findsNothing);
+      expect(reader, findsOneWidget);
       expect(tester.takeException(), isNull);
     },
+    variant: const TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+    }),
   );
   testWidgets('contain-fit whitespace does not intercept a reading tap', (
     tester,

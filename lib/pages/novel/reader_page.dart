@@ -269,15 +269,19 @@ class _ReaderViewState extends State<_ReaderView> {
     final topArea = screenHeight * 0.3;
     final bottomArea = screenHeight * 0.7;
 
-    final spread = widget.state.layout.isSpread;
-    if (tapX < leftArea || (!spread && tapY < topArea)) {
+    // On iOS the side zones run the full height. The upper edge must not
+    // override a tap on the right, even in single-page portrait mode.
+    final useVerticalZones =
+        Theme.of(context).platform != TargetPlatform.iOS &&
+        !widget.state.layout.isSpread;
+    if (tapX < leftArea || (useVerticalZones && tapY < topArea)) {
       // 点击左侧或上方区域，上一页
       if (_viewIndex > 0) {
         _turnPage(-1, startY: details.localPosition.dy);
       } else {
         _handleBoundaryTurn(-1);
       }
-    } else if (tapX > rightArea || (!spread && tapY > bottomArea)) {
+    } else if (tapX > rightArea || (useVerticalZones && tapY > bottomArea)) {
       // 点击右侧或下方区域，下一页
       if (_viewIndex < _viewCount - 1) {
         _turnPage(1, startY: details.localPosition.dy);
