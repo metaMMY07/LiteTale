@@ -80,8 +80,9 @@ class ReaderImageHitScope extends InheritedWidget {
 
 /// The region is exactly the visible image, not its contain-fit letterboxing.
 class ReaderImageRegion extends StatefulWidget {
-  const ReaderImageRegion({super.key, required this.image});
+  const ReaderImageRegion({super.key, required this.image, this.frame});
   final ReaderImageRef image;
+  final ReaderImageFrame? frame;
   @override
   State<ReaderImageRegion> createState() => _ReaderImageRegionState();
 }
@@ -89,9 +90,25 @@ class ReaderImageRegion extends StatefulWidget {
 class _ReaderImageRegionState extends State<ReaderImageRegion> {
   ReaderImageHitRegistry? _registry;
   void _open() {
-    if (mounted && ModalRoute.of(context)?.isCurrent != false) {
-      openReaderImage(context, widget.image);
+    if (!mounted || ModalRoute.of(context)?.isCurrent == false) return;
+    final box = context.findRenderObject();
+    final overlay = Navigator.of(context).overlay?.context.findRenderObject();
+    ReaderImageOrigin? origin;
+    if (box is RenderBox &&
+        box.attached &&
+        box.hasSize &&
+        overlay is RenderBox &&
+        overlay.attached &&
+        overlay.hasSize) {
+      final rect = MatrixUtils.transformRect(
+        box.getTransformTo(overlay),
+        Offset.zero & box.size,
+      );
+      if (rect.isFinite && !rect.isEmpty) {
+        origin = (rect: rect, viewport: overlay.size);
+      }
     }
+    openReaderImage(context, widget.image, origin: origin, frame: widget.frame);
   }
 
   @override
@@ -188,10 +205,13 @@ class _ReaderIllustrationState extends State<ReaderIllustration> {
         fit: StackFit.expand,
         children: [
           widget.child,
-          if (fitted != null)
+          if (fitted != null && source != null)
             Positioned.fromRect(
               rect: Alignment.center.inscribe(fitted, Offset.zero & output),
-              child: ReaderImageRegion(image: widget.image),
+              child: ReaderImageRegion(
+                image: widget.image,
+                frame: (provider: widget.provider, size: source),
+              ),
             ),
         ],
       );

@@ -9,6 +9,7 @@ import 'package:http/testing.dart';
 import 'package:wild/services/reader_images.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/pages/novel/reader_image_viewer.dart';
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/reader_illustration.dart';
 import 'support/epub_fixture.dart';
 
@@ -307,4 +308,95 @@ void main() {
     await tester.pump();
     expect(background, 1);
   });
+
+  testWidgets(
+    'preview grows from the illustration and follows a dismiss drag',
+    (tester) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final bytes = epubFixturePng();
+      final provider = MemoryImage(bytes);
+      var originalReads = 0;
+      final ref = ReaderImageRef(
+        source: SourceId.localEpub,
+        url: 'preview-motion-fixture',
+        readLocal: () async {
+          originalReads++;
+          return bytes;
+        },
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: const Alignment(.7, .55),
+              child: SizedBox.square(
+                dimension: 128,
+                child: ReaderIllustration(
+                  image: ref,
+                  provider: provider,
+                  child: Image(image: provider, fit: BoxFit.contain),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      final origin = tester.getRect(find.byType(ReaderIllustration));
+      final region = find.byType(ReaderImageRegion);
+      for (var i = 0; i < 10 && region.evaluate().isEmpty; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 30)),
+        );
+        await tester.pump();
+      }
+      expect(region, findsOneWidget);
+      final viewer = find.byType(ReaderImageViewer);
+      final picture = find.descendant(of: viewer, matching: find.byType(Image));
+      await tester.tap(region);
+      await tester.pump();
+      expect(
+        (tester.getRect(picture).center - origin.center).distance,
+        lessThan(.01),
+      );
+      expect(tester.getRect(picture).width, closeTo(origin.width, .01));
+      await tester.pumpAndSettle();
+      final fitted = tester.getRect(picture);
+      expect(fitted.width, greaterThan(origin.width));
+      expect(originalReads, 0);
+
+      // The preview stays dark even though MaterialApp uses its light theme.
+      final close = find.ancestor(
+        of: find.byIcon(CupertinoIcons.xmark),
+        matching: find.byType(AppIconButton),
+      );
+      expect(tester.widget<AppIconButton>(close).color, Colors.white);
+      expect(Theme.of(tester.element(close)).brightness, Brightness.dark);
+
+      final shortDrag = await tester.startGesture(fitted.center);
+      await shortDrag.moveBy(const Offset(45, 56));
+      await tester.pump();
+      final dragged = tester.getRect(picture);
+      expect(dragged.center.dx, greaterThan(fitted.center.dx));
+      expect(dragged.center.dy, greaterThan(fitted.center.dy));
+      expect(dragged.width, lessThan(fitted.width));
+      await shortDrag.up();
+      await tester.pumpAndSettle();
+      expect(tester.getRect(picture), fitted);
+
+      final longDrag = await tester.startGesture(fitted.center);
+      await longDrag.moveBy(const Offset(-105, 135));
+      await tester.pump();
+      final released = tester.getRect(picture);
+      await longDrag.up();
+      await tester.pump();
+      expect(tester.getRect(picture), released);
+      await tester.pumpAndSettle();
+      expect(viewer, findsNothing);
+      expect(tester.getRect(find.byType(ReaderIllustration)), origin);
+      expect(tester.takeException(), isNull);
+    },
+    variant: const TargetPlatformVariant({TargetPlatform.iOS}),
+  );
 }
