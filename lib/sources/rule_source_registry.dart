@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:wild/services/source_import_file.dart'
+    show maxSourceImportBytes;
 import 'package:wild/src/rust/api/database.dart' as db;
 import 'rules/rule_source.dart';
 import 'rules/legado_compatibility.dart';
@@ -12,9 +14,12 @@ class InstalledRuleSource {
     this.definition, {
     this.enabled = true,
     this.builtIn = false,
+    this.updateTime,
   });
   final RuleSourceDefinition definition;
   final bool enabled, builtIn;
+  final int? updateTime;
+
   InstalledRuleSource copyWith({
     bool? enabled,
     RuleSourceDefinition? definition,
@@ -22,69 +27,145 @@ class InstalledRuleSource {
     definition ?? this.definition,
     enabled: enabled ?? this.enabled,
     builtIn: builtIn,
+    updateTime: updateTime,
   );
 }
 
+enum SourceImportStatus { added, updated, unchanged, older, conflict, invalid }
+
 class SourceImportItem {
   const SourceImportItem({
+    required this.status,
     this.definition,
+    this.existing,
+    this.updateTime,
     this.error,
     this.notices = const [],
     this.name,
   });
+  final SourceImportStatus status;
   final RuleSourceDefinition? definition;
+  final InstalledRuleSource? existing;
+  final int? updateTime;
   final String? error;
   final List<String> notices;
   final String? name;
 }
 
+int? _positiveUpdateTime(Object? value) {
+  final number = switch (value) {
+    final int n => n,
+    final String s => int.tryParse(s.trim()),
+    _ => null,
+  };
+  return number != null && number > 0 ? number : null;
+}
+
+String _importUrlKey(String value) {
+  final uri = Uri.parse(value);
+  return (uri.path.isEmpty ? uri.replace(path: '/') : uri).toString();
+}
+
+final _legacyLegadoId = RegExp(r'^legado_[0-9a-f]{16}$');
+final _savedCopyId = RegExp(r'_copy_[0-9]+$');
+
+bool _sameLegadoIdentity(InstalledRuleSource entry, String urlKey) {
+  final installed = entry.definition;
+  if (_savedCopyId.hasMatch(installed.id)) return false;
+  final savedKey = installed.importKey;
+  if (savedKey != null) return _importUrlKey(savedKey) == urlKey;
+  // Older Android imports saved the full address as baseUrl but did not
+  // record importKey. Only recognize known Legado identities.
+  return !entry.builtIn &&
+      (_legacyLegadoId.hasMatch(installed.id) ||
+          installed.version == 'legado-unknown') &&
+      _importUrlKey(installed.baseUrl.toString()) == urlKey;
+}
+
+SourceImportStatus _compareImport(
+  RuleSourceDefinition definition,
+  int? updateTime,
+  InstalledRuleSource? existing,
+) {
+  if (existing == null) return SourceImportStatus.added;
+  final previous = existing.updateTime;
+  if (previous != null && updateTime != null) {
+    if (updateTime < previous) return SourceImportStatus.older;
+    if (updateTime > previous) return SourceImportStatus.updated;
+  }
+  return definition.sameImportDefinition(existing.definition)
+      ? SourceImportStatus.unchanged
+      : SourceImportStatus.updated;
+}
+
 List<SourceImportItem> inspectSourceImport(
   String raw, {
-  TargetPlatform? platform,
   Iterable<InstalledRuleSource> installedSources = const [],
 }) {
-  final ios = (platform ?? defaultTargetPlatform) == TargetPlatform.iOS;
-  if (utf8.encode(raw).length > 2 * 1024 * 1024) {
+  if (raw.length > maxSourceImportBytes ||
+      utf8.encode(raw).length > maxSourceImportBytes) {
     throw const FormatException('书源文件不能超过 2 MB');
   }
-  final decoded = jsonDecode(raw.startsWith('\uFEFF') ? raw.substring(1) : raw);
+  final input = raw.trim();
+  if (input.isEmpty) throw const FormatException('没有可导入的书源');
+  final decoded = jsonDecode(
+    input.startsWith('\uFEFF') ? input.substring(1) : input,
+  );
   final list = decoded is List ? decoded : [decoded];
-  if (ios && list.isEmpty) throw const FormatException('文件中没有书源');
+  if (list.isEmpty) throw const FormatException('文件中没有书源');
   if (list.length > 100) throw const FormatException('一次最多导入 100 个书源');
+  final installed = {
+    for (final entry in installedSources) entry.definition.id: entry,
+  };
   final ids = <String>{};
+  final urlKeys = <String>{};
   return list.map((value) {
     try {
       if (value is! Map) throw const FormatException('书源必须是 JSON 对象');
       final map = Map<String, dynamic>.from(value);
       RuleSourceDefinition definition;
+      InstalledRuleSource? existing;
+      String? identity;
+      String? conflict;
+      int? updateTime;
       var notices = <String>[];
       if (map.containsKey('bookSourceUrl')) {
         try {
           definition = RuleSourceDefinition.fromLegadoJson(map);
         } on RuleSourceException {
-          if (!ios) rethrow;
           final converted = convertLegadoSource(map);
           definition = RuleSourceDefinition.fromJson(converted.definition);
           notices = converted.notices;
         }
-      } else {
-        definition = RuleSourceDefinition.fromJson(map);
-      }
-      if (ios && map['bookSourceUrl'] is String) {
         final key =
             Uri.parse((map['bookSourceUrl'] as String).trim()).toString();
+        final urlKey = _importUrlKey(key);
+        identity = urlKey;
         final matches =
-            installedSources
-                .where((entry) => entry.definition.importKey == key)
+            installed.values
+                .where((entry) => _sameLegadoIdentity(entry, urlKey))
                 .toList();
-        final exact =
+        existing =
             matches
                 .where((entry) => entry.definition.id == definition.id)
                 .firstOrNull;
-        final existing = exact ?? (matches.length == 1 ? matches.single : null);
+        if (existing == null && matches.length == 1) existing = matches.single;
+        if (existing == null && matches.length > 1) {
+          conflict = '同一网址匹配到多个已导入书源，可另存为新书源。';
+        } else if (existing == null && installed.containsKey(definition.id)) {
+          conflict = '该书源 ID 已被其他书源使用，可另存为新书源。';
+        }
         final canonical = definition.toJson(id: existing?.definition.id);
         (canonical['source'] as Map<String, dynamic>)['importKey'] = key;
         definition = RuleSourceDefinition.fromJson(canonical);
+        updateTime = _positiveUpdateTime(map['lastUpdateTime']);
+      } else {
+        definition = RuleSourceDefinition.fromJson(map);
+        existing = installed[definition.id];
+        if (existing != null &&
+            existing.definition.baseUrl.origin != definition.baseUrl.origin) {
+          conflict = '该书源 ID 已用于其他站点，可另存为新书源。';
+        }
       }
       if (!definition.capabilities.detail ||
           !definition.capabilities.catalog ||
@@ -95,12 +176,24 @@ List<SourceImportItem> inspectSourceImport(
           !definition.capabilities.search) {
         throw const FormatException('书源需要提供发现或搜索入口');
       }
-      if (!ids.add(definition.id)) {
-        throw FormatException('同一文件出现重复书源 ID：${definition.id}');
+      if (ids.contains(definition.id) ||
+          (identity != null && urlKeys.contains(identity))) {
+        throw const FormatException('同一批导入包含重复书源。');
       }
+      ids.add(definition.id);
+      if (identity != null) urlKeys.add(identity);
       return SourceImportItem(
+        status:
+            conflict != null
+                ? SourceImportStatus.conflict
+                : _compareImport(definition, updateTime, existing),
         definition: definition,
-        notices: List.unmodifiable(notices),
+        existing: existing,
+        updateTime: updateTime,
+        notices: List.unmodifiable([
+          if (conflict != null) conflict,
+          ...notices,
+        ]),
         name: definition.name,
       );
     } catch (error) {
@@ -110,6 +203,7 @@ List<SourceImportItem> inspectSourceImport(
                   (value['source'] is Map ? value['source']['name'] : null)
               : null;
       return SourceImportItem(
+        status: SourceImportStatus.invalid,
         error: '$error',
         name: name is String ? name : null,
       );
@@ -136,7 +230,7 @@ Future<String> fetchSourceImport(Uri uri) async {
       final chunks = <int>[];
       await for (final chunk in response.stream) {
         length += chunk.length;
-        if (length > 2 * 1024 * 1024) {
+        if (length > maxSourceImportBytes) {
           throw const FormatException('书源文件不能超过 2 MB');
         }
         chunks.addAll(chunk);
@@ -227,6 +321,7 @@ class RuleSourceRegistry extends ChangeNotifier {
               source,
               enabled: item['enabled'] != false,
               builtIn: item['builtIn'] == true,
+              updateTime: _positiveUpdateTime(item['updateTime']),
             );
           } catch (_) {
             warning = '部分书源配置无法读取，其余书源仍可使用。';
@@ -279,6 +374,7 @@ class RuleSourceRegistry extends ChangeNotifier {
                       'definition': e.definition.toJson(),
                       'enabled': e.enabled,
                       'builtIn': e.builtIn,
+                      if (e.updateTime != null) 'updateTime': e.updateTime,
                     },
                   )
                   .toList(),
@@ -309,7 +405,14 @@ class RuleSourceRegistry extends ChangeNotifier {
   Future<void> install(
     List<RuleSourceDefinition> definitions, {
     bool replace = false,
+    Map<String, int> updateTimes = const {},
+    Map<String, InstalledRuleSource?> previewedSources = const {},
   }) => _change((entries, removed) {
+    for (final expected in previewedSources.entries) {
+      if (!identical(entries[expected.key], expected.value)) {
+        throw StateError('书源在预览后已变更，请返回后重新导入。');
+      }
+    }
     if (definitions.map((d) => d.id).toSet().length != definitions.length) {
       throw const FormatException('此次导入包含重复书源 ID');
     }
@@ -328,9 +431,12 @@ class RuleSourceRegistry extends ChangeNotifier {
         throw StateError('域名已改变，请另存为新书源，避免混用原书籍数据');
       }
       entries[definition.id] = InstalledRuleSource(
-        definition,
+        existing == null
+            ? definition
+            : definition.withIdentity(name: existing.definition.name),
         enabled: existing?.enabled ?? true,
         builtIn: existing?.builtIn ?? false,
+        updateTime: updateTimes[definition.id],
       );
       removed.remove(definition.id);
     }
@@ -342,10 +448,8 @@ class RuleSourceRegistry extends ChangeNotifier {
   Future<void> rename(String id, String name) => _change((entries, _) {
     final entry = entries[id];
     if (entry == null || name.trim().isEmpty) return;
-    final raw = entry.definition.toJson();
-    (raw['source'] as Map)['name'] = name.trim();
     entries[id] = entry.copyWith(
-      definition: RuleSourceDefinition.fromJson(raw),
+      definition: entry.definition.withIdentity(name: name),
     );
   });
   Future<void> remove(String id) => _change((entries, removed) {

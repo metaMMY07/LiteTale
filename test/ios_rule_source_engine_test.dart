@@ -1,6 +1,6 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/sources/rule_book_source.dart';
 import 'package:wild/sources/rule_source_registry.dart';
@@ -11,10 +11,7 @@ import 'support/huanmeng_source.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   RuleSourceDefinition source() =>
-      inspectSourceImport(
-        huanmengSourceJson,
-        platform: TargetPlatform.iOS,
-      ).single.definition!;
+      inspectSourceImport(huanmengSourceJson).single.definition!;
 
   test(
     'the original rules parse search, details, two catalog pages and all chapter paragraphs',

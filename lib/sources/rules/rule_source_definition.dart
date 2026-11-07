@@ -95,6 +95,17 @@ class RuleSourceDefinition {
     };
   }
 
+  /// Compares effective rules and request settings, apart from local identity
+  /// and name. Field order in a JSON export does not constitute a rule update.
+  bool sameImportDefinition(RuleSourceDefinition other) =>
+      baseUrl == other.baseUrl &&
+      version == other.version &&
+      charset == other.charset &&
+      userAgent == other.userAgent &&
+      cookieJar == other.cookieJar &&
+      _canonicalJson(toJson()['rules']) ==
+          _canonicalJson(other.toJson()['rules']);
+
   RuleSourceDefinition withIdentity({String? id, String? name}) {
     final savedId = id ?? this.id;
     final savedName = name ?? this.name;
@@ -224,6 +235,13 @@ class RuleSourceDefinition {
   /// Login, arbitrary headers, JS, XPath, selector pipelines and encryption
   /// rules are refused so conversion cannot silently produce empty results.
   factory RuleSourceDefinition.fromLegadoJson(Map<String, dynamic> legado) {
+    final type = legado['bookSourceType'];
+    if (type != null && type != 0) {
+      throw const RuleSourceUnsupportedException(
+        'legado',
+        '当前仅支持文字书源（bookSourceType=0）。',
+      );
+    }
     _rejectLegadoExecutableOrCredentialFeatures(legado);
     final rawBase = legado['bookSourceUrl'];
     if (rawBase is! String || rawBase.trim().isEmpty) {
@@ -408,9 +426,13 @@ class RuleSourceDefinition {
       if (catalog != null) 'catalog': catalog,
       if (content != null) 'content': content,
     };
+    // Keep historical root-address ids, but distinguish two rules using
+    // different full addresses on the same site.
+    final identityUrl =
+        sourceUri.path == '/' ? sourceUri.origin : sourceUri.toString();
     final stableId =
         explicitId ??
-        'legado_${sha256.convert(utf8.encode('${sourceUri.origin}|$name|${_canonicalJson(convertedRules)}')).toString().substring(0, 16)}';
+        'legado_${sha256.convert(utf8.encode('$identityUrl|$name|${_canonicalJson(convertedRules)}')).toString().substring(0, 16)}';
     final converted = <String, dynamic>{
       'schema': _schemaName,
       'schemaVersion': _schemaVersion,

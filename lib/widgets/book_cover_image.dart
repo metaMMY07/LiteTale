@@ -195,15 +195,16 @@ class _CoverSurfaceState extends State<_CoverSurface>
         );
     _stream = _provider!.resolve(createLocalImageConfiguration(context));
     _listener = ImageStreamListener(
-      (info, _) {
+      (info, synchronous) {
         if (!mounted || generation != _generation) return;
         final first = _frame == null;
         // A decoded/prefetched image has not necessarily appeared on screen.
-        // Novella's skipOnCacheHit is `none`: only an actually displayed cover
-        // suppresses the first reveal, irrespective of source or load speed.
+        // An Android card that had to wait for a frame again should fade in
+        // again. A previously displayed, synchronous cache hit stays instant.
+        final android = Theme.of(context).platform == TargetPlatform.android;
         final instant =
-            widget.cache.wasRevealed(key) ||
-            MediaQuery.disableAnimationsOf(context);
+            MediaQuery.disableAnimationsOf(context) ||
+            (widget.cache.wasRevealed(key) && (!android || synchronous));
         final previous = _frame;
         _frame = info.clone();
         previous?.dispose();

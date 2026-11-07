@@ -12,6 +12,7 @@ import 'book_source.dart';
 import 'package:wild/services/read_request.dart';
 import 'package:wild/services/read_diagnostics.dart';
 import 'package:wild/models/source_comment.dart';
+import 'package:wild/utils/bili_cover_url.dart';
 import 'comment_parsers.dart' show biliComments;
 
 const _siteOrigin = 'https://www.bilinovel.net';
@@ -158,9 +159,11 @@ class BiliSiteSource implements BookSource, BookCommentsSource {
 
   @override
   Future<List<HomeBlock>> discover() => _withSession((session) async {
-    final document = await _getDocument(session, Uri.parse('$_siteOrigin/'));
+    final uri = Uri.parse('$_siteOrigin/');
+    final document = await _getDocument(session, uri);
     final records = _parseCards(
       document,
+      page: uri,
       bookCards: '.index_tpic_info, li.module-slide-li',
       titleSelector: 'a[href*="/novel/"]',
     );
@@ -209,6 +212,7 @@ class BiliSiteSource implements BookSource, BookCommentsSource {
       final document = await _getDocument(session, uri);
       final cards = _parseCards(
         document,
+        page: uri,
         bookCards:
             '.rank_d_list, #list_content.jsBooks > li.book-li, '
             'ol.book-ol > li.book-li, li.book-li',
@@ -351,11 +355,12 @@ class BiliSiteSource implements BookSource, BookCommentsSource {
       final coverNode =
           mobileInfo?.querySelector('img.book-cover') ??
           detailDocument.querySelector('.book-img img');
-      final cover = _safeImageUrl(
-        coverNode?.attributes['data-src'] ??
-            coverNode?.attributes['data-original'] ??
-            coverNode?.attributes['src'],
-      );
+      final cover = biliCoverUrl([
+        ..._coverAttributes(coverNode),
+        detailDocument
+            .querySelector('meta[property="og:image"]')
+            ?.attributes['content'],
+      ], page: detailUri);
       final updateText =
           mobileInfo?.parent
               ?.querySelector('a.book-status .book-meta-l')
@@ -528,6 +533,7 @@ class BiliSiteSource implements BookSource, BookCommentsSource {
 
   List<NovelCover> _parseCards(
     dom.Document document, {
+    required Uri page,
     required String bookCards,
     required String titleSelector,
   }) {
@@ -576,13 +582,7 @@ class BiliSiteSource implements BookSource, BookCommentsSource {
         NovelCover(
           aid: _bookId(nid),
           title: title,
-          img:
-              _safeImageUrl(
-                image?.attributes['data-src'] ??
-                    image?.attributes['data-original'] ??
-                    image?.attributes['src'],
-              ) ??
-              '',
+          img: biliCoverUrl(_coverAttributes(image), page: page) ?? '',
           detailUrl: _bookId(nid),
         ),
       );
@@ -751,11 +751,11 @@ class BiliSiteSource implements BookSource, BookCommentsSource {
       status == 307 ||
       status == 308;
 
-  static String? _safeImageUrl(String? raw) {
-    if (raw == null || raw.trim().isEmpty) return null;
-    final uri = Uri.parse(_siteOrigin).resolve(raw.trim());
-    return _isSiteUri(uri) ? uri.toString() : null;
-  }
+  static List<String?> _coverAttributes(dom.Element? image) => [
+    image?.attributes['data-src'],
+    image?.attributes['data-original'],
+    image?.attributes['src'],
+  ];
 
   static Uri _resolveSiteHref(String raw) =>
       Uri.parse(_siteOrigin).resolve(raw);

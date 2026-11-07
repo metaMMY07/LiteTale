@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
 import 'package:wild/src/rust/wenku8/models.dart';
+import 'package:wild/utils/bili_cover_url.dart';
 import 'package:wild/utils/bili_site_dom.dart';
 import 'package:wild/services/read_request.dart';
 import 'package:wild/services/read_diagnostics.dart';
@@ -664,6 +665,7 @@ class BiliBrowserSession extends ChangeNotifier {
     );
     final books = <NovelCover>[];
     final seen = <String>{};
+    final resultPage = Uri.parse('${value['url']}');
     for (final raw in value['books'] as List? ?? const []) {
       final item = Map<String, dynamic>.from(raw as Map);
       final nid = '${item['nid']}';
@@ -673,18 +675,18 @@ class BiliBrowserSession extends ChangeNotifier {
           !seen.add(nid)) {
         continue;
       }
-      final image = Uri.tryParse('${item['image'] ?? ''}');
-      final safeImage =
-          image != null &&
-                  const ['https', 'http'].contains(image.scheme) &&
-                  image.userInfo.isEmpty
-              ? '$image'
-              : '';
+      final images = item['images'];
+      final cover = biliCoverUrl(
+        images is List
+            ? images.whereType<String>()
+            : [if (item['image'] case final String url) url],
+        page: resultPage,
+      );
       books.add(
         NovelCover(
           aid: 'bili:$nid',
           title: title,
-          img: safeImage,
+          img: cover ?? '',
           detailUrl: 'bili:$nid',
         ),
       );

@@ -111,17 +111,18 @@ const biliSearchProbeScript =
   if (biliCheckAccess(result)) return JSON.stringify(result);
   if (window.__liteTaleBiliSearchPending) return JSON.stringify(result);
   if (document.readyState === 'loading' || location.pathname === '/' || !document.body) return JSON.stringify(result);
-  const image = root => {
-    const img = root.querySelector('img');
-    return img && (img.getAttribute('data-original') || img.getAttribute('data-src') || img.getAttribute('src')) || '';
+  const images = root => {
+    const img = root && (root.matches('img') ? root : root.querySelector('img'));
+    return img ? ['data-src','data-original','src'].map(k => img.getAttribute(k)).filter(Boolean) : [];
   };
   const detail = location.pathname.match(/^\/novel\/([1-9]\d*)\.html$/);
   const title = document.querySelector('h1.book-name,h1.book-title');
   if (detail && title) {
-    result.books = [{nid:detail[1],title:title.innerText.trim(),image:
-      (document.querySelector('meta[property="og:image"]')||{}).content ||
-      ((document.querySelector('img.book-cover')||{}).src) ||
-      image(document.querySelector('.book-img,.book-cover,.book-info')||document)}];
+    result.books = [{nid:detail[1],title:title.innerText.trim(),images:[
+      ...images(document.querySelector('img.book-cover')),
+      (document.querySelector('meta[property="og:image"]')||{}).content || '',
+      ...images(document.querySelector('.book-img,.book-cover,.book-info'))
+    ]}];
     result.ready = true; return JSON.stringify(result);
   }
   if (!['/S6/','/search.html'].includes(location.pathname)) return JSON.stringify(result);
@@ -135,7 +136,7 @@ const biliSearchProbeScript =
       const card=a.closest('.bookbox,.rank_d_list,tr,li')||a;
       const text = (card.querySelector('h4.book-title,.rank_d_b_name')||a).innerText.trim();
       if (!m || !text || seen.has(m[1])) continue;
-      seen.add(m[1]); result.books.push({nid:m[1],title:text,image:image(card)});
+      seen.add(m[1]); result.books.push({nid:m[1],title:text,images:images(card)});
       if (result.books.length >= 100) break;
     }
   }

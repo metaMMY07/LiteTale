@@ -8,6 +8,8 @@ import 'package:wild/sources/book_source.dart';
 import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
 import 'package:wild/src/rust/wenku8/models.dart';
 
+const _cdnCover = 'https://img2.readpai.com/image/2/2844/2844s.jpg?1749303677';
+
 const _detail = '''
 <div class="book-html-box">
   <h1 class="book-name">SeaBed</h1>
@@ -272,7 +274,9 @@ void main() {
             calls.add(request.url);
             return request.url.path.endsWith('/catalog')
                 ? _html(_mobileCatalog())
-                : _html(_mobileDetail);
+                : _html(
+                  _mobileDetail.replaceFirst('/cover-mobile.jpg', _cdnCover),
+                );
           }),
         );
 
@@ -285,10 +289,7 @@ void main() {
         expect(result.info.status, '完结');
         expect(result.info.finUpdate, '2025-06-07');
         expect(result.info.tags, ['游戏剧本']);
-        expect(
-          result.info.imgUrl,
-          'https://www.bilinovel.net/cover-mobile.jpg',
-        );
+        expect(result.info.imgUrl, _cdnCover);
         expect(result.info.introduce, '测试用移动版简介');
         expect(result.volumes.map((volume) => volume.id), [
           'bili:2844:vol:278372',
@@ -516,7 +517,7 @@ void main() {
             <ul>
               <li class="module-slide-li">
                 <a class="module-slide-a" href="/novel/2844.html">
-                  <img data-src="/cover-mobile.jpg">
+                  <img data-src="$_cdnCover" src="/themes/zhmb/images/book-cover-no.svg">
                   <h3 class="module-slide-caption">SeaBed</h3>
                 </a>
                 <span class="module-slide-author">不要拼到标题</span>
@@ -529,10 +530,7 @@ void main() {
         final blocks = await source.discover();
         expect(blocks.single.list.single.aid, 'bili:2844');
         expect(blocks.single.list.single.title, 'SeaBed');
-        expect(
-          blocks.single.list.single.img,
-          'https://www.bilinovel.net/cover-mobile.jpg',
-        );
+        expect(blocks.single.list.single.img, _cdnCover);
       },
     );
 

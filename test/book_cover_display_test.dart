@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -22,6 +23,21 @@ class _DecodedImage extends ImageProvider<_DecodedImage> {
       OneFrameImageStreamCompleter(
         SynchronousFuture(ImageInfo(image: pixels.clone())),
       );
+}
+
+class _DeferredCover extends ImageProvider<_DeferredCover> {
+  final requests = <Completer<ImageInfo>>[];
+
+  @override
+  Future<_DeferredCover> obtainKey(ImageConfiguration _) =>
+      SynchronousFuture(this);
+
+  @override
+  ImageStreamCompleter loadImage(_DeferredCover key, ImageDecoderCallback _) {
+    final frame = Completer<ImageInfo>();
+    requests.add(frame);
+    return OneFrameImageStreamCompleter(frame.future);
+  }
 }
 
 final _sources = [
@@ -192,6 +208,84 @@ void main() {
       variant: TargetPlatformVariant.only(platform),
     );
   }
+
+  testWidgets(
+    'Android fades a cover after it is evicted and loaded again on scroll back',
+    (tester) async {
+      final provider = _DeferredCover();
+      final controller = ScrollController();
+      final cache = BookCoverPreviewCache();
+      final pixels = await _bookPixels(tester);
+      final reveal = find.byKey(const ValueKey('cover-reveal'));
+      final androidPlaceholder = find.byKey(
+        const ValueKey('cover-android-placeholder'),
+      );
+      double opacity() => tester.widget<FadeTransition>(reveal).opacity.value;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 120,
+              height: 210,
+              child: ListView.builder(
+                controller: controller,
+                itemCount: 80,
+                itemExtent: 180,
+                cacheExtent: 0,
+                itemBuilder:
+                    (_, index) =>
+                        index == 0
+                            ? BookCoverImage(
+                              url: 'https://example.invalid/scroll.png',
+                              source: SourceId.bili,
+                              imageProvider: provider,
+                              previewCache: cache,
+                            )
+                            : const SizedBox(),
+              ),
+            ),
+          ),
+        ),
+      );
+      provider.requests.single.complete(ImageInfo(image: pixels.clone()));
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(opacity(), 1);
+
+      controller.jumpTo(180 * 40);
+      await tester.pump();
+      expect(find.byType(BookCoverImage), findsNothing);
+      PaintingBinding.instance.imageCache.evict(provider);
+      controller.jumpTo(0);
+      await tester.pump();
+      expect(androidPlaceholder, findsOneWidget);
+      expect(provider.requests, hasLength(2));
+
+      provider.requests.last.complete(ImageInfo(image: pixels.clone()));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(opacity(), inExclusiveRange(0, 1));
+      expect(androidPlaceholder, findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(opacity(), 1);
+
+      controller.jumpTo(180 * 40);
+      await tester.pump();
+      controller.jumpTo(0);
+      await tester.pump();
+      expect(provider.requests, hasLength(2));
+      expect(opacity(), 1);
+      expect(androidPlaceholder, findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      PaintingBinding.instance.imageCache.evict(provider);
+      controller.dispose();
+      pixels.dispose();
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
 
   testWidgets(
     'offstage prefetch does not consume the first on-screen transition',

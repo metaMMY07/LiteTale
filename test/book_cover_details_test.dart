@@ -79,7 +79,7 @@ Widget _cover(
 
 void main() {
   testWidgets(
-    'new cover fades in place; a previously displayed cover is immediate',
+    'new cover fades in place; a previously displayed memory hit is immediate',
     (tester) async {
       final cache = BookCoverPreviewCache(), provider = _Image();
       await tester.pumpWidget(_cover(provider, cache));
@@ -112,10 +112,7 @@ void main() {
         findsNothing,
       );
       await tester.pumpWidget(const SizedBox());
-      final second = _Image();
-      await tester.pumpWidget(_cover(second, cache));
-      second.ready.complete(ImageInfo(image: pixels.clone()));
-      await tester.pump();
+      await tester.pumpWidget(_cover(provider, cache));
       expect(
         tester
             .widget<FadeTransition>(find.byKey(const ValueKey('cover-reveal')))

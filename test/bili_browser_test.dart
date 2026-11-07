@@ -6,6 +6,8 @@ import 'package:wild/services/read_request.dart';
 import 'package:flutter/foundation.dart';
 import 'package:wild/sources/bili_site_source.dart';
 
+const _cdnCover = 'https://img2.readpai.com/image/2/2844/2844s.jpg?1749303677';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   BiliBrowserSession session(
@@ -28,6 +30,8 @@ void main() {
     final result = await s.search('seabed', 1);
     expect(result.records.single.aid, 'bili:2844');
     expect(result.records.single.title, 'SeaBed');
+    expect(result.records.single.img, _cdnCover);
+    expect(BiliBrowserSession.allowsNavigation(_cdnCover), isFalse);
     expect(p.urls, ['https://www.bilinovel.net/search.html', 'about:blank']);
     expect(p.submitted, true);
   });
@@ -551,7 +555,11 @@ class _Port implements BiliBrowserPort {
           {
             'nid': '2844',
             'title': 'SeaBed',
-            'image': 'https://www.linovelib.com/cover.jpg',
+            'images': [
+              'https://img2.readpai.com.example.test/image/2/2844/2844s.jpg',
+              '/themes/zhmb/images/book-cover-no.svg',
+              _cdnCover,
+            ],
           },
         ],
         'next': next,

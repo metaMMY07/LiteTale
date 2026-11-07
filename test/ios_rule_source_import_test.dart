@@ -67,10 +67,7 @@ void main() {
           name: '幻梦轻小说.json',
         ),
       );
-      expect(
-        inspectSourceImport(raw, platform: TargetPlatform.iOS).single.error,
-        isNull,
-      );
+      expect(inspectSourceImport(raw).single.error, isNull);
       await expectLater(
         readSourceImportFile(
           XFile.fromData(Uint8List.fromList([0xff]), name: 'wrong.json'),
@@ -90,34 +87,17 @@ void main() {
   );
 
   test(
-    'original source is accepted on iOS, while the existing Android subset stays unchanged',
+    'the shared importer accepts the original rule and rejects arbitrary scripts',
     () {
-      final item =
-          inspectSourceImport(
-            huanmengSourceJson,
-            platform: TargetPlatform.iOS,
-          ).single;
+      final item = inspectSourceImport(huanmengSourceJson).single;
       expect(item.error, isNull);
       expect(item.definition!.name, '幻梦轻小说');
       expect(item.definition!.capabilities.search, isTrue);
       expect(item.definition!.capabilities.discover, isFalse);
       expect(item.notices, isNotEmpty);
-      expect(
-        inspectSourceImport(
-          huanmengSourceJson,
-          platform: TargetPlatform.android,
-        ).single.error,
-        isNotNull,
-      );
       final invalid = jsonDecode(huanmengSourceJson) as List;
       invalid.single['ruleContent']['content'] = '@js:java.getSecret()';
-      expect(
-        inspectSourceImport(
-          jsonEncode(invalid),
-          platform: TargetPlatform.iOS,
-        ).single.error,
-        isNotNull,
-      );
+      expect(inspectSourceImport(jsonEncode(invalid)).single.error, isNotNull);
     },
   );
 
@@ -131,23 +111,34 @@ void main() {
       );
       addTearDown(registry.dispose);
       await registry.load(builtIns: []);
-      final original =
-          inspectSourceImport(
-            huanmengSourceJson,
-            platform: TargetPlatform.iOS,
-          ).single.definition!;
-      await registry.install([original]);
+      final input = jsonDecode(huanmengSourceJson) as List;
+      input.single['lastUpdateTime'] = 100;
+      final item = inspectSourceImport(jsonEncode(input)).single;
+      final original = item.definition!;
+      await registry.install(
+        [original],
+        updateTimes: {original.id: item.updateTime!},
+      );
+      await registry.rename(original.id, '本机名称');
       await registry.setEnabled(original.id, false);
       final updated = jsonDecode(huanmengSourceJson) as List;
       updated.single['bookSourceName'] = '幻梦新名称';
       updated.single['ruleSearch']['name'] = 'dt@text##^新';
-      final replacement =
+      updated.single['lastUpdateTime'] = 200;
+      final preview =
           inspectSourceImport(
             jsonEncode(updated),
-            platform: TargetPlatform.iOS,
-          ).single.definition!;
+            installedSources: registry.entries,
+          ).single;
+      expect(preview.status, SourceImportStatus.updated);
+      final replacement = preview.definition!;
       expect(replacement.id, original.id);
-      await registry.install([replacement], replace: true);
+      await registry.install(
+        [replacement],
+        replace: true,
+        updateTimes: {replacement.id: preview.updateTime!},
+        previewedSources: {replacement.id: preview.existing},
+      );
       expect(registry[original.id]!.enabled, isFalse);
       expect(registry.entries, hasLength(1));
       final restored = RuleSourceRegistry(
@@ -157,6 +148,22 @@ void main() {
       addTearDown(restored.dispose);
       await restored.load(builtIns: []);
       final definition = restored[original.id]!.definition;
+      expect(definition.name, '本机名称');
+      expect(restored[original.id]!.enabled, isFalse);
+      expect(
+        inspectSourceImport(
+          jsonEncode(input),
+          installedSources: restored.entries,
+        ).single.status,
+        SourceImportStatus.older,
+      );
+      expect(
+        inspectSourceImport(
+          jsonEncode(updated),
+          installedSources: restored.entries,
+        ).single.status,
+        SourceImportStatus.unchanged,
+      );
       expect(definition.importKey, 'https://www.huanmengacg.com');
       expect(definition.userAgent, contains('Chrome/124'));
       expect(definition.cookieJar, isTrue);
@@ -178,10 +185,7 @@ void main() {
     addTearDown(registry.dispose);
     await registry.load(builtIns: []);
     final definition =
-        inspectSourceImport(
-          huanmengSourceJson,
-          platform: TargetPlatform.iOS,
-        ).single.definition!;
+        inspectSourceImport(huanmengSourceJson).single.definition!;
     await registry.install([definition]);
     fail = true;
     await expectLater(
@@ -197,10 +201,7 @@ void main() {
     'a later simplified rule keeps the already imported URL identity',
     () async {
       final installed =
-          inspectSourceImport(
-            huanmengSourceJson,
-            platform: TargetPlatform.iOS,
-          ).single.definition!;
+          inspectSourceImport(huanmengSourceJson).single.definition!;
       final simpler = <String, dynamic>{
         'bookSourceName': '改名后的幻梦',
         'bookSourceUrl': 'https://www.huanmengacg.com',
@@ -218,19 +219,24 @@ void main() {
         },
         'ruleContent': {'content': '#content@html'},
       };
-      expect(
-        RuleSourceDefinition.fromLegadoJson(simpler).id,
-        isNot(installed.id),
-      );
+      final legacy = RuleSourceDefinition.fromLegadoJson(simpler);
+      expect(legacy.id, isNot(installed.id));
       final updated =
           inspectSourceImport(
             jsonEncode(simpler),
-            platform: TargetPlatform.iOS,
             installedSources: [InstalledRuleSource(installed)],
           ).single.definition!;
       expect(updated.id, installed.id);
       expect(updated.importKey, installed.importKey);
       expect(updated.name, '改名后的幻梦');
+      final migrated =
+          inspectSourceImport(
+            huanmengSourceJson,
+            installedSources: [InstalledRuleSource(legacy)],
+          ).single;
+      expect(migrated.status, SourceImportStatus.updated);
+      expect(migrated.definition!.id, legacy.id);
+      expect(migrated.definition!.importKey, installed.importKey);
     },
   );
 
