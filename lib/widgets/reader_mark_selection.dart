@@ -100,6 +100,20 @@ class ReaderMarkSelection extends ValueNotifier<ReaderTextSelection?> {
         continue;
       }
       final target = region.widget.location;
+      // Reopen the entire saved range when a hold lands on its painted text.
+      // A word within a multi-line highlight must still offer Remove.
+      for (final saved in _ranges(target).reversed) {
+        if (!region
+            .globalRects(saved.start, saved.end)
+            .any((rect) => rect.contains(global))) {
+          continue;
+        }
+        final reopened = _make(target.at(saved.start), saved.end, group);
+        if (reopened == null) continue;
+        onStart?.call();
+        value = reopened;
+        return true;
+      }
       final position = region.position(global);
       if (position == null) continue;
       final word = region.box?.word(position);
@@ -199,7 +213,7 @@ class ReaderMarkSelection extends ValueNotifier<ReaderTextSelection?> {
   }
 
   ReaderMark? matching(ReaderTextSelection selection) {
-    for (final range in _ranges(selection.location)) {
+    for (final range in _ranges(selection.location).reversed) {
       if (range.start == selection.location.offset &&
           range.end == selection.end &&
           range.mark.quote == selection.quote) {

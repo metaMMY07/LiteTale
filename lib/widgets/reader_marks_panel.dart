@@ -113,8 +113,9 @@ class _ReaderMarkLayerState extends State<ReaderMarkLayer> {
 
   Future<void> _highlight(
     ReaderTextSelection target,
-    ReaderMarkColor color,
-  ) async {
+    ReaderMarkColor color, {
+    bool showPalette = true,
+  }) async {
     if (_busy) return;
     setState(() {
       _busy = true;
@@ -123,6 +124,9 @@ class _ReaderMarkLayerState extends State<ReaderMarkLayer> {
     try {
       await _save(target, color);
       _selection.lastColor = color;
+      if (!showPalette && mounted && identical(_palette, target)) {
+        setState(() => _palette = null);
+      }
     } catch (_) {
       if (mounted) {
         setState(() => _palette = null);
@@ -167,6 +171,45 @@ class _ReaderMarkLayerState extends State<ReaderMarkLayer> {
       }
     } catch (_) {
       if (mounted) showReaderMarkError(context, '笔记保存失败，请重试');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _remove(ReaderTextSelection target, ReaderMark mark) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      if (mark.note.isNotEmpty) {
+        final confirmed = await showAdaptiveDialog<bool>(
+          context: context,
+          builder:
+              (dialog) => AlertDialog.adaptive(
+                title: const Text('移除高亮？'),
+                content: const Text('这段高亮附带的笔记也会删除。'),
+                actions: [
+                  AppButton.text(
+                    onPressed: () => Navigator.pop(dialog, false),
+                    child: const Text('取消'),
+                  ),
+                  AppButton.text(
+                    onPressed: () => Navigator.pop(dialog, true),
+                    child: Text(
+                      '移除高亮',
+                      style: TextStyle(
+                        color: Theme.of(dialog).colorScheme.error,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+        );
+        if (!mounted || confirmed != true) return;
+      }
+      await _selection.store.remove(_selection.book, mark.id);
+      if (mounted && identical(_selection.value, target)) _selection.clear();
+    } catch (_) {
+      if (mounted) showReaderMarkError(context, '无法移除高亮，请重试');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -286,11 +329,33 @@ class _ReaderMarkLayerState extends State<ReaderMarkLayer> {
     bool palette,
     bool reduced,
   ) {
-    final color = _selection.matching(target)?.color ?? _selection.lastColor;
+    final existing = _selection.matching(target);
+    final color = existing?.color ?? _selection.lastColor;
     final theme = Theme.of(context);
     final ink = theme.colorScheme.onSurface;
+    final divider = VerticalDivider(
+      width: 1,
+      indent: 13,
+      endIndent: 13,
+      color: ink.withValues(alpha: .16),
+    );
+    Widget action(String label, VoidCallback onPressed, {Color? color}) =>
+        Expanded(
+          child: AppButton.text(
+            onPressed: _busy ? null : onPressed,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+            ),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: color ?? ink),
+            ),
+          ),
+        );
     final content = SizedBox(
-      width: 224,
+      width: palette || existing == null ? 224 : 286,
       height: 48,
       child: AnimatedSwitcher(
         duration: reduced ? Duration.zero : _markMotion,
@@ -315,7 +380,13 @@ class _ReaderMarkLayerState extends State<ReaderMarkLayer> {
                           tooltip: option.label,
                           isSelected: option == color,
                           onPressed:
-                              _busy ? null : () => _highlight(target, option),
+                              _busy
+                                  ? null
+                                  : () => _highlight(
+                                    target,
+                                    option,
+                                    showPalette: false,
+                                  ),
                           icon: Icon(
                             Icons.circle,
                             color: Color(option.argb),
@@ -333,25 +404,17 @@ class _ReaderMarkLayerState extends State<ReaderMarkLayer> {
                 : Row(
                   key: const ValueKey('highlight-actions'),
                   children: [
-                    Expanded(
-                      child: AppButton.text(
-                        onPressed:
-                            _busy ? null : () => _highlight(target, color),
-                        child: Text('高亮', style: TextStyle(color: ink)),
+                    action('高亮', () => _highlight(target, color)),
+                    divider,
+                    action('添加笔记', () => _note(target)),
+                    if (existing != null) ...[
+                      divider,
+                      action(
+                        '移除',
+                        () => _remove(target, existing),
+                        color: theme.colorScheme.error,
                       ),
-                    ),
-                    VerticalDivider(
-                      width: 1,
-                      indent: 13,
-                      endIndent: 13,
-                      color: ink.withValues(alpha: .16),
-                    ),
-                    Expanded(
-                      child: AppButton.text(
-                        onPressed: _busy ? null : () => _note(target),
-                        child: Text('添加笔记', style: TextStyle(color: ink)),
-                      ),
-                    ),
+                    ],
                   ],
                 ),
       ),

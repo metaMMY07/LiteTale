@@ -117,140 +117,174 @@ void main() {
     await cubit.close();
   });
 
-  testWidgets('long press shows two actions, then saves a color and a note', (
-    tester,
-  ) async {
-    const text = 'Alpha beta gamma.';
-    final viewport = GlobalKey();
-    final memory = <String, String>{};
-    final store = ReaderMarkStore(
-      read: (key) async => memory[key] ?? '',
-      write: (key, value) async => memory[key] = value,
-    );
-    final selection = ReaderMarkSelection(
-      viewport: viewport,
-      book: 'lns:1',
-      store: store,
-      chapterText: (chapter, axis) => (text: text, encoded: false),
-      canSelect: (_) => true,
-    );
-    addTearDown(selection.dispose);
-    final paragraph = GlobalKey();
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder:
-                (context) => Stack(
-                  key: viewport,
-                  children: [
-                    Positioned(
-                      top: 160,
-                      left: 32,
-                      child: ReaderMarkedRegion(
-                        selection: selection,
-                        location: _location.at(0),
-                        group: 0,
-                        text: text,
-                        child: RichText(
-                          key: paragraph,
-                          text: const TextSpan(
-                            text: text,
-                            style: TextStyle(fontSize: 22, color: Colors.black),
+  testWidgets(
+    'a saved highlight reopens its full range and can be removed in place',
+    (tester) async {
+      const text = 'Alpha beta gamma.';
+      final viewport = GlobalKey();
+      final memory = <String, String>{};
+      final store = ReaderMarkStore(
+        read: (key) async => memory[key] ?? '',
+        write: (key, value) async => memory[key] = value,
+      );
+      final selection = ReaderMarkSelection(
+        viewport: viewport,
+        book: 'lns:1',
+        store: store,
+        chapterText: (chapter, axis) => (text: text, encoded: false),
+        canSelect: (_) => true,
+      );
+      addTearDown(selection.dispose);
+      final paragraph = GlobalKey();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder:
+                  (context) => Stack(
+                    key: viewport,
+                    children: [
+                      Positioned(
+                        top: 160,
+                        left: 32,
+                        child: ReaderMarkedRegion(
+                          selection: selection,
+                          location: _location.at(0),
+                          group: 0,
+                          text: text,
+                          child: RichText(
+                            key: paragraph,
+                            text: const TextSpan(
+                              text: text,
+                              style: TextStyle(
+                                fontSize: 22,
+                                color: Colors.black,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    Positioned(
-                      bottom: 20,
-                      left: 20,
-                      child: TextButton(
-                        onPressed:
-                            () => showReaderMarks(
-                              context,
-                              selection: selection,
-                              current: _location,
-                            ),
-                        child: const Text('打开标记'),
+                      Positioned(
+                        bottom: 20,
+                        left: 20,
+                        child: TextButton(
+                          onPressed:
+                              () => showReaderMarks(
+                                context,
+                                selection: selection,
+                                current: _location,
+                              ),
+                          child: const Text('打开标记'),
+                        ),
                       ),
-                    ),
-                    Positioned.fill(
-                      child: ReaderMarkLayer(selection: selection),
-                    ),
-                  ],
-                ),
+                      Positioned.fill(
+                        child: ReaderMarkLayer(selection: selection),
+                      ),
+                    ],
+                  ),
+            ),
           ),
         ),
-      ),
-    );
-    final glyphs =
-        paragraph.currentContext!.findRenderObject()! as RenderParagraph;
-    final rect =
-        glyphs
-            .getBoxesForSelection(
-              const TextSelection(baseOffset: 7, extentOffset: 8),
-            )
-            .single
-            .toRect();
-    final point = glyphs.localToGlobal(rect.center);
-    await tester.longPressAt(point);
-    await tester.pumpAndSettle();
-    expect(selection.value?.quote, 'beta');
-    expect(find.text('高亮'), findsOneWidget);
-    expect(find.text('添加笔记'), findsOneWidget);
-    expect(find.text('翻译'), findsNothing);
-    expect(
-      find.byKey(const ValueKey('selection-start-handle')),
-      findsOneWidget,
-    );
-    expect(find.byKey(const ValueKey('selection-end-handle')), findsOneWidget);
-    final endGrip = tester.getCenter(
-      find.byKey(const ValueKey('selection-end-handle')),
-    );
-    final nextWord =
-        glyphs
-            .getBoxesForSelection(
-              const TextSelection(baseOffset: 11, extentOffset: 16),
-            )
-            .single
-            .toRect();
-    final right = glyphs.localToGlobal(nextWord.bottomRight).dx;
-    await tester.dragFrom(endGrip, Offset(right - endGrip.dx, 0));
-    await tester.pumpAndSettle();
-    expect(selection.value?.quote, startsWith('beta gam'));
-    selection.clear();
-    await tester.pumpAndSettle();
-    await tester.longPressAt(point);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('高亮'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('粉色'));
-    await tester.pumpAndSettle();
-    expect(store.marks('lns:1').single.color, ReaderMarkColor.pink);
-    selection.clear();
-    await tester.pumpAndSettle();
-    await tester.longPressAt(point);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('添加笔记'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), '这段值得记下来');
-    await tester.pump();
-    await tester.tap(find.text('保存'));
-    await tester.pumpAndSettle();
-    expect(store.marks('lns:1').single.note, '这段值得记下来');
-    expect(store.marks('lns:1').single.color, ReaderMarkColor.pink);
-    await tester.tap(find.text('打开标记'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('添加当前位置书签'));
-    await tester.pumpAndSettle();
-    expect(store.marks('lns:1').where((m) => m.isBookmark), hasLength(1));
-    await tester.tap(find.text('移除当前位置书签'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('高亮'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('这段值得记下来'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
+      );
+      final glyphs =
+          paragraph.currentContext!.findRenderObject()! as RenderParagraph;
+      final rect =
+          glyphs
+              .getBoxesForSelection(
+                const TextSelection(baseOffset: 7, extentOffset: 8),
+              )
+              .single
+              .toRect();
+      final point = glyphs.localToGlobal(rect.center);
+      await tester.longPressAt(point);
+      await tester.pumpAndSettle();
+      expect(selection.value?.quote, 'beta');
+      expect(find.text('高亮'), findsOneWidget);
+      expect(find.text('添加笔记'), findsOneWidget);
+      expect(find.text('翻译'), findsNothing);
+      expect(find.text('移除'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('selection-start-handle')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('selection-end-handle')),
+        findsOneWidget,
+      );
+      final endGrip = tester.getCenter(
+        find.byKey(const ValueKey('selection-end-handle')),
+      );
+      final nextWord =
+          glyphs
+              .getBoxesForSelection(
+                const TextSelection(baseOffset: 11, extentOffset: 16),
+              )
+              .single
+              .toRect();
+      final right = glyphs.localToGlobal(nextWord.bottomRight).dx;
+      await tester.dragFrom(endGrip, Offset(right - endGrip.dx, 0));
+      await tester.pumpAndSettle();
+      expect(selection.value?.quote, startsWith('beta gam'));
+      final highlighted = selection.value!.quote;
+      await tester.tap(find.text('高亮'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('粉色'));
+      await tester.pumpAndSettle();
+      expect(store.marks('lns:1').single.color, ReaderMarkColor.pink);
+      expect(find.text('移除'), findsOneWidget);
+      selection.clear();
+      await tester.pumpAndSettle();
+      await tester.longPressAt(point);
+      await tester.pumpAndSettle();
+      expect(selection.value!.quote, highlighted);
+      expect(find.text('移除'), findsOneWidget);
+      await tester.tap(find.text('添加笔记'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '这段值得记下来');
+      await tester.pump();
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.marks('lns:1').single.note, '这段值得记下来');
+      expect(store.marks('lns:1').single.color, ReaderMarkColor.pink);
+      await tester.tap(find.text('打开标记'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('添加当前位置书签'));
+      await tester.pumpAndSettle();
+      expect(store.marks('lns:1').where((m) => m.isBookmark), hasLength(1));
+      await tester.tap(find.text('移除当前位置书签'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('高亮'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('这段值得记下来'), findsOneWidget);
+      await tester.tap(find.byTooltip('关闭'));
+      await tester.pumpAndSettle();
+      await store.saveHighlight(
+        'lns:1',
+        _location.at(0),
+        quote: 'Alpha',
+        color: ReaderMarkColor.yellow,
+      );
+      await tester.pump();
+      await tester.longPressAt(point);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('移除'));
+      await tester.pumpAndSettle();
+      expect(find.text('这段高亮附带的笔记也会删除。'), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(store.marks('lns:1'), hasLength(2));
+      await tester.tap(find.text('移除'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('移除高亮'));
+      await tester.pumpAndSettle();
+      expect(store.marks('lns:1').single.quote, 'Alpha');
+      expect(selection.value, isNull);
+      await tester.longPressAt(point);
+      await tester.pumpAndSettle();
+      expect(find.text('移除'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('EPUB selection uses the asynchronously loaded DOM glyphs', (
     tester,
