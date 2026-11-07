@@ -18,6 +18,7 @@ import 'package:wild/pages/novel/theme_cubit.dart';
 import 'package:wild/services/reader_typography.dart';
 import 'package:wild/widgets/reader_system_ui_scope.dart';
 import 'package:wild/widgets/reader_paper_view.dart';
+import 'package:wild/widgets/reader_illustration.dart';
 import 'package:wild/widgets/reader_footer.dart';
 import 'package:wild/cubits/screen_keep_on.dart';
 import 'package:wild/utils/controller_event.dart';
@@ -202,6 +203,8 @@ class _ReaderViewState extends State<_ReaderView> {
   );
   late ReaderCoverController _pageController;
   final _curlKey = GlobalKey<PageCurlViewState>();
+  final _imageViewport = GlobalKey();
+  late final _visibleImages = ReaderImageHitRegistry(_imageViewport);
   bool _wasCurlEnabled = false;
   Size? _lastLayoutSize;
   EdgeInsets? _lastLayoutPadding;
@@ -252,9 +255,30 @@ class _ReaderViewState extends State<_ReaderView> {
     super.dispose();
   }
 
+  void _handleMenuTap() {
+    final cubit = context.read<ReaderCubit>();
+    final state = cubit.state;
+    if (state is! ReaderLoaded) return;
+    if (!state.showControls) {
+      final first = state.layout.firstPage(
+        state.layout.viewIndex(state.currentPageIndex),
+      );
+      final visibleLeaves = state.pages
+          .skip(first)
+          .take(state.layout.isSpread ? 2 : 1);
+      if (visibleLeaves.any(
+            (page) => page.isImage || page.artworkText != null,
+          ) ||
+          _visibleImages.hasVisibleImage) {
+        return;
+      }
+    }
+    cubit.toggleControls();
+  }
+
   void _handleTap(TapUpDetails details) {
     if (!settingsPreferencesOf(context, listen: false).tapToTurn) {
-      context.read<ReaderCubit>().toggleControls();
+      _handleMenuTap();
       return;
     }
     final screenWidth = MediaQuery.of(context).size.width;
@@ -290,7 +314,7 @@ class _ReaderViewState extends State<_ReaderView> {
       }
     } else {
       // 点击中央区域，切换菜单栏显示状态
-      context.read<ReaderCubit>().toggleControls();
+      _handleMenuTap();
     }
   }
 
@@ -572,8 +596,7 @@ class _ReaderViewState extends State<_ReaderView> {
                             tapToTurn: preferences.tapToTurn,
                             paperDecoration: paperDecoration,
                             paperColor: backgroundColor,
-                            onCenterTap:
-                                context.read<ReaderCubit>().toggleControls,
+                            onCenterTap: _handleMenuTap,
                             onBoundaryTurn: _handleBoundaryTurn,
                             pageBuilder:
                                 (context, index) =>
@@ -587,27 +610,34 @@ class _ReaderViewState extends State<_ReaderView> {
                                 child: curl,
                               );
                         }
-                        return GestureDetector(
-                          onTapUp: _handleTap,
-                          child: ReaderCoverView(
-                            controller: _pageController,
-                            index: _viewIndex,
-                            pageCount: _viewCount,
-                            leafCount: widget.state.pages.length,
-                            isSpread: widget.state.layout.isSpread,
-                            active: !state.showControls,
-                            revision: Object.hash(
-                              widget.state.presentationKey ??
-                                  widget.state.pages,
-                              paperDecoration,
-                              widget.title,
+                        return ReaderImageHitScope(
+                          registry: _visibleImages,
+                          child: GestureDetector(
+                            key: _imageViewport,
+                            onTapUp: _handleTap,
+                            child: ReaderCoverView(
+                              controller: _pageController,
+                              index: _viewIndex,
+                              pageCount: _viewCount,
+                              leafCount: widget.state.pages.length,
+                              isSpread: widget.state.layout.isSpread,
+                              active: !state.showControls,
+                              revision: Object.hash(
+                                widget.state.presentationKey ??
+                                    widget.state.pages,
+                                paperDecoration,
+                                widget.title,
+                              ),
+                              paperDecoration: paperDecoration,
+                              onPageChanged: _onViewChanged,
+                              onBoundaryTurn: _handleBoundaryTurn,
+                              pageBuilder:
+                                  (context, index) => _buildReaderPage(
+                                    context,
+                                    index,
+                                    textColor,
+                                  ),
                             ),
-                            paperDecoration: paperDecoration,
-                            onPageChanged: _onViewChanged,
-                            onBoundaryTurn: _handleBoundaryTurn,
-                            pageBuilder:
-                                (context, index) =>
-                                    _buildReaderPage(context, index, textColor),
                           ),
                         );
                       },

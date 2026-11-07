@@ -90,6 +90,8 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final ScrollController _scrollController;
   final _readingSessionKey = GlobalKey<ReadingSessionScopeState>();
+  final _imageViewport = GlobalKey();
+  late final _visibleImages = ReaderImageHitRegistry(_imageViewport);
   late final FrameAutoScroller _autoScroller;
 
   @override
@@ -314,8 +316,14 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                                     ),
                                   // 底层内容
                                   GestureDetector(
+                                    key: _imageViewport,
                                     onTap: () {
-                                      context.read<FullscreenCubit>().toggle();
+                                      final fullscreen =
+                                          context.read<FullscreenCubit>();
+                                      if (!fullscreen.state ||
+                                          !_visibleImages.hasVisibleImage) {
+                                        fullscreen.toggle();
+                                      }
                                     },
                                     child:
                                         state is HtmlReaderLoading
@@ -385,28 +393,25 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                                               ),
                                             )
                                             : state is HtmlReaderLoaded
-                                            ? _ReaderContent(
-                                              parsedContent:
-                                                  state.parsedContent,
-                                              // The open book owns its image policy;
-                                              // never read the global setting here.
-                                              source: sourceOf(
-                                                context
-                                                    .read<HtmlReaderCubit>()
-                                                    .initialAid,
+                                            ? ReaderImageHitScope(
+                                              registry: _visibleImages,
+                                              child: _ReaderContent(
+                                                parsedContent:
+                                                    state.parsedContent,
+                                                // The open book owns its image
+                                                // policy, including on scroll.
+                                                source: sourceOf(
+                                                  context
+                                                      .read<HtmlReaderCubit>()
+                                                      .initialAid,
+                                                ),
+                                                onPreviousChapter:
+                                                    cubit.goToPreviousChapter,
+                                                onNextChapter:
+                                                    cubit.goToNextChapter,
+                                                scrollController:
+                                                    _scrollController,
                                               ),
-                                              onPreviousChapter: () {
-                                                context
-                                                    .read<HtmlReaderCubit>()
-                                                    .goToPreviousChapter();
-                                              },
-                                              onNextChapter: () {
-                                                context
-                                                    .read<HtmlReaderCubit>()
-                                                    .goToNextChapter();
-                                              },
-                                              scrollController:
-                                                  _scrollController,
                                             )
                                             : const SizedBox.shrink(),
                                   ),

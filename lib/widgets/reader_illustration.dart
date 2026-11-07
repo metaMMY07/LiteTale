@@ -2,14 +2,42 @@ import 'package:flutter/material.dart';
 import 'package:wild/pages/novel/reader_image_viewer.dart';
 import 'package:wild/services/reader_images.dart';
 
-/// Native curl pages are snapshots. Retain their interactive regions separately.
+/// Tracks illustration visibility and the hotspots used by native curl pages.
 class ReaderImageHitRegistry {
   ReaderImageHitRegistry(this.anchor);
   final GlobalKey anchor;
-  final _regions = <Object, ({BuildContext context, VoidCallback open})>{};
-  void register(Object token, BuildContext context, VoidCallback open) =>
+  final _regions = <Object, ({BuildContext context, VoidCallback? open})>{};
+  void register(Object token, BuildContext context, {VoidCallback? open}) =>
       _regions[token] = (context: context, open: open);
   void unregister(Object token) => _regions.remove(token);
+
+  bool get hasVisibleImage {
+    final viewport = anchor.currentContext?.findRenderObject();
+    if (viewport is! RenderBox || !viewport.attached || !viewport.hasSize) {
+      return false;
+    }
+    final bounds = Offset.zero & viewport.size;
+    for (final region in _regions.values) {
+      final target = region.context.findRenderObject();
+      if (target is! RenderBox || !target.attached || !target.hasSize) continue;
+
+      // Preloaded page leaves and cached scroll rows can still be mounted.
+      RenderObject child = target;
+      while (child != viewport) {
+        final parent = child.parent;
+        if (parent == null || !parent.paintsChild(child)) break;
+        child = parent;
+      }
+      if (child != viewport) continue;
+      final rect = MatrixUtils.transformRect(
+        target.getTransformTo(viewport),
+        Offset.zero & target.size,
+      );
+      if (rect.isFinite && rect.overlaps(bounds)) return true;
+    }
+    return false;
+  }
+
   Map<int, ({Rect rect, VoidCallback open})> get regions {
     final box = anchor.currentContext?.findRenderObject();
     if (box is! RenderBox ||
@@ -21,6 +49,8 @@ class ReaderImageHitRegistry {
     final result = <int, ({Rect rect, VoidCallback open})>{};
     var id = 0;
     for (final region in _regions.values) {
+      final open = region.open;
+      if (open == null) continue;
       final target = region.context.findRenderObject();
       if (target is! RenderBox || !target.attached || !target.hasSize) continue;
       final origin = target.localToGlobal(Offset.zero, ancestor: box);
@@ -30,7 +60,7 @@ class ReaderImageHitRegistry {
         target.size.width / box.size.width,
         target.size.height / box.size.height,
       );
-      result[id++] = (rect: rect, open: region.open);
+      result[id++] = (rect: rect, open: open);
     }
     return result;
   }
@@ -119,7 +149,7 @@ class _ReaderImageRegionState extends State<ReaderImageRegion> {
       _registry?.unregister(this);
       _registry = next;
     }
-    _registry?.register(this, context, _open);
+    _registry?.register(this, context, open: _open);
   }
 
   @override
@@ -155,6 +185,7 @@ class ReaderIllustration extends StatefulWidget {
 }
 
 class _ReaderIllustrationState extends State<ReaderIllustration> {
+  ReaderImageHitRegistry? _registry;
   ImageStream? _stream;
   Size? _size;
   late final _listener = ImageStreamListener((image, synchronous) {
@@ -174,6 +205,12 @@ class _ReaderIllustrationState extends State<ReaderIllustration> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final next = ReaderImageHitScope.of(context);
+    if (next != _registry) {
+      _registry?.unregister(this);
+      _registry = next;
+    }
+    _registry?.register(this, context);
     _resolve();
   }
 
@@ -188,6 +225,7 @@ class _ReaderIllustrationState extends State<ReaderIllustration> {
 
   @override
   void dispose() {
+    _registry?.unregister(this);
     _stream?.removeListener(_listener);
     super.dispose();
   }
