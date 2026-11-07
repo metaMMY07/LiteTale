@@ -138,6 +138,7 @@ class ReaderParagraphLayout {
   late final TextPainter painter;
   late final double left;
   late final int prefixLength;
+  Offset get textOrigin => Offset(left + _textLeft, textTop);
   bool get isTable => _cells.isNotEmpty;
   double get height =>
       textTop +

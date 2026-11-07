@@ -52,6 +52,12 @@ class EpubCssReader {
     ttl: const Duration(minutes: 10),
     weightOf: (regions) => regions.length * 256,
   );
+  static final _glyphs = ReadResultCache<String, List<ReaderCssMarkGlyph>>(
+    maxEntries: 8,
+    maxWeight: 2 * 1024 * 1024,
+    ttl: const Duration(minutes: 4),
+    weightOf: (glyphs) => glyphs.length * 128,
+  );
   bool _closed = false;
 
   static Future<T> _exclusive<T>(Future<T> Function() action) {
@@ -188,9 +194,82 @@ class EpubCssReader {
                   .trim(),
           read: () => _image(recipe, index),
           readImages: () => _imageRegions(recipe, index),
+          markText: text,
+          readMarkGlyphs:
+              () => _markGlyphs(recipe, index, domStart, domEnd, text.length),
         ),
       );
     });
+  }
+
+  Future<List<ReaderCssMarkGlyph>> _markGlyphs(
+    _Chapter recipe,
+    int index,
+    int start,
+    int end,
+    int textLength,
+  ) async {
+    _check();
+    _checkSource(recipe);
+    final result = await _glyphs.getOrLoad('${recipe.id}:$index', () async {
+      final raw = await _exclusive(() async {
+        await _ensure(recipe, sharedLoad: true);
+        Future<List<dynamic>> read() async =>
+            await _channel
+                .invokeListMethod<dynamic>('markGlyphs', {
+                  'id': recipe.id,
+                  'page': index,
+                })
+                .timeout(const Duration(seconds: 20)) ??
+            const [];
+        try {
+          return await read();
+        } on PlatformException catch (error) {
+          if (error.code != 'missing_session') rethrow;
+          _layouts.clear();
+          await _ensure(recipe, sharedLoad: true);
+          return read();
+        }
+      });
+      _checkSource(recipe);
+      if (raw.length > 8192) throw StateError('本页文字区域过多');
+      final glyphs = <ReaderCssMarkGlyph>[];
+      for (final item in raw) {
+        if (item is! List ||
+            item.length != 8 ||
+            item.take(4).any((n) => n is! int) ||
+            item
+                .skip(4)
+                .any((n) => n is! num || !n.isFinite || n < 0 || n > 1)) {
+          throw StateError('文字位置无效');
+        }
+        final lo = item[0] as int, hi = item[1] as int;
+        final wordLo = item[2] as int, wordHi = item[3] as int;
+        if (lo < start ||
+            hi > end ||
+            lo >= hi ||
+            wordLo < start ||
+            wordLo > lo ||
+            wordHi < hi ||
+            wordHi > end ||
+            wordHi > textLength) {
+          throw StateError('文字范围无效');
+        }
+        final rect = Rect.fromLTRB(
+          (item[4] as num).toDouble(),
+          (item[5] as num).toDouble(),
+          (item[6] as num).toDouble(),
+          (item[7] as num).toDouble(),
+        );
+        if (!rect.isEmpty) {
+          glyphs.add(ReaderCssMarkGlyph(lo, hi, wordLo, wordHi, rect));
+        }
+      }
+      return List<ReaderCssMarkGlyph>.unmodifiable(glyphs);
+    });
+    _check();
+    _checkSource(recipe);
+    return result;
   }
 
   Future<List<ReaderCssImageRegion>> _imageRegions(
@@ -353,6 +432,7 @@ class EpubCssReader {
     _idleTimer = null;
     _images.clear();
     _regions.clear();
+    _glyphs.clear();
     _layouts.clear();
     await _exclusive(() async {
       if (_activeReaders != 0) return;

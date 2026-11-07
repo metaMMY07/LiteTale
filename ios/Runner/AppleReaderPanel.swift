@@ -51,7 +51,7 @@ final class AppleReaderPanelChannel: NSObject {
                   let row = form.model.sections.flatMap({ $0.rows }).first(where: { $0.id == id }) {
           form.model.commit(row, value); result(nil)
         } else if call.method == "testSelect", let id = input["id"] as? String {
-          form.model.selectChapter?(id); result(nil)
+          form.model.selectRow?(id); result(nil)
         } else if call.method == "testClose" {
           form.onClose?(nil); result(nil)
         } else { result(FlutterMethodNotImplemented) }
@@ -213,7 +213,7 @@ private final class ReaderFormModel: ObservableObject {
   var sendChange: (([String: Any], @escaping FlutterResult) -> Void)?
   var chooseColor: ((ReaderFormRow) -> Void)?
   var choosePhoto: ((ReaderFormRow) -> Void)?
-  var selectChapter: ((String) -> Void)?
+  var selectRow: ((String) -> Void)?
   var showError: ((String) -> Void)?
 
   func apply(_ config: [String: Any]) {
@@ -252,11 +252,13 @@ private struct ReaderNativeForm: View {
       ScrollViewReader { proxy in
         Form {
           ForEach(model.sections) { section in
-            Section(header: Text(section.title)) {
+            Section {
               ForEach(section.rows) { row in
                 ReaderNativeRow(model: model, row: row, width: geometry.size.width).id(row.id)
                   .listRowBackground(Color(model.rowBackground))
               }
+            } header: {
+              if !section.title.isEmpty { Text(section.title) }
             }
           }
         }
@@ -349,13 +351,25 @@ private struct ReaderNativeRow: View {
   var body: some View {
     Group {
       if row.kind == "chapter" {
-        Button { model.selectChapter?(row.id) } label: {
+        Button { model.selectRow?(row.id) } label: {
           HStack {
             Text(row.title).font(.body).foregroundColor(row.boolean ? Color(model.accent) : .primary)
               .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             if row.boolean { Image(systemName: "checkmark").foregroundColor(Color(model.accent)) }
           }.padding(.vertical, 6)
+        }
+      } else if row.kind == "action" {
+        Button { model.selectRow?(row.id) } label: {
+          HStack(spacing: 12) {
+            Image(systemName: row.data["icon"] as? String ?? "bookmark")
+              .foregroundColor(Color(model.accent)).frame(width: 28)
+              .accessibilityHidden(true)
+            Text(row.title).foregroundColor(.primary)
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+              .foregroundColor(.secondary).accessibilityHidden(true)
+          }.padding(.vertical, 8)
         }
       } else {
         HStack(alignment: .top, spacing: 12) {
@@ -394,7 +408,7 @@ private final class AppleReaderFormController: UIViewController, UIAdaptivePrese
     model.appearanceChanged = { [weak self] in self?.updateAppearance() }
     model.chooseColor = { [weak self] row in self?.pickColor(row) }
     model.choosePhoto = { [weak self] row in self?.pickPhoto(row) }
-    model.selectChapter = { [weak self] id in self?.onClose?(["id": id]) }
+    model.selectRow = { [weak self] id in self?.onClose?(["id": id]) }
     model.showError = { [weak self] message in
       let alert = UIAlertController(title: "无法保存", message: message, preferredStyle: .alert)
       alert.addAction(UIAlertAction(title: "知道了", style: .default))

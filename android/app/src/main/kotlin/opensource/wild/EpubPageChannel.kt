@@ -79,13 +79,15 @@ class EpubPageChannel(private val activity: Activity, messenger: BinaryMessenger
                         begin(result, session)
                         session.start()
                     }
-                    "images" -> {
+                    "images", "markGlyphs" -> {
                         val id=call.argument<String>("id") ?: throw IllegalArgumentException()
                         val session=sessions[id] ?: run {result.error("missing_session", "本地排版缓存已释放", null);return@setMethodCallHandler}
                         val page=call.argument<Int>("page") ?: throw IllegalArgumentException()
                         if (page < 0 || page >= (session.metadata?.get("count") as? Int ?: 0)) throw IllegalArgumentException()
                         begin(result, session)
-                        session.web.evaluateJavascript("EpubEngine.select($page).catch(e=>EpubEngine.error=String(e));null") { session.pollImages() }
+                        session.web.evaluateJavascript("EpubEngine.select($page).catch(e=>EpubEngine.error=String(e));null") {
+                            if (call.method == "markGlyphs") session.pollMarkGlyphs() else session.pollImages()
+                        }
                     }
                     "capture" -> {
                         val session = sessions[id]
@@ -262,6 +264,32 @@ class EpubPageChannel(private val activity: Activity, messenger: BinaryMessenger
                 } catch (_:Exception) {finishError("epub_images", "插图位置数据无效")}
             }
         }
+        fun pollMarkGlyphs() {
+            if (destroyed || active !== this) return
+            web.evaluateJavascript("({ready:!!window.EpubEngine?.selected,error:window.EpubEngine?.error,glyphs:window.EpubEngine?.selected?window.EpubEngine.markGlyphs():[]})") { raw ->
+                if (destroyed || active !== this) return@evaluateJavascript
+                try {
+                    require(raw.length <= 2 * 1024 * 1024)
+                    val info = JSONObject(raw)
+                    if (!info.isNull("error")) {
+                        finishError("epub_marks", "无法定位本页文字"); return@evaluateJavascript
+                    }
+                    if (!info.optBoolean("ready")) {
+                        handler.postDelayed({ pollMarkGlyphs() }, 35); return@evaluateJavascript
+                    }
+                    val glyphs = info.getJSONArray("glyphs")
+                    require(glyphs.length() <= 8192)
+                    finish((0 until glyphs.length()).map { i ->
+                        val glyph = glyphs.getJSONArray(i)
+                        require(glyph.length() == 8)
+                        List<Number>(8) { n -> if (n < 4) glyph.getInt(n) else glyph.getDouble(n) }
+                    })
+                } catch (_: Exception) {
+                    finishError("epub_marks", "文字位置数据无效")
+                }
+            }
+        }
+
         fun capture() {
             if(destroyed || active!==this) return
             try {

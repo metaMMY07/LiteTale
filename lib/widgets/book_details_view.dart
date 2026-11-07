@@ -8,6 +8,7 @@ import 'package:wild/src/rust/wenku8/models.dart';
 import 'apple_glass_chrome.dart';
 import 'book_cover_image.dart';
 import 'platform_controls.dart';
+import 'reader_controls.dart';
 
 /// Source-independent presentation: only the host supplies real capabilities.
 class BookDetailsView extends StatefulWidget {
@@ -116,29 +117,42 @@ class _BookDetailsViewState extends State<BookDetailsView> {
           Row(
             children: [
               if (widget.onBookmark != null) ...[
-                SizedBox(
-                  key: const ValueKey('detail-bookmark'),
-                  width: 56,
-                  height: 56,
-                  child: AppButton.tonal(
+                if (apple)
+                  ReaderRoundAction(
+                    key: const ValueKey('detail-bookmark'),
+                    size: 56,
+                    label: widget.inShelf ? '移出书架' : '加入书架',
+                    selected: widget.inShelf,
+                    icon:
+                        widget.inShelf
+                            ? CupertinoIcons.bookmark_fill
+                            : CupertinoIcons.bookmark,
                     onPressed: _busy ? null : _bookmark,
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(56, 56),
-                      padding: EdgeInsets.zero,
-                    ),
-                    child: Center(
-                      child: Semantics(
-                        label: widget.inShelf ? '移出书架' : '加入书架',
-                        button: true,
-                        child: Icon(
-                          widget.inShelf
-                              ? Icons.bookmark_rounded
-                              : Icons.bookmark_border_rounded,
+                  )
+                else
+                  SizedBox(
+                    key: const ValueKey('detail-bookmark'),
+                    width: 56,
+                    height: 56,
+                    child: AppButton.tonal(
+                      onPressed: _busy ? null : _bookmark,
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(56, 56),
+                        padding: EdgeInsets.zero,
+                      ),
+                      child: Center(
+                        child: Semantics(
+                          label: widget.inShelf ? '移出书架' : '加入书架',
+                          button: true,
+                          child: Icon(
+                            widget.inShelf
+                                ? Icons.bookmark_rounded
+                                : Icons.bookmark_border_rounded,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
                 const SizedBox(width: 12),
               ],
               Expanded(
@@ -538,7 +552,7 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
                     ),
                     if (author.isNotEmpty)
                       Padding(
-                        padding: const EdgeInsets.only(top: 12),
+                        padding: EdgeInsets.only(top: apple ? 8 : 12),
                         child: GestureDetector(
                           onTap: widget.onAuthor,
                           child: Text(
@@ -554,48 +568,64 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
                           ),
                         ),
                       ),
-                    const SizedBox(height: 12),
-                    Text(
-                      widget.source.label,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodySmall?.copyWith(color: colors.primary),
-                    ),
-                    if (status.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          status,
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(color: colors.onSurfaceVariant),
+                    if (apple) ...[
+                      const SizedBox(height: 10),
+                      _DetailMetadata([
+                        widget.source.label,
+                        if (status.isNotEmpty) status,
+                        if (info?.isAnimated ?? false) '动画化',
+                      ]),
+                      if (info?.finUpdate.trim().isNotEmpty ?? false)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: _DetailMetadata([
+                            '更新 ${info!.finUpdate.trim()}',
+                          ]),
                         ),
+                    ] else ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        widget.source.label,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: colors.primary),
                       ),
-                    if (widget.volumes != null && widget.chapters != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          '${widget.volumes} 卷 · ${widget.chapters} 章',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: colors.onSurfaceVariant),
+                      if (status.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            status,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: colors.onSurfaceVariant),
+                          ),
                         ),
-                      ),
-                    if (info?.finUpdate.trim().isNotEmpty ?? false)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          '更新 ${info!.finUpdate}',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: colors.onSurfaceVariant),
+                      if (widget.volumes != null && widget.chapters != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            '${widget.volumes} 卷 · ${widget.chapters} 章',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: colors.onSurfaceVariant),
+                          ),
                         ),
-                      ),
-                    if (info?.isAnimated ?? false)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          '动画化',
-                          style: TextStyle(color: colors.primary),
+                      if (info?.finUpdate.trim().isNotEmpty ?? false)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            '更新 ${info!.finUpdate}',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: colors.onSurfaceVariant),
+                          ),
                         ),
-                      ),
+                      if (info?.isAnimated ?? false)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            '动画化',
+                            style: TextStyle(color: colors.primary),
+                          ),
+                        ),
+                    ],
                   ],
                 ),
               ),
@@ -634,4 +664,18 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
       },
     );
   }
+}
+
+class _DetailMetadata extends StatelessWidget {
+  const _DetailMetadata(this.values);
+  final List<String> values;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    values.join(' · '),
+    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+      height: 1.4,
+    ),
+  );
 }

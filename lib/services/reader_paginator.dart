@@ -3,6 +3,7 @@ import 'package:wild/models/reader_page.dart';
 import 'package:wild/services/reader_typography.dart';
 import 'package:wild/models/reader_document.dart';
 import 'package:wild/services/reader_rich_paginator.dart';
+import 'package:wild/services/reader_mark_text.dart';
 
 /// Every iteration consumes content or flushes a nonempty page.
 List<ReaderPage> paginateReaderContent({
@@ -31,6 +32,8 @@ List<ReaderPage> paginateReaderContent({
   }
   final pages = <ReaderPage>[];
   final currentPage = StringBuffer();
+  final paragraphOffsets = <int>[];
+  var sourceEnd = 0;
   var freeHeight = canvasHeight;
   final style = readerBodyStyle(
     fontSize: fontSize,
@@ -51,13 +54,22 @@ List<ReaderPage> paginateReaderContent({
 
   void flush() {
     if (currentPage.isNotEmpty) {
-      pages.add(ReaderPage(content: currentPage.toString(), isImage: false));
+      pages.add(
+        ReaderPage(
+          content: currentPage.toString(),
+          isImage: false,
+          sourceStart: paragraphOffsets.first,
+          sourceEnd: sourceEnd,
+          paragraphOffsets: List.unmodifiable(paragraphOffsets),
+        ),
+      );
       currentPage.clear();
+      paragraphOffsets.clear();
     }
     freeHeight = canvasHeight;
   }
 
-  void text(String paragraph) {
+  void text(String paragraph, int sourceOffset) {
     while (paragraph.isNotEmpty) {
       final painter = TextPainter(
         textDirection: TextDirection.ltr,
@@ -70,6 +82,8 @@ List<ReaderPage> paginateReaderContent({
         final gap = currentPage.isEmpty ? 0.0 : paragraphSpacing;
         final availableHeight = freeHeight - gap;
         if (painter.height <= availableHeight + 0.001) {
+          paragraphOffsets.add(sourceOffset);
+          sourceEnd = sourceOffset + paragraph.length;
           currentPage.writeln(paragraph);
           freeHeight -= painter.height + gap;
           break;
@@ -110,8 +124,11 @@ List<ReaderPage> paginateReaderContent({
           if (split <= 0) split = paragraph.characters.first.length;
         }
         split = split.clamp(1, paragraph.length);
+        paragraphOffsets.add(sourceOffset);
+        sourceEnd = sourceOffset + split;
         currentPage.write(paragraph.substring(0, split));
         paragraph = paragraph.substring(split);
+        sourceOffset += split;
         flush();
       } finally {
         painter.dispose();
@@ -119,16 +136,15 @@ List<ReaderPage> paginateReaderContent({
     }
   }
 
-  final imageMarker = RegExp(r'<!--image-->([^<]+)<!--image-->');
-  for (final paragraph in content.split('\n')) {
-    var offset = 0;
-    for (final match in imageMarker.allMatches(paragraph)) {
-      text(paragraph.substring(offset, match.start));
+  for (final part in readerPlainParts(content)) {
+    if (part.image) {
       flush();
-      pages.add(ReaderPage(content: match.group(1)!.trim(), isImage: true));
-      offset = match.end;
+      pages.add(
+        ReaderPage(content: part.text, isImage: true, sourceStart: part.offset),
+      );
+    } else {
+      text(part.text, part.offset);
     }
-    text(paragraph.substring(offset));
   }
   flush();
   return pages.isEmpty ? [ReaderPage(content: '', isImage: false)] : pages;

@@ -39,6 +39,10 @@ import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/widgets/page_curl_view.dart';
 import 'package:wild/settings/settings_preferences.dart';
 import 'package:wild/settings/reading_session_scope.dart';
+import 'dart:async';
+import 'package:wild/services/reader_mark_store.dart';
+import 'package:wild/widgets/reader_mark_selection.dart';
+import 'package:wild/widgets/reader_marks_panel.dart';
 
 class ReaderPage extends StatelessWidget {
   final String aid;
@@ -48,6 +52,7 @@ class ReaderPage extends StatelessWidget {
   final NovelInfo novelInfo;
   final int? initialPage;
   final int? initialTextOffset;
+  final ReaderMarkStore? markStore;
 
   const ReaderPage({
     super.key,
@@ -58,6 +63,7 @@ class ReaderPage extends StatelessWidget {
     required this.novelInfo,
     this.initialPage,
     this.initialTextOffset,
+    this.markStore,
   });
 
   @override
@@ -166,6 +172,9 @@ class ReaderPage extends StatelessWidget {
                     key: ObjectKey(state.presentationKey ?? state.pages),
                     state: state,
                     title: state.title,
+                    bookId: aid,
+                    markStore: markStore,
+                    panelContext: context,
                   ),
                 );
               }
@@ -181,8 +190,18 @@ class ReaderPage extends StatelessWidget {
 class _ReaderView extends StatefulWidget {
   final ReaderLoaded state;
   final String title;
+  final String bookId;
+  final ReaderMarkStore? markStore;
+  final BuildContext panelContext;
 
-  const _ReaderView({super.key, required this.state, required this.title});
+  const _ReaderView({
+    super.key,
+    required this.state,
+    required this.title,
+    required this.bookId,
+    required this.panelContext,
+    this.markStore,
+  });
 
   @override
   State<_ReaderView> createState() => _ReaderViewState();
@@ -204,7 +223,11 @@ class _ReaderViewState extends State<_ReaderView> {
   late ReaderCoverController _pageController;
   final _curlKey = GlobalKey<PageCurlViewState>();
   final _imageViewport = GlobalKey();
+  final _markViewport = GlobalKey();
   late final _visibleImages = ReaderImageHitRegistry(_imageViewport);
+  late final ReaderMarkSelection _marks;
+  bool _selecting = false;
+  int _markPaintRevision = 0;
   bool _wasCurlEnabled = false;
   Size? _lastLayoutSize;
   EdgeInsets? _lastLayoutPadding;
@@ -242,13 +265,79 @@ class _ReaderViewState extends State<_ReaderView> {
   void initState() {
     super.initState();
     _pageController = ReaderCoverController();
+    final cubit = context.read<ReaderCubit>();
+    _marks = ReaderMarkSelection(
+      viewport: _markViewport,
+      book: widget.bookId,
+      store: widget.markStore,
+      chapterText: cubit.markText,
+      canSelect:
+          (group) =>
+              mounted &&
+              group == _viewIndex &&
+              !_isTurning &&
+              ModalRoute.of(context)?.isCurrent != false,
+      onStart: () {
+        if (cubit.state.showControls) cubit.toggleControls();
+      },
+    )..addListener(_selectionChanged);
+    _marks.store.addListener(_savedMarksChanged);
+    _markPaintRevision = _chapterMarksRevision();
+    unawaited(_marks.store.load(_marks.book).catchError((Object _) {}));
     setKeepScreenUpOnReading(true);
+  }
+
+  void _selectionChanged() {
+    final selecting = _marks.value != null;
+    if (selecting != _selecting && mounted) {
+      setState(() => _selecting = selecting);
+    }
+  }
+
+  int _chapterMarksRevision() => Object.hashAll(
+    _marks.store
+        .marks(_marks.book)
+        .where(
+          (mark) =>
+              !mark.isBookmark &&
+              mark.location.chapter ==
+                  (aid: widget.state.aid, cid: widget.state.cid),
+        )
+        .map(
+          (mark) => (
+            mark.id,
+            mark.location.offset,
+            mark.quote,
+            mark.color,
+            mark.note.isNotEmpty,
+          ),
+        ),
+  );
+
+  void _savedMarksChanged() {
+    if (!mounted) return;
+    final revision = _chapterMarksRevision();
+    if (revision != _markPaintRevision) {
+      setState(() => _markPaintRevision = revision);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _ReaderView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state.layout.viewIndex(oldWidget.state.currentPageIndex) !=
+            _viewIndex ||
+        oldWidget.state.cid != widget.state.cid) {
+      _marks.clear();
+    }
   }
 
   @override
   void dispose() {
     _hardwareTurns.dispose();
     _pageController.dispose();
+    _marks.store.removeListener(_savedMarksChanged);
+    _marks.dispose();
     setKeepScreenUpOnReading(false);
     setKeepScreenUpOnScroll(false);
 
@@ -256,6 +345,7 @@ class _ReaderViewState extends State<_ReaderView> {
   }
 
   void _handleMenuTap() {
+    if (_marks.clear()) return;
     final cubit = context.read<ReaderCubit>();
     final state = cubit.state;
     if (state is! ReaderLoaded) return;
@@ -277,6 +367,7 @@ class _ReaderViewState extends State<_ReaderView> {
   }
 
   void _handleTap(TapUpDetails details) {
+    if (_marks.clear()) return;
     if (!settingsPreferencesOf(context, listen: false).tapToTurn) {
       _handleMenuTap();
       return;
@@ -373,15 +464,52 @@ class _ReaderViewState extends State<_ReaderView> {
     }
   }
 
-  void _showSettings() {
-    final cubit = context.read<ReaderCubit>();
-    showReaderSettingsPanel(
-      context,
+  Future<void> _showSettings() async {
+    // The paper widget can be recreated while a typography setting is saved.
+    // The route and sheet must outlive that presentation key.
+    final panelContext = widget.panelContext;
+    final cubit = panelContext.read<ReaderCubit>();
+    _marks.clear();
+    final openMarks = await showReaderSettingsPanel(
+      panelContext,
       localEpub: _bookSource == SourceId.localEpub,
+      includeMarks: true,
       onLayoutChanged: () async {
         if (!cubit.isClosed) await cubit.reloadCurrentPage();
       },
     );
+    final loaded = cubit.state;
+    if (!openMarks ||
+        !panelContext.mounted ||
+        cubit.isClosed ||
+        loaded is! ReaderLoaded ||
+        ModalRoute.of(panelContext)?.isCurrent == false) {
+      return;
+    }
+    final current = cubit.markLocation(loaded);
+    final page = loaded.pages[loaded.currentPageIndex];
+    final text = cubit.markText(current.chapter, current.axis);
+    final quote =
+        page.isImage || page.artworkText != null
+            ? '插图'
+            : readerMarkExcerpt(
+              (page.cssPage?.semanticText ?? page.content).characters
+                  .take(72)
+                  .toString(),
+              encoded: text?.encoded == true,
+            );
+    final mark = await showReaderMarks(
+      panelContext,
+      selection: _marks,
+      current: current,
+      bookmarkExcerpt: quote,
+      onCurrentPage: (location) => cubit.markOnPage(loaded, location),
+    );
+    if (mark == null || !panelContext.mounted || cubit.isClosed) return;
+    final opened = await cubit.openMark(mark);
+    if (!opened && panelContext.mounted) {
+      showReaderMarkError(panelContext, '未能定位该标记');
+    }
   }
 
   void _turnPage(int direction, {double? startY}) {
@@ -393,7 +521,7 @@ class _ReaderViewState extends State<_ReaderView> {
   }
 
   void _onController(ReaderControllerEventArgs args) {
-    if (!mounted || _isTurning) return;
+    if (!mounted || _isTurning || _selecting) return;
     ReadingSessionScope.recordActivity(context);
     if (args.key == "UP") {
       if (_bookSource == SourceId.localEpub && _viewIndex == 0) {
@@ -455,6 +583,8 @@ class _ReaderViewState extends State<_ReaderView> {
         color: textColor,
       ),
       paragraphSpacing: context.read<ParagraphSpacingCubit>().state,
+      marks: _marks,
+      markChapter: (aid: widget.state.aid, cid: widget.state.cid),
     );
   }
 
@@ -564,6 +694,7 @@ class _ReaderViewState extends State<_ReaderView> {
             return Scaffold(
               backgroundColor: backgroundColor,
               body: Stack(
+                key: _markViewport,
                 children: [
                   // 背景图片
                   if (backgroundImagePath != null)
@@ -597,6 +728,9 @@ class _ReaderViewState extends State<_ReaderView> {
                             paperDecoration: paperDecoration,
                             paperColor: backgroundColor,
                             onCenterTap: _handleMenuTap,
+                            onTextHold:
+                                (point) => _marks.beginAt(point, _viewIndex),
+                            contentRevision: _markPaintRevision,
                             onBoundaryTurn: _handleBoundaryTurn,
                             pageBuilder:
                                 (context, index) =>
@@ -621,7 +755,7 @@ class _ReaderViewState extends State<_ReaderView> {
                               pageCount: _viewCount,
                               leafCount: widget.state.pages.length,
                               isSpread: widget.state.layout.isSpread,
-                              active: !state.showControls,
+                              active: !state.showControls && !_selecting,
                               revision: Object.hash(
                                 widget.state.presentationKey ??
                                     widget.state.pages,
@@ -697,6 +831,14 @@ class _ReaderViewState extends State<_ReaderView> {
                       ),
                     ),
                   ],
+                  if (_selecting)
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _marks.clear,
+                      ),
+                    ),
+                  Positioned.fill(child: ReaderMarkLayer(selection: _marks)),
                 ],
               ),
             );
@@ -705,10 +847,14 @@ class _ReaderViewState extends State<_ReaderView> {
       },
     );
     return ReaderVolumeTurnScope(
+      active: !_selecting,
       onTurn: _hardwareTurns.add,
       child: PopScope(
-        canPop: !preferences.preventBack || widget.state.showControls,
+        canPop:
+            !_selecting &&
+            (!preferences.preventBack || widget.state.showControls),
         onPopInvokedWithResult: (didPop, result) {
+          if (!didPop && _marks.clear()) return;
           if (!didPop && !widget.state.showControls) {
             context.read<ReaderCubit>().toggleControls();
           }

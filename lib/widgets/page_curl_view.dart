@@ -30,6 +30,8 @@ class PageCurlView extends StatefulWidget {
     this.onCenterTap,
     this.onBoundaryTurn,
     this.leafCount,
+    this.onTextHold,
+    this.contentRevision,
   }) : assert(pageCount > 0);
 
   final int pageCount;
@@ -42,6 +44,8 @@ class PageCurlView extends StatefulWidget {
   final bool tapToTurn;
   final VoidCallback? onCenterTap;
   final ValueChanged<int>? onBoundaryTurn;
+  final ValueChanged<Offset>? onTextHold;
+  final Object? contentRevision;
 
   /// Physical leaves may append into a previously half-empty last spread.
   final int? leafCount;
@@ -129,7 +133,11 @@ class PageCurlViewState extends State<PageCurlView>
     // A local EPUB appends already paginated leaves to the same window. Keep
     // current textures/native view alive while only increasing its page count.
     // Reflow/recentring recreates this widget via the reader presentation key.
-    final resetPages = paperChanged || widget.pageCount < oldWidget.pageCount;
+    final contentChanged = widget.contentRevision != oldWidget.contentRevision;
+    final resetPages =
+        paperChanged ||
+        contentChanged ||
+        widget.pageCount < oldWidget.pageCount;
     final oldLeaves = oldWidget.leafCount;
     final filledHalfSpread =
         !resetPages &&
@@ -157,7 +165,7 @@ class PageCurlViewState extends State<PageCurlView>
       _nativeChannel?.setMethodCallHandler(null);
       _nativeChannel = null;
     }
-    if (paperChanged ||
+    if (resetPages ||
         filledHalfSpread ||
         widget.pageCount != oldWidget.pageCount ||
         widget.index != oldWidget.index) {
@@ -440,6 +448,23 @@ class PageCurlViewState extends State<PageCurlView>
   Future<void> _handleNativeCall(MethodCall call) async {
     if (!mounted) return;
     switch (call.method) {
+      case 'textHold':
+        final args = call.arguments as Map;
+        if (!isTurning &&
+            args['index'] == widget.index &&
+            widget.onTextHold != null) {
+          final render = context.findRenderObject();
+          if (render is RenderBox && render.hasSize) {
+            widget.onTextHold!(
+              render.localToGlobal(
+                Offset(
+                  (args['x'] as num).toDouble() * render.size.width,
+                  (args['y'] as num).toDouble() * render.size.height,
+                ),
+              ),
+            );
+          }
+        }
       case 'imageTap':
         final args = call.arguments as Map;
         if (!isTurning && args['index'] == widget.index) {
@@ -544,7 +569,9 @@ class PageCurlViewState extends State<PageCurlView>
           fit: StackFit.expand,
           children: [
             for (final index in visible.where(
-              (index) => !_nativePages.containsKey(index),
+              (index) =>
+                  !_nativePages.containsKey(index) ||
+                  index == widget.index && widget.onTextHold != null,
             ))
               // Keep the boundary painted so toImage can rasterize its page,
               // but keep their composited opacity negligible underneath the
@@ -633,6 +660,11 @@ class PageCurlViewState extends State<PageCurlView>
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTapUp: (details) => _loadingTap(details.localPosition),
+                  onLongPressStart:
+                      widget.onTextHold == null
+                          ? null
+                          : (details) =>
+                              widget.onTextHold!(details.globalPosition),
                   onHorizontalDragStart: (details) {
                     _loadingDragDx = 0;
                     _loadingDragStartY = details.localPosition.dy;

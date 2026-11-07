@@ -90,6 +90,7 @@ List<ReaderPage> paginateReaderDocument({
         last: end == text.length,
         gapBefore: gap,
         tableAsText: tableAsText,
+        sourceOffset: offset + start,
       );
       final full = ReaderParagraphLayout(
         fragment: fragment(text.length),

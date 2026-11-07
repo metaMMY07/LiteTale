@@ -28,6 +28,9 @@ class EpubFlowPage {
       chapterTitle: owner.chapter.title,
       artworkText: p.artworkText,
       cssPage: p.cssPage,
+      sourceStart: p.sourceStart,
+      sourceEnd: p.sourceEnd,
+      paragraphOffsets: p.paragraphOffsets,
     );
   }
   final EpubFlowChapter owner;

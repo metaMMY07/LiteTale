@@ -24,27 +24,31 @@ import 'package:wild/widgets/apple_reader_panel.dart';
 import 'package:wild/widgets/reader_settings_binding.dart';
 import 'package:wild/widgets/reader_draggable_sheet.dart';
 
-Future<void> showReaderSettingsPanel(
+Future<bool> showReaderSettingsPanel(
   BuildContext context, {
   Future<void> Function()? onLayoutChanged,
   bool localEpub = false,
   AutoScrollConfigCubit? autoScroll,
+  bool includeMarks = false,
 }) async {
   if (usesAppleGlass && await AppleReaderPanel.available) {
-    if (!context.mounted || ModalRoute.of(context)?.isCurrent == false) return;
+    if (!context.mounted || ModalRoute.of(context)?.isCurrent == false) {
+      return false;
+    }
     final binding = ReaderSettingsBinding(
       context,
       onLayoutChanged: onLayoutChanged,
       autoScroll: autoScroll,
+      includeMarks: includeMarks,
     );
-    await AppleReaderPanel.show(
+    final selection = await AppleReaderPanel.show(
       context,
       configuration: binding.snapshot,
       onChange: binding.change,
     );
-    return;
+    return includeMarks && selection?['id'] == 'marks';
   }
-  if (!context.mounted) return;
+  if (!context.mounted) return false;
   final panel = MultiBlocProvider(
     providers: [
       BlocProvider.value(value: context.read<FontSizeCubit>()),
@@ -71,27 +75,33 @@ Future<void> showReaderSettingsPanel(
             onLayoutChanged: onLayoutChanged,
             localEpub: localEpub,
             autoScroll: autoScroll,
+            includeMarks: includeMarks,
           ),
     ),
   );
   if (usesAppleGlass) {
-    await showCupertinoModalPopup<void>(
-      context: context,
-      useRootNavigator: false,
-      builder: (_) => Material(type: MaterialType.transparency, child: panel),
-    );
+    return await showCupertinoModalPopup<bool>(
+          context: context,
+          useRootNavigator: false,
+          builder:
+              (_) => Material(type: MaterialType.transparency, child: panel),
+        ) ??
+        false;
   } else {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      showDragHandle: false,
-      enableDrag: Theme.of(context).platform != TargetPlatform.android,
-      elevation: 0,
-      useSafeArea: true,
-      constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width),
-      builder: (_) => panel,
-    );
+    return await showModalBottomSheet<bool>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          showDragHandle: false,
+          enableDrag: Theme.of(context).platform != TargetPlatform.android,
+          elevation: 0,
+          useSafeArea: true,
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width,
+          ),
+          builder: (_) => panel,
+        ) ??
+        false;
   }
 }
 
@@ -104,12 +114,14 @@ class ReaderSettingsPanel extends StatelessWidget {
     this.localEpub = false,
     this.autoScroll,
     this.dragHandle,
+    this.includeMarks = false,
   });
   final ScrollController? scrollController;
   final Future<void> Function()? onLayoutChanged;
   final bool localEpub;
   final AutoScrollConfigCubit? autoScroll;
   final Widget? dragHandle;
+  final bool includeMarks;
 
   Future<void> _save(BuildContext context, Future<void> Function() action) =>
       settingsAction(context, () async {
@@ -158,7 +170,7 @@ class ReaderSettingsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     if (usesAppleGlass) {
       return FutureBuilder<bool>(
-        future: AppleReaderPanel.available,
+        future: includeMarks ? null : AppleReaderPanel.available,
         builder: (context, available) {
           if (available.data == true) {
             final binding = ReaderSettingsBinding(
@@ -249,6 +261,23 @@ class ReaderSettingsPanel extends StatelessWidget {
                           ),
                         ),
                       ),
+                if (includeMarks)
+                  ReaderSettingGroup(
+                    children: [
+                      ListTile(
+                        key: const ValueKey('reader-settings-marks'),
+                        leading: Icon(
+                          usesAppleGlass
+                              ? CupertinoIcons.bookmark
+                              : Icons.bookmarks_outlined,
+                          color: colors.primary,
+                        ),
+                        title: const Text('高亮与书签'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.pop(context, true),
+                      ),
+                    ],
+                  ),
                 const ReaderSettingLabel('排版'),
                 ReaderSettingGroup(
                   children: [

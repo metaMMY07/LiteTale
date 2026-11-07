@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:wild/services/read_request.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
 import 'package:wild/models/reader_document.dart';
+import 'package:wild/services/reader_mark_text.dart';
 import 'package:wild/services/reader_chapter_prefetch.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
@@ -36,25 +37,26 @@ class HtmlReaderError extends HtmlReaderState {
 
 // 解析后的内容类型
 abstract class ParsedContent extends Equatable {
-  const ParsedContent();
+  const ParsedContent({this.offset = 0});
+  final int offset;
 }
 
 class ParsedText extends ParsedContent {
   final String text;
 
-  const ParsedText(this.text);
+  const ParsedText(this.text, {super.offset});
 
   @override
-  List<Object?> get props => [text];
+  List<Object?> get props => [text, offset];
 }
 
 class ParsedImage extends ParsedContent {
   final String imageUrl;
 
-  const ParsedImage(this.imageUrl);
+  const ParsedImage(this.imageUrl, {super.offset});
 
   @override
-  List<Object?> get props => [imageUrl];
+  List<Object?> get props => [imageUrl, offset];
 }
 
 class ParsedStyledText extends ParsedContent {
@@ -62,12 +64,13 @@ class ParsedStyledText extends ParsedContent {
     this.block, {
     this.previousStyle,
     this.endOfTextRun = false,
+    super.offset,
   });
   final ReaderBlock block;
   final ReaderBlockStyle? previousStyle;
   final bool endOfTextRun;
   @override
-  List<Object?> get props => [block, previousStyle, endOfTextRun];
+  List<Object?> get props => [block, previousStyle, endOfTextRun, offset];
 }
 
 // 加载完成状态
@@ -79,6 +82,7 @@ class HtmlReaderLoaded extends HtmlReaderState {
   final List<ParsedContent> parsedContent;
   final List<Volume> volumes;
   final String? sourceFont;
+  final String? markContent;
 
   const HtmlReaderLoaded({
     required this.aid,
@@ -88,6 +92,7 @@ class HtmlReaderLoaded extends HtmlReaderState {
     required this.parsedContent,
     required this.volumes,
     this.sourceFont,
+    this.markContent,
   });
 
   HtmlReaderLoaded copyWith({
@@ -106,6 +111,7 @@ class HtmlReaderLoaded extends HtmlReaderState {
       parsedContent: parsedContent ?? this.parsedContent,
       volumes: volumes ?? this.volumes,
       sourceFont: sourceFont,
+      markContent: markContent,
     );
   }
 
@@ -118,6 +124,7 @@ class HtmlReaderLoaded extends HtmlReaderState {
     parsedContent,
     volumes,
     sourceFont,
+    markContent,
   ];
 }
 
@@ -203,14 +210,24 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
     if (document != null) {
       final result = <ParsedContent>[];
       ReaderBlockStyle? previous;
-      final visible =
-          document.blocks
-              .where((block) => block.imageUrl != null || block.text.isNotEmpty)
-              .toList();
-      for (var index = 0; index < visible.length; index++) {
-        final block = visible[index];
+      final visible = <(ReaderBlock, int)>[];
+      var offset = 0;
+      for (final block in document.blocks) {
+        if (block.imageUrl != null || block.text.isNotEmpty) {
+          visible.add((block, offset));
+        }
         if (block.imageUrl != null || block.artworkUrl != null) {
-          result.add(ParsedImage(block.artworkUrl ?? block.imageUrl!));
+          offset += block.plainText.length + 1;
+        } else if (block.text.isNotEmpty) {
+          offset += block.text.length + 1;
+        }
+      }
+      for (var index = 0; index < visible.length; index++) {
+        final (block, offset) = visible[index];
+        if (block.imageUrl != null || block.artworkUrl != null) {
+          result.add(
+            ParsedImage(block.artworkUrl ?? block.imageUrl!, offset: offset),
+          );
           previous = null;
         } else if (block.text.isNotEmpty) {
           result.add(
@@ -219,7 +236,8 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
               previousStyle: previous,
               endOfTextRun:
                   index == visible.length - 1 ||
-                  visible[index + 1].imageUrl != null,
+                  visible[index + 1].$1.imageUrl != null,
+              offset: offset,
             ),
           );
           previous = block.style;
@@ -228,41 +246,17 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
       return result;
     }
     final parsedContent = <ParsedContent>[];
-    final paragraphs = content.split('\n');
-
-    for (var paragraph in paragraphs) {
-      if (paragraph.trim().isEmpty) continue;
-
-      // 检查是否包含图片标签
-      final regex = RegExp(r'<!--image-->([^<]+)<!--image-->');
-      if (regex.hasMatch(paragraph)) {
-        var currentText = paragraph;
-        while (regex.hasMatch(currentText)) {
-          var match = regex.firstMatch(currentText)!;
-
-          // 处理图片前的文本
-          if (match.start > 0) {
-            var text = currentText.substring(0, match.start).trim();
-            if (text.isNotEmpty) {
-              parsedContent.add(ParsedText(text));
-            }
-          }
-
-          // 处理图片
-          final imageUrl = match.group(1)!;
-          parsedContent.add(ParsedImage(imageUrl));
-
-          // 更新剩余文本
-          currentText = currentText.substring(match.end);
-        }
-
-        // 处理最后剩余的文本
-        if (currentText.trim().isNotEmpty) {
-          parsedContent.add(ParsedText(currentText.trim()));
-        }
-      } else {
-        // 普通文本段落
-        parsedContent.add(ParsedText(paragraph));
+    for (final part in readerPlainParts(content)) {
+      if (part.image) {
+        parsedContent.add(ParsedImage(part.text, offset: part.offset));
+      } else if (part.text.trim().isNotEmpty) {
+        final text = part.mixed ? part.text.trim() : part.text;
+        parsedContent.add(
+          ParsedText(
+            text,
+            offset: part.offset + (part.mixed ? part.text.indexOf(text) : 0),
+          ),
+        );
       }
     }
 
@@ -353,6 +347,10 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
           parsedContent: parsedContent,
           volumes: initialVolumes,
           sourceFont: chapter.fontFamily,
+          markContent:
+              chapter.document == null
+                  ? null
+                  : readerMarkText(rawContent, chapter.document),
         ),
       );
       _prefetch?.schedule(

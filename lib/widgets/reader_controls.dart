@@ -55,40 +55,85 @@ class ReaderToolbar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          ReaderControlSurface(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AppIconButton(
-                  tooltip: '目录',
-                  onPressed: onCatalog,
-                  icon: Icon(
-                    usesAppleGlass
-                        ? CupertinoIcons.list_bullet
-                        : Icons.format_list_bulleted,
-                  ),
-                ),
-                if (onAutoScroll != null)
-                  AppIconButton(
-                    tooltip: '自动滚动',
-                    onPressed: onAutoScroll,
-                    icon: const Icon(Icons.play_arrow_rounded),
-                  ),
-                AppIconButton(
-                  tooltip: '阅读设置',
-                  onPressed: onSettings,
-                  icon: Icon(
-                    usesAppleGlass
-                        ? CupertinoIcons.gear
-                        : Icons.settings_outlined,
-                  ),
-                ),
-              ],
+          ReaderRoundAction(
+            key: const ValueKey('reader-catalog'),
+            label: '目录',
+            onPressed: onCatalog,
+            icon:
+                usesAppleGlass
+                    ? CupertinoIcons.list_bullet
+                    : Icons.format_list_bulleted,
+          ),
+          if (onAutoScroll != null) ...[
+            const SizedBox(width: 8),
+            ReaderRoundAction(
+              label: '自动滚动',
+              onPressed: onAutoScroll,
+              icon:
+                  usesAppleGlass
+                      ? CupertinoIcons.play_fill
+                      : Icons.play_arrow_rounded,
             ),
+          ],
+          const SizedBox(width: 8),
+          ReaderRoundAction(
+            key: const ValueKey('reader-settings'),
+            label: '阅读设置',
+            onPressed: onSettings,
+            icon:
+                usesAppleGlass ? CupertinoIcons.gear : Icons.settings_outlined,
           ),
         ],
       ),
     ),
+  );
+}
+
+/// Square constraints make the native glass capsule a true circle.
+class ReaderRoundAction extends StatelessWidget {
+  const ReaderRoundAction({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.size = 48,
+    this.selected = false,
+  });
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final double size;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: size,
+    child:
+        usesAppleGlass
+            ? AppleGlassSurface(
+              capsule: true,
+              child: Semantics(
+                selected: selected,
+                child: SizedBox.expand(
+                  child: AppIconButton(
+                    tooltip: label,
+                    padding: EdgeInsets.zero,
+                    onPressed: onPressed,
+                    icon: Icon(icon),
+                  ),
+                ),
+              ),
+            )
+            : IconButton.filledTonal(
+              tooltip: label,
+              style: IconButton.styleFrom(
+                shape: const CircleBorder(),
+                padding: EdgeInsets.zero,
+              ),
+              isSelected: selected,
+              icon: Icon(icon),
+              onPressed: onPressed,
+            ),
   );
 }
 

@@ -21,6 +21,7 @@ class ReaderSettingsBinding {
     BuildContext context, {
     this.onLayoutChanged,
     this.autoScroll,
+    this.includeMarks = false,
   }) : _context = context,
        size = context.read<FontSizeCubit>(),
        line = context.read<LineHeightCubit>(),
@@ -47,6 +48,7 @@ class ReaderSettingsBinding {
   final VolumeControlCubit volume;
   final ReaderBackgroundCubit paper;
   final AutoScrollConfigCubit? autoScroll;
+  final bool includeMarks;
   final Future<void> Function()? onLayoutChanged;
   final _pending = <String>{};
 
@@ -96,6 +98,11 @@ class ReaderSettingsBinding {
       'dark': colors.brightness == Brightness.dark,
       'accent': colors.primary.toARGB32(),
       'sections': [
+        if (includeMarks)
+          {
+            'title': '',
+            'rows': [row('marks', 'action', 'bookmark', '高亮与书签', '', false)],
+          },
         {
           'title': '排版',
           'rows': [

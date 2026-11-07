@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:wild/models/reader_page.dart';
+import 'package:wild/models/reader_mark.dart';
 import 'package:wild/services/reader_viewport_layout.dart';
 import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/sources/book_source.dart';
@@ -9,6 +10,8 @@ import 'package:wild/widgets/reader_styled_paragraph.dart';
 import 'package:wild/services/epub/epub_css_reader.dart';
 import 'package:wild/services/reader_images.dart';
 import 'package:wild/widgets/reader_illustration.dart';
+import 'package:wild/widgets/reader_mark_selection.dart';
+import 'package:wild/widgets/reader_css_marks.dart';
 
 /// A real spread contains two independently paginated leaves. Text continues
 /// from the left leaf to the right, rather than being laid out across the seam.
@@ -23,6 +26,8 @@ class ReaderPaperView extends StatelessWidget {
     required this.textStyle,
     required this.paragraphSpacing,
     this.titleFontFamily = appFontFamily,
+    this.marks,
+    this.markChapter,
   });
 
   final List<ReaderPage> pages;
@@ -34,6 +39,8 @@ class ReaderPaperView extends StatelessWidget {
   final double paragraphSpacing;
   // Catalog titles are normal Unicode, never chapter-obfuscated glyph codes.
   final String titleFontFamily;
+  final ReaderMarkSelection? marks;
+  final ReaderMarkChapter? markChapter;
 
   Widget _leaf(int index, {required bool showTitle}) {
     final page = index < pages.length ? pages[index] : null;
@@ -51,6 +58,13 @@ class ReaderPaperView extends StatelessWidget {
       textStyle: textStyle,
       paragraphSpacing: paragraphSpacing,
       titleFontFamily: titleFontFamily,
+      marks: marks,
+      markChapter:
+          markChapter == null || page?.chapterId == null
+              ? markChapter
+              : (aid: markChapter!.aid, cid: page!.chapterId!),
+      markTitle: page?.chapterTitle ?? chapterTitle,
+      markGroup: viewIndex,
     );
     // Fixed artwork has no text margins. Scale the complete page and its image
     // hotspots together so the footer never masks an illustration.
@@ -180,6 +194,10 @@ class ReaderPaperLeaf extends StatelessWidget {
     required this.textStyle,
     required this.paragraphSpacing,
     this.titleFontFamily = appFontFamily,
+    this.marks,
+    this.markChapter,
+    this.markTitle,
+    this.markGroup = 0,
   });
 
   final ReaderPage? page;
@@ -189,6 +207,26 @@ class ReaderPaperLeaf extends StatelessWidget {
   final TextStyle textStyle;
   final double paragraphSpacing;
   final String titleFontFamily;
+  final ReaderMarkSelection? marks;
+  final ReaderMarkChapter? markChapter;
+  final String? markTitle;
+  final int markGroup;
+
+  Widget _marked(int? offset, String text, Widget child) {
+    if (marks == null || offset == null || markChapter == null) return child;
+    return ReaderMarkedRegion(
+      selection: marks!,
+      group: markGroup,
+      text: text,
+      location: ReaderMarkLocation(
+        markChapter!,
+        markTitle ?? chapterTitle,
+        ReaderMarkAxis.text,
+        offset,
+      ),
+      child: child,
+    );
+  }
 
   Widget _illustration(String url, Widget error) {
     final provider = CachedImageProvider(url, source: source);
@@ -218,6 +256,18 @@ class ReaderPaperLeaf extends StatelessWidget {
                 child: Text('页面加载失败，请重新打开本章', style: textStyle),
               ),
             ),
+            if (marks != null && markChapter != null)
+              ReaderCssMarks(
+                page: page!.cssPage!,
+                selection: marks!,
+                group: markGroup,
+                location: ReaderMarkLocation(
+                  markChapter!,
+                  markTitle ?? chapterTitle,
+                  ReaderMarkAxis.epubDom,
+                  page!.cssPage!.domStart,
+                ),
+              ),
             _CssIllustrations(page: page!.cssPage!),
             if (chapterTitle.isNotEmpty &&
                 layout.headerHeight > 0 &&
@@ -302,10 +352,14 @@ class ReaderPaperLeaf extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         for (final fragment in page!.fragments!)
-                          ReaderStyledParagraph(
-                            fragment: fragment,
-                            style: textStyle,
-                            textScaler: layout.textScaler,
+                          _marked(
+                            fragment.sourceOffset,
+                            fragment.text,
+                            ReaderStyledParagraph(
+                              fragment: fragment,
+                              style: textStyle,
+                              textScaler: layout.textScaler,
+                            ),
                           ),
                       ],
                     )
@@ -313,14 +367,18 @@ class ReaderPaperLeaf extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         for (var i = 0; i < paragraphs.length; i++) ...[
-                          RichText(
-                            text: TextSpan(
-                              text: paragraphs[i],
-                              style: textStyle,
+                          _marked(
+                            page!.paragraphOffsets?[i],
+                            paragraphs[i],
+                            RichText(
+                              text: TextSpan(
+                                text: paragraphs[i],
+                                style: textStyle,
+                              ),
+                              textDirection: TextDirection.ltr,
+                              textScaler: layout.textScaler,
+                              strutStyle: StrutStyle.fromTextStyle(textStyle),
                             ),
-                            textDirection: TextDirection.ltr,
-                            textScaler: layout.textScaler,
-                            strutStyle: StrutStyle.fromTextStyle(textStyle),
                           ),
                           if (i + 1 < paragraphs.length)
                             SizedBox(height: paragraphSpacing),
