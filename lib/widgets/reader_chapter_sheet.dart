@@ -4,6 +4,11 @@ import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/apple_reader_panel.dart';
 import 'package:wild/widgets/reader_draggable_sheet.dart';
 
+final _chapterSlide = Tween<Offset>(
+  begin: const Offset(0, 1),
+  end: Offset.zero,
+).chain(CurveTween(curve: readerPanelSlideCurve));
+
 /// Directory selection returns a value. Dismissing the directory presentation
 /// never pops the reader, and chapter loading starts after dismissal completes.
 Future<Chapter?> showReaderChapterSheet(
@@ -47,16 +52,31 @@ Future<Chapter?> showReaderChapterSheet(
   }
   if (!context.mounted) return null;
   if (Theme.of(context).platform == TargetPlatform.android) {
-    return Navigator.of(context).push<Chapter>(
-      MaterialPageRoute<Chapter>(
-        builder:
-            (_) => _AndroidChapterPage(
-              volumes: volumes,
-              currentAid: currentAid,
-              currentCid: currentCid,
-            ),
-      ),
+    if (ModalRoute.of(context)?.isCurrent == false) return null;
+    final animate = !MediaQuery.disableAnimationsOf(context);
+    final duration = animate ? readerPanelSlideDuration : Duration.zero;
+    final route = PageRouteBuilder<Chapter>(
+      transitionDuration: duration,
+      reverseTransitionDuration: duration,
+      pageBuilder:
+          (_, __, ___) => _AndroidChapterPage(
+            volumes: volumes,
+            currentAid: currentAid,
+            currentCid: currentCid,
+          ),
+      transitionsBuilder:
+          (_, animation, __, child) =>
+              animate
+                  ? SlideTransition(
+                    position: animation.drive(_chapterSlide),
+                    child: child,
+                  )
+                  : child,
     );
+    final chapter = await Navigator.of(context).push(route);
+    // Keep chapter loading off the closing animation's frames.
+    await route.completed;
+    return chapter;
   }
   return showModalBottomSheet<Chapter>(
     context: context,

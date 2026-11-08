@@ -98,7 +98,7 @@ class _HomePageState extends State<HomePage> {
       });
       // 切换到历史页面时刷新数据
       if (index == 2) {
-        _historyCubit.load();
+        _historyCubit.load(keepContent: true);
       }
     }
   }

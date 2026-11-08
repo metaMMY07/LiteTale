@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:wild/services/book_cover_preview.dart';
@@ -23,6 +24,7 @@ class BookCoverImage extends StatelessWidget {
     this.onColor,
     this.imageProvider,
     this.previewCache,
+    this.preferPaintedSize = false,
   });
   final String url;
   final SourceId source;
@@ -33,6 +35,7 @@ class BookCoverImage extends StatelessWidget {
   final ValueChanged<Color>? onColor;
   final ImageProvider? imageProvider;
   final BookCoverPreviewCache? previewCache;
+  final bool preferPaintedSize;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -60,6 +63,7 @@ class BookCoverImage extends StatelessWidget {
             fit: fit,
             onColor: onColor,
             imageProvider: imageProvider,
+            preferPaintedSize: preferPaintedSize,
             cache: previewCache ?? BookCoverPreviewCache.instance,
           ),
         ),
@@ -75,6 +79,7 @@ class _CoverSurface extends StatefulWidget {
     required this.pixels,
     required this.fit,
     required this.cache,
+    required this.preferPaintedSize,
     this.onColor,
     this.imageProvider,
   });
@@ -85,6 +90,7 @@ class _CoverSurface extends StatefulWidget {
   final ValueChanged<Color>? onColor;
   final ImageProvider? imageProvider;
   final BookCoverPreviewCache cache;
+  final bool preferPaintedSize;
   @override
   State<_CoverSurface> createState() => _CoverSurfaceState();
 }
@@ -105,6 +111,8 @@ class _CoverSurfaceState extends State<_CoverSurface>
   ImageProvider? _provider;
   String _key = '';
   int _revision = 0, _generation = 0;
+  int? _decodePixels;
+  bool _needsPreview = false;
   _CoverPhase _phase = _CoverPhase.loading;
 
   @override
@@ -145,8 +153,10 @@ class _CoverSurfaceState extends State<_CoverSurface>
     if (old.url != widget.url ||
         old.source != widget.source ||
         old.pixels != widget.pixels ||
+        old.preferPaintedSize != widget.preferPaintedSize ||
         old.imageProvider != widget.imageProvider ||
-        old.cache != widget.cache) {
+        old.cache != widget.cache ||
+        (old.onColor == null) != (widget.onColor == null)) {
       _resolve(force: true);
     }
   }
@@ -162,7 +172,16 @@ class _CoverSurfaceState extends State<_CoverSurface>
   void _resolve({bool force = false}) {
     final revision = sourceRevision.value;
     final key = '${widget.source.name}:$revision:${widget.url}';
-    if (!force && key == _key && _stream != null) return;
+    final needsPreview =
+        Theme.of(context).platform == TargetPlatform.iOS ||
+        widget.onColor != null;
+    if (!force &&
+        key == _key &&
+        _stream != null &&
+        needsPreview == _needsPreview) {
+      return;
+    }
+    _needsPreview = needsPreview;
     _detach();
     _frame?.dispose();
     _frame = null;
@@ -171,29 +190,23 @@ class _CoverSurfaceState extends State<_CoverSurface>
     _key = key;
     final generation = ++_generation;
     _fade.value = 0;
-    _preview = widget.cache.lookup(key);
+    _preview = needsPreview ? widget.cache.lookup(key) : null;
     if (_preview != null) _notifyColor(_preview!.color, generation);
     if (widget.url.isEmpty && widget.imageProvider == null) return;
-    unawaited(
-      widget.cache.fromUrl(key, widget.url).then((preview) {
-        if (!mounted || generation != _generation || preview == null) return;
-        // Do not replace the underlay halfway through an ongoing dissolve.
-        if (_frame == null) setState(() => _preview = preview);
-        _notifyColor(preview.color, generation);
-      }),
-    );
-    _provider =
-        widget.imageProvider ??
-        ResizeImage.resizeIfNeeded(
-          widget.pixels,
-          null,
-          CachedImageProvider(
-            widget.url,
-            source: widget.source,
-            revision: revision,
-          ),
-        );
-    _stream = _provider!.resolve(createLocalImageConfiguration(context));
+    if (needsPreview) {
+      unawaited(
+        widget.cache.fromUrl(key, widget.url).then((preview) {
+          if (!mounted || generation != _generation || preview == null) return;
+          // Do not replace the underlay halfway through an ongoing dissolve.
+          if (_frame == null) setState(() => _preview = preview);
+          _notifyColor(preview.color, generation);
+        }),
+      );
+    }
+    final configuration = createLocalImageConfiguration(context);
+    _decodePixels = null;
+    _provider = widget.imageProvider ?? _sizedProvider(revision, configuration);
+    _stream = _provider!.resolve(configuration);
     _listener = ImageStreamListener(
       (info, synchronous) {
         if (!mounted || generation != _generation) return;
@@ -213,14 +226,16 @@ class _CoverSurfaceState extends State<_CoverSurface>
           if (instant) {
             _fade.value = 1;
           }
-          unawaited(
-            widget.cache.capture(key, info.image).then((preview) {
-              if (!mounted || generation != _generation || preview == null) {
-                return;
-              }
-              _notifyColor(preview.color, generation);
-            }),
-          );
+          if (needsPreview) {
+            unawaited(
+              widget.cache.capture(key, info.image).then((preview) {
+                if (!mounted || generation != _generation || preview == null) {
+                  return;
+                }
+                _notifyColor(preview.color, generation);
+              }),
+            );
+          }
         }
         setState(() {});
       },
@@ -233,6 +248,37 @@ class _CoverSurfaceState extends State<_CoverSurface>
     _stream!.addListener(_listener!);
   }
 
+  ImageProvider _sizedProvider(int revision, ImageConfiguration configuration) {
+    final original = CachedImageProvider(
+      widget.url,
+      source: widget.source,
+      revision: revision,
+    );
+    final painted =
+        widget.preferPaintedSize ? widget.cache.revealedPixels(_key) : null;
+    if (painted != null && painted > widget.pixels) {
+      final existing = ResizeImage(original, width: painted);
+      // CachedImageProvider has a synchronous key. Check before resolving so
+      // a discarded grid image cannot start a new, unnecessarily large decode.
+      final key = existing.obtainKey(configuration);
+      if (key is SynchronousFuture<ResizeImageKey>) {
+        var available = false;
+        key.then((value) {
+          final status = PaintingBinding.instance.imageCache.statusForKey(
+            value,
+          );
+          available = !status.pending && (status.keepAlive || status.live);
+        });
+        if (available) {
+          _decodePixels = painted;
+          return existing;
+        }
+      }
+    }
+    _decodePixels = widget.pixels;
+    return ResizeImage(original, width: widget.pixels);
+  }
+
   void _didPaintFrame(int generation) {
     if (!mounted ||
         generation != _generation ||
@@ -240,7 +286,7 @@ class _CoverSurfaceState extends State<_CoverSurface>
         _phase == _CoverPhase.error) {
       return;
     }
-    widget.cache.reveal(_key);
+    widget.cache.reveal(_key, pixels: _decodePixels);
     if (_phase != _CoverPhase.ready) return;
     // Offstage tabs and sliver-cache children may finish decoding without ever
     // being painted. Start their transition on display, not during prefetch.

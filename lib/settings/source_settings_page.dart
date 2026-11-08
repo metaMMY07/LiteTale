@@ -29,98 +29,107 @@ class _SourceSettingsPageState extends State<SourceSettingsPage> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('书源与账号')),
-    body: LeftAlignedScrollView(
+    body: LeftAlignedCustomScrollView(
       bottomInset: 28,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const SourceSettings(),
-          const RuleSourceManager(),
-          SettingsGroup(
-            title: '文库8镜像',
-            icon: Icons.link_rounded,
+      slivers: [
+        const SliverToBoxAdapter(child: SourceSettings()),
+        const RuleSourceManager(),
+        // Keep the two small forms mounted so scrolling does not reset their
+        // expanded state. Only the potentially long rules list is virtualized.
+        SliverToBoxAdapter(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Padding(
-                padding: EdgeInsets.all(12),
-                child: Text('仅影响文库8；留空使用默认地址。\n$wenku8HostHint'),
-              ),
-              AppTextField(
-                controller: host,
-                decoration: InputDecoration(
-                  labelText: '镜像地址',
-                  prefixIcon: const Icon(Icons.link),
-                  errorText: hostError,
-                  errorMaxLines: 3,
-                ),
-                onSubmitted: (_) => _saveHost(),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Wrap(
-                  spacing: 12,
-                  children: [
-                    AppButton.filled(
-                      onPressed: _saveHost,
-                      child: const Text('保存'),
+              SettingsGroup(
+                title: '文库8镜像',
+                icon: Icons.link_rounded,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text('仅影响文库8；留空使用默认地址。\n$wenku8HostHint'),
+                  ),
+                  AppTextField(
+                    controller: host,
+                    decoration: InputDecoration(
+                      labelText: '镜像地址',
+                      prefixIcon: const Icon(Icons.link),
+                      errorText: hostError,
+                      errorMaxLines: 3,
                     ),
-                    AppButton.outlined(
-                      onPressed:
-                          () => settingsAction(context, () async {
-                            await context.read<ApiHostCubit>().resetToDefault();
-                            if (context.mounted) {
-                              setState(() {
-                                host.text = context.read<ApiHostCubit>().state;
-                                hostError = null;
-                              });
-                            }
-                          }, success: '已恢复默认地址'),
-                      child: const Text('恢复默认'),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          SettingsGroup(
-            title: '缓存',
-            icon: Icons.storage_outlined,
-            children: [
-              SettingsEntry(
-                icon: Icons.cleaning_services_outlined,
-                title: '清除接口缓存',
-                description: '保留账号、书架和阅读记录',
-                onTap: () async {
-                  final yes = await showAdaptiveDialog<bool>(
-                    context: context,
-                    builder:
-                        (ctx) => AlertDialog.adaptive(
-                          title: const Text('清除接口缓存'),
-                          content: const Text('下次打开页面时会重新获取数据。'),
-                          actions: [
-                            AppButton.text(
-                              onPressed: () => Navigator.pop(ctx, false),
-                              child: const Text('取消'),
-                            ),
-                            AppButton.filled(
-                              onPressed: () => Navigator.pop(ctx, true),
-                              child: const Text('清除'),
-                            ),
-                          ],
+                    onSubmitted: (_) => _saveHost(),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Wrap(
+                      spacing: 12,
+                      children: [
+                        AppButton.filled(
+                          onPressed: _saveHost,
+                          child: const Text('保存'),
                         ),
-                  );
-                  if (yes == true && context.mounted) {
-                    await settingsAction(
-                      context,
-                      cleanAllWebCache,
-                      success: '接口缓存已清除',
-                    );
-                  }
-                },
+                        AppButton.outlined(
+                          onPressed:
+                              () => settingsAction(context, () async {
+                                await context
+                                    .read<ApiHostCubit>()
+                                    .resetToDefault();
+                                if (context.mounted) {
+                                  setState(() {
+                                    host.text =
+                                        context.read<ApiHostCubit>().state;
+                                    hostError = null;
+                                  });
+                                }
+                              }, success: '已恢复默认地址'),
+                          child: const Text('恢复默认'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              SettingsGroup(
+                title: '缓存',
+                icon: Icons.storage_outlined,
+                children: [
+                  SettingsEntry(
+                    icon: Icons.cleaning_services_outlined,
+                    title: '清除接口缓存',
+                    description: '保留账号、书架和阅读记录',
+                    onTap: () async {
+                      final yes = await showAdaptiveDialog<bool>(
+                        context: context,
+                        builder:
+                            (ctx) => AlertDialog.adaptive(
+                              title: const Text('清除接口缓存'),
+                              content: const Text('下次打开页面时会重新获取数据。'),
+                              actions: [
+                                AppButton.text(
+                                  onPressed: () => Navigator.pop(ctx, false),
+                                  child: const Text('取消'),
+                                ),
+                                AppButton.filled(
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  child: const Text('清除'),
+                                ),
+                              ],
+                            ),
+                      );
+                      if (yes == true && context.mounted) {
+                        await settingsAction(
+                          context,
+                          cleanAllWebCache,
+                          success: '接口缓存已清除',
+                        );
+                      }
+                    },
+                  ),
+                ],
               ),
             ],
           ),
-        ],
-      ),
+        ),
+      ],
     ),
   );
   Future<void> _saveHost() async {

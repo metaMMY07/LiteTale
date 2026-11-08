@@ -14,7 +14,7 @@ class BookCoverPreview {
 class BookCoverPreviewCache {
   static final instance = BookCoverPreviewCache();
   final _previews = <String, BookCoverPreview>{};
-  final _revealed = <String>{};
+  final _revealed = <String, int?>{};
   final _pending = <String>{};
   int _weight = 0;
   static const maxEntries = 256, maxBytes = 8 * 1024 * 1024;
@@ -25,12 +25,14 @@ class BookCoverPreviewCache {
     return preview;
   }
 
-  bool wasRevealed(String key) => _revealed.contains(key);
-  void reveal(String key) {
-    _revealed.remove(key);
-    _revealed.add(key);
+  bool wasRevealed(String key) => _revealed.containsKey(key);
+  int? revealedPixels(String key) => _revealed[key];
+
+  void reveal(String key, {int? pixels}) {
+    final previous = _revealed.remove(key);
+    _revealed[key] = pixels ?? previous;
     while (_revealed.length > maxEntries) {
-      _revealed.remove(_revealed.first);
+      _revealed.remove(_revealed.keys.first);
     }
   }
 

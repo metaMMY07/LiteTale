@@ -1,8 +1,6 @@
 import 'package:wild/theme/ios_system_colors.dart';
 import 'package:flutter/material.dart';
 import 'dart:io';
-import 'package:wild/pages/apple_books_open_page.dart';
-import 'package:wild/sources/book_source.dart' as book_sources;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:wild/widgets/bili_browser_host.dart';
@@ -21,8 +19,7 @@ import 'package:wild/pages/home_page.dart';
 import 'package:wild/pages/novel/line_height_cubit.dart';
 import 'package:wild/pages/novel/novel_info_page.dart';
 import 'package:wild/pages/novel/novel_downloading_page.dart';
-import 'package:wild/pages/novel/reader_page.dart';
-import 'package:wild/pages/novel/html_reader_page.dart';
+import 'package:wild/pages/novel/reader_route.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
 import 'package:wild/pages/novel/paragraph_spacing_cubit.dart';
 import 'package:wild/pages/novel/theme_cubit.dart';
@@ -229,6 +226,12 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                       localizationsDelegates:
                           GlobalMaterialLocalizations.delegates,
                       onGenerateRoute: (settings) {
+                        if (settings.name == novelInfoRouteName) {
+                          return novelInfoRoute(settings);
+                        }
+                        if (settings.name == novelReaderRouteName) {
+                          return novelReaderRoute(settings);
+                        }
                         final routes = <String, WidgetBuilder>{
                           '/init': (context) => const InitPage(),
                           '/login':
@@ -237,16 +240,6 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                           '/home':
                               (context) =>
                                   const UpdateChecker(child: HomePage()),
-                          '/novel/info': (context) {
-                            final args =
-                                ModalRoute.of(context)!.settings.arguments;
-                            if (args is Map<String, dynamic>) {
-                              return NovelInfoPage(
-                                novelId: args['novelId'] as String,
-                              );
-                            }
-                            return NovelInfoPage(novelId: args as String);
-                          },
                           '/novel/reviews': (context) {
                             final args =
                                 ModalRoute.of(context)!.settings.arguments
@@ -266,64 +259,6 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                               novelInfo: args['novelInfo'] as NovelInfo,
                               volumes: (args['volumes'] as List).cast<Volume>(),
                             );
-                          },
-                          '/novel/reader': (context) {
-                            final args =
-                                ModalRoute.of(context)!.settings.arguments
-                                    as Map<String, dynamic>;
-                            final aid = args['novelId'] as String;
-                            if (Platform.isIOS &&
-                                book_sources.sourceOf(aid) ==
-                                    book_sources.SourceId.localEpub) {
-                              return AppleBooksOpenPage(bookId: aid);
-                            }
-                            final readerType =
-                                context.read<ReaderTypeCubit>().state;
-
-                            if (readerType == ReaderType.html) {
-                              return HtmlReaderPage(
-                                novelInfo: args['novelInfo'] as NovelInfo,
-                                initialAid: args['novelId'] as String,
-                                initialCid: args['chapterId'] as String,
-                                volumes:
-                                    (args['volumes'] as List).cast<Volume>(),
-                              );
-                            } else {
-                              return MultiBlocProvider(
-                                providers: [
-                                  BlocProvider.value(
-                                    value: context.read<FontSizeCubit>(),
-                                  ),
-                                  BlocProvider.value(
-                                    value:
-                                        context.read<ParagraphSpacingCubit>(),
-                                  ),
-                                  BlocProvider.value(
-                                    value: context.read<LineHeightCubit>(),
-                                  ),
-                                  BlocProvider.value(
-                                    value: context.read<ThemeCubit>(),
-                                  ),
-                                  BlocProvider.value(
-                                    value: context.read<TopBarHeightCubit>(),
-                                  ),
-                                  BlocProvider.value(
-                                    value: context.read<BottomBarHeightCubit>(),
-                                  ),
-                                ],
-                                child: ReaderPage(
-                                  aid: args['novelId'] as String,
-                                  cid: args['chapterId'] as String,
-                                  initialTitle: args['title'] as String,
-                                  volumes:
-                                      (args['volumes'] as List).cast<Volume>(),
-                                  novelInfo: args['novelInfo'] as NovelInfo,
-                                  initialPage: args['initialPage'] as int?,
-                                  initialTextOffset:
-                                      args['initialTextOffset'] as int?,
-                                ),
-                              );
-                            }
                           },
                           '/category': (context) {
                             final args =

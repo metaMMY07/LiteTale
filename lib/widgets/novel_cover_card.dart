@@ -5,6 +5,7 @@ import 'package:wild/sources/book_source.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/widgets/book_cover_image.dart';
 import 'package:wild/models/book_detail_hint.dart';
+import 'book_card_ink.dart';
 
 class NovelCoverCard extends StatelessWidget {
   final NovelCover novel;
@@ -31,7 +32,8 @@ class NovelCoverCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       elevation: usesMaterialYou ? 0 : .5,
       shape: RoundedRectangleBorder(borderRadius: cardRadius),
-      child: InkWell(
+      child: BookCardInk(
+        borderRadius: cardRadius,
         onTap: open,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,

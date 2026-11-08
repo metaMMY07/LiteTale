@@ -1,5 +1,15 @@
 import 'package:flutter/material.dart';
 
+/// Wait until the pushed page's overlay is removed. A normal push Future
+/// resolves as soon as pop starts, while the previous page is still being drawn.
+Future<void> pushAndWaitForPageExit(
+  BuildContext context,
+  PageRoute<void> page,
+) async {
+  await Navigator.of(context).push(page);
+  await page.completed;
+}
+
 /// A page covers its predecessor from the right and uncovers it to the right.
 /// The page underneath stays still. No opacity, scale, or shared-element work is
 /// performed during the transition.

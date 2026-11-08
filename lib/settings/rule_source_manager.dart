@@ -14,6 +14,7 @@ import 'package:wild/widgets/left_aligned_scrollable.dart';
 import 'package:wild/services/source_import_file.dart';
 import 'package:wild/widgets/app_loading_indicator.dart';
 
+/// The import controls and installed rules share the settings page's viewport.
 class RuleSourceManager extends StatefulWidget {
   const RuleSourceManager({super.key, this.registry, this.pickFile});
   final RuleSourceRegistry? registry;
@@ -141,61 +142,77 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: registry,
-    builder:
-        (context, _) => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-              child: Text(
-                '添加与管理书源',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: const Text(
-                '支持 LiteTale JSON 和部分阅读书源规则。预览新增、更新及不兼容项后，再选择要保存的书源。',
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                children: [
-                  AppButton.tonalIcon(
-                    onPressed:
-                        busy ? null : () => _import(_SourceImportInput.file),
-                    icon: const Icon(Icons.file_open_outlined),
-                    label: const Text('本地文件'),
+    builder: (context, _) {
+      final entries = registry.entries;
+      return SliverMainAxisGroup(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+                  child: Text(
+                    '添加与管理书源',
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
-                  AppButton.outlinedIcon(
-                    onPressed:
-                        busy ? null : () => _import(_SourceImportInput.link),
-                    icon: const Icon(Icons.link),
-                    label: const Text('链接导入'),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: const Text(
+                    '支持 LiteTale JSON 和部分阅读书源规则。预览新增、更新及不兼容项后，再选择要保存的书源。',
                   ),
-                  AppButton.outlinedIcon(
-                    onPressed:
-                        busy ? null : () => _import(_SourceImportInput.paste),
-                    icon: const Icon(Icons.content_paste_rounded),
-                    label: const Text('粘贴规则'),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    children: [
+                      AppButton.tonalIcon(
+                        onPressed:
+                            busy
+                                ? null
+                                : () => _import(_SourceImportInput.file),
+                        icon: const Icon(Icons.file_open_outlined),
+                        label: const Text('本地文件'),
+                      ),
+                      AppButton.outlinedIcon(
+                        onPressed:
+                            busy
+                                ? null
+                                : () => _import(_SourceImportInput.link),
+                        icon: const Icon(Icons.link),
+                        label: const Text('链接导入'),
+                      ),
+                      AppButton.outlinedIcon(
+                        onPressed:
+                            busy
+                                ? null
+                                : () => _import(_SourceImportInput.paste),
+                        icon: const Icon(Icons.content_paste_rounded),
+                        label: const Text('粘贴规则'),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                if (loading)
+                  usesAppleGlass
+                      ? const Center(child: AppLoadingIndicator(size: 24))
+                      : const LinearProgressIndicator(),
+                if (registry.warning != null)
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(registry.warning!),
+                  ),
+              ],
             ),
-            if (loading)
-              usesAppleGlass
-                  ? const Center(child: AppLoadingIndicator(size: 24))
-                  : const LinearProgressIndicator(),
-            if (registry.warning != null)
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(registry.warning!),
-              ),
-            for (final entry in registry.entries)
-              AppleGlassCard(
+          ),
+          SliverList.builder(
+            itemCount: entries.length,
+            itemBuilder: (context, index) {
+              final entry = entries[index];
+              return AppleGlassCard(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: ListTile(
                   leading: Icon(
@@ -237,10 +254,13 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
                         ],
                   ),
                 ),
-              ),
-            const SizedBox(height: 16),
-          ],
-        ),
+              );
+            },
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+        ],
+      );
+    },
   );
 }
 

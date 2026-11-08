@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+const readerPanelSlideDuration = Duration(milliseconds: 250);
+const readerPanelSlideCurve = Cubic(.32, .72, 0, 1);
+
 /// List gestures use Flutter's normal sheet/scroll handoff. The header handle
 /// resizes the same sheet directly, even with the current chapter far down the
 /// list; expanding must not first scroll all the way back to chapter one.
@@ -27,8 +30,6 @@ class ReaderDraggableSheet extends StatefulWidget {
 class _ReaderDraggableSheetState extends State<ReaderDraggableSheet> {
   final _controller = DraggableScrollableController();
   static const _half = .5;
-  static const _snapDuration = Duration(milliseconds: 250);
-  static const _drawerCurve = Cubic(.32, .72, 0, 1);
   double _handleStartSize = _half;
   double _handleDistance = 0;
   double _edgeDrag = 0;
@@ -51,8 +52,8 @@ class _ReaderDraggableSheetState extends State<ReaderDraggableSheet> {
       unawaited(
         _controller.animateTo(
           target,
-          duration: _snapDuration,
-          curve: _drawerCurve,
+          duration: readerPanelSlideDuration,
+          curve: readerPanelSlideCurve,
         ),
       );
     }
@@ -133,7 +134,7 @@ class _ReaderDraggableSheetState extends State<ReaderDraggableSheet> {
               widget.snapToPages
                   ? (MediaQuery.disableAnimationsOf(context)
                       ? const Duration(milliseconds: 1)
-                      : _snapDuration)
+                      : readerPanelSlideDuration)
                   : null,
           builder:
               (context, scrollController) =>

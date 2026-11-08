@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:wild/models/book_detail_hint.dart';
 import 'package:wild/services/epub/apple_books_opener.dart';
 import 'package:wild/services/epub/epub_library_query.dart';
 import 'package:wild/services/epub/epub_models.dart';
@@ -226,6 +227,7 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
       }
       return;
     }
+    BookDetailHint.remember(book.id, book.title, book.coverUrl);
     await Navigator.pushNamed(context, '/novel/info', arguments: book.id);
   }
 

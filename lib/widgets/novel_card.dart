@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'book_card_ink.dart';
 import 'apple_book_cover.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/sources/book_source.dart';
@@ -123,7 +124,8 @@ class NovelCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       elevation: elevation,
       shape: RoundedRectangleBorder(borderRadius: cardRadius),
-      child: InkWell(
+      child: BookCardInk(
+        borderRadius: cardRadius,
         onTap: onTap,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

@@ -39,6 +39,7 @@ class NovelInfoCubit extends Cubit<NovelInfoState> {
   final String novelId;
   List<Volume> _volumes = [];
   int _loadGeneration = 0;
+  int _historyGeneration = 0;
   ReadRequest? _readRequest;
   final Future<SourceBookDetail> Function({required String aid}) _loadDetail;
   final Future<w8.ReadingHistory?> Function({required String novelId})
@@ -160,17 +161,37 @@ class NovelInfoCubit extends Cubit<NovelInfoState> {
   }
 
   Future<void> loadHistory() async {
+    if (isClosed || state is! NovelInfoLoaded) return;
     final generation = _loadGeneration;
+    final historyGeneration = ++_historyGeneration;
+    final source = activeSource.value;
     final revision = sourceRevision.value;
-    final readingHistory = await _loadHistory(novelId: novelId);
-    if (isClosed || generation != _loadGeneration) return;
-    if (sourceOf(novelId) == SourceId.bili &&
-        (activeSource.value != SourceId.bili ||
-            sourceRevision.value != revision)) {
+    final session = w8.readerSessionGeneration(novelId);
+    final w8.ReadingHistory? readingHistory;
+    try {
+      readingHistory = await _loadHistory(
+        novelId: novelId,
+      ).timeout(const Duration(seconds: 2));
+    } catch (_) {
+      // Optional progress refresh must leave a usable detail page intact.
       return;
     }
-    if (state is NovelInfoLoaded) {
-      final currentState = state as NovelInfoLoaded;
+    if (isClosed ||
+        generation != _loadGeneration ||
+        historyGeneration != _historyGeneration ||
+        source != activeSource.value ||
+        revision != sourceRevision.value ||
+        session != w8.readerSessionGeneration(novelId)) {
+      return;
+    }
+    final currentState = state;
+    if (currentState is NovelInfoLoaded) {
+      final previous = currentState.readingHistory;
+      if (previous?.chapterId == readingHistory?.chapterId &&
+          previous?.progressPage == readingHistory?.progressPage &&
+          previous?.progress == readingHistory?.progress) {
+        return;
+      }
       emit(
         NovelInfoLoaded(
           novelInfo: currentState.novelInfo,

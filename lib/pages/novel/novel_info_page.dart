@@ -9,14 +9,31 @@ import 'package:wild/widgets/book_details_view.dart';
 import 'package:wild/models/book_detail_hint.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/pages/home/bookshelf_cubit.dart';
+import 'package:wild/pages/search_page.dart';
 import 'package:wild/widgets/cf_action_loader.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
 import 'package:wild/widgets/source_website.dart';
 import 'package:wild/pages/shelf_login_page.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 
-import '../../src/rust/wenku8/models.dart';
 import 'novel_info_cubit.dart';
+import 'reader_route.dart';
+
+const novelInfoRouteName = '/novel/info';
+
+PageRoute<void> novelInfoRoute(RouteSettings settings) =>
+    HorizontalCoverPageRoute<void>(
+      settings: settings,
+      builder: (_) {
+        final args = settings.arguments;
+        return NovelInfoPage(
+          novelId:
+              args is Map<String, dynamic>
+                  ? args['novelId'] as String
+                  : args as String,
+        );
+      },
+    );
 
 bool _isCfError(dynamic e) {
   return shouldUseWenku8WebViewFallback(e);
@@ -63,6 +80,7 @@ class NovelInfoPage extends StatelessWidget {
           actions: [
             if (w8.sourceSupportsComments(novelId))
               BlocBuilder<NovelInfoCubit, NovelInfoState>(
+                buildWhen: _detailActionsChanged,
                 builder: (context, state) {
                   if (state is! NovelInfoLoaded) return const SizedBox.shrink();
                   return AppIconButton(
@@ -83,6 +101,7 @@ class NovelInfoPage extends StatelessWidget {
               ),
             if (sourceOf(novelId) == SourceId.wenku8)
               BlocBuilder<NovelInfoCubit, NovelInfoState>(
+                buildWhen: _detailActionsChanged,
                 builder: (context, state) {
                   if (state is! NovelInfoLoaded) {
                     return const SizedBox.shrink();
@@ -104,20 +123,8 @@ class NovelInfoPage extends StatelessWidget {
         ),
         body: BlocBuilder<NovelInfoCubit, NovelInfoState>(
           builder: (context, state) {
-            if (state is NovelInfoLoading) {
-              final hint = BookDetailHint.lookup(novelId);
-              return Column(
-                children: [
-                  if (hint != null)
-                    BookDetailsHeader(hint: hint, source: sourceOf(novelId)),
-                  Expanded(
-                    child: SourceLoadingIndicator(
-                      source: sourceOf(novelId),
-                      requestKey: state,
-                    ),
-                  ),
-                ],
-              );
+            if (state is NovelInfoLoading || state is NovelInfoLoaded) {
+              return _NovelInfoContent(novelId: novelId, state: state);
             }
             if (state is NovelInfoError) {
               if (state.loginRequired) {
@@ -184,13 +191,6 @@ class NovelInfoPage extends StatelessWidget {
                 ),
               );
             }
-            if (state is NovelInfoLoaded) {
-              return _NovelInfoContent(
-                novelInfo: state.novelInfo,
-                volumes: state.volumes,
-                novelId: novelId,
-              );
-            }
             return const SizedBox.shrink();
           },
         ),
@@ -199,16 +199,18 @@ class NovelInfoPage extends StatelessWidget {
   }
 }
 
-class _NovelInfoContent extends StatelessWidget {
-  final NovelInfo novelInfo;
-  final List<Volume> volumes;
-  final String novelId;
+bool _detailActionsChanged(NovelInfoState previous, NovelInfoState current) {
+  if (previous is NovelInfoLoaded && current is NovelInfoLoaded) {
+    return previous.novelInfo.title != current.novelInfo.title;
+  }
+  return (previous is NovelInfoLoaded) != (current is NovelInfoLoaded);
+}
 
-  const _NovelInfoContent({
-    required this.novelInfo,
-    required this.volumes,
-    required this.novelId,
-  });
+class _NovelInfoContent extends StatelessWidget {
+  final String novelId;
+  final NovelInfoState state;
+
+  const _NovelInfoContent({required this.novelId, required this.state});
 
   Future<void> _navigateToReader(
     BuildContext context,
@@ -226,38 +228,61 @@ class _NovelInfoContent extends StatelessWidget {
       initialPage = currentState.readingHistory!.progressPage;
     }
 
-    await Navigator.pushNamed(
+    if (ModalRoute.of(context)?.isCurrent == false) return;
+    final cubit = context.read<NovelInfoCubit>();
+    final scope = bookNavigationScope(novelId);
+    await pushAndWaitForPageExit(
       context,
-      '/novel/reader',
-      arguments: {
-        'novelId': novelId,
-        'chapterId': chapterId,
-        'title': title,
-        'volumes': volumes,
-        'novelInfo': novelInfo,
-        'initialPage': initialPage,
-        if (novelId.startsWith('epub:') &&
-            currentState.readingHistory?.chapterId == chapterId)
-          'initialTextOffset': currentState.readingHistory!.progress,
-      },
+      novelReaderRoute(
+        RouteSettings(
+          name: novelReaderRouteName,
+          arguments: {
+            'novelId': novelId,
+            'chapterId': chapterId,
+            'title': title,
+            'volumes': currentState.volumes,
+            'novelInfo': currentState.novelInfo,
+            'initialPage': initialPage,
+            if (novelId.startsWith('epub:') &&
+                currentState.readingHistory?.chapterId == chapterId)
+              'initialTextOffset': currentState.readingHistory!.progress,
+          },
+        ),
+      ),
     );
-    // 返回后更新历史记录
-    if (context.mounted) context.read<NovelInfoCubit>().loadHistory();
+    if (context.mounted &&
+        ModalRoute.of(context)?.isCurrent != false &&
+        scope == bookNavigationScope(novelId)) {
+      await cubit.loadHistory();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<NovelInfoCubit>().state;
-    if (state is! NovelInfoLoaded) return const SizedBox.shrink();
+    final state = this.state;
     final source = sourceOf(novelId);
-    final shelf = context.watch<BookshelfCubit>().state;
+    final key = ValueKey('book-details-$novelId');
+    final hint = BookDetailHint.lookup(novelId);
+    if (state is! NovelInfoLoaded) {
+      return BookDetailsView.loading(
+        key: key,
+        source: source,
+        hint: hint,
+        loading: SourceLoadingIndicator(source: source, requestKey: state),
+      );
+    }
+    final novelInfo = state.novelInfo;
+    final inShelf = context.select<BookshelfCubit, bool>(
+      (cubit) => cubit.state.isBookInBookshelf(novelId),
+    );
     return BookDetailsView(
-      key: ValueKey('book-details-$novelId'),
+      key: key,
       info: novelInfo,
-      volumes: volumes,
+      hint: hint,
+      volumes: state.volumes,
       source: source,
       resumeChapterId: state.readingHistory?.chapterId,
-      inShelf: shelf.isBookInBookshelf(novelId),
+      inShelf: inShelf,
       onBookmark:
           source == SourceId.localEpub
               ? null
@@ -274,16 +299,30 @@ class _NovelInfoContent extends StatelessWidget {
           w8.sourceSupportsAuthorSearch(source) &&
                   novelInfo.author.trim().isNotEmpty
               ? () async {
-                await Navigator.pushNamed(
+                if (ModalRoute.of(context)?.isCurrent == false) return;
+                final cubit = context.read<NovelInfoCubit>();
+                final scope = bookNavigationScope(novelId);
+                await pushAndWaitForPageExit(
                   context,
-                  '/search',
-                  arguments: {
-                    'searchType': 'author',
-                    'searchKey': novelInfo.author,
-                  },
+                  HorizontalCoverPageRoute<void>(
+                    settings: RouteSettings(
+                      name: '/search',
+                      arguments: {
+                        'searchType': 'author',
+                        'searchKey': novelInfo.author,
+                      },
+                    ),
+                    builder:
+                        (_) => SearchPage(
+                          initialSearchType: 'author',
+                          initialSearchKey: novelInfo.author,
+                        ),
+                  ),
                 );
-                if (context.mounted) {
-                  context.read<NovelInfoCubit>().loadHistory();
+                if (context.mounted &&
+                    ModalRoute.of(context)?.isCurrent != false &&
+                    scope == bookNavigationScope(novelId)) {
+                  await cubit.loadHistory();
                 }
               }
               : null,

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/sources/book_source.dart';
@@ -23,6 +24,8 @@ class HistoryError extends HistoryState {
 
 class HistoryCubit extends Cubit<HistoryState> {
   int _request = 0;
+  SourceId? _loadedSource;
+  int? _loadedRevision;
   ReadRequest? _opening;
   bool localOnly = false;
   SourceId get historySource =>
@@ -60,19 +63,38 @@ class HistoryCubit extends Cubit<HistoryState> {
     return super.close();
   }
 
-  Future<void> load() async {
+  Future<void> load({bool keepContent = false}) async {
+    if (isClosed) return;
     final request = ++_request;
-    emit(HistoryLoading());
+    final source = historySource;
+    final revision = sourceRevision.value;
+    final existing = state;
+    final previous =
+        keepContent &&
+                existing is HistoryLoaded &&
+                _loadedSource == source &&
+                _loadedRevision == revision
+            ? existing
+            : null;
+    if (previous == null) emit(HistoryLoading());
+    bool current() =>
+        !isClosed &&
+        request == _request &&
+        source == historySource &&
+        revision == sourceRevision.value &&
+        (previous == null || identical(previous, state));
     try {
       final histories = await w8.listReadingHistory(
         offset: 0,
         limit: 100,
-        source: historySource,
+        source: source,
       );
-      if (isClosed || request != _request) return;
+      if (!current() || listEquals(previous?.histories, histories)) return;
+      _loadedSource = source;
+      _loadedRevision = revision;
       emit(HistoryLoaded(histories));
     } catch (e) {
-      if (isClosed || request != _request) return;
+      if (!current() || previous != null) return;
       emit(HistoryError(e.toString()));
     }
   }

@@ -13,6 +13,9 @@ import 'package:wild/widgets/source_website.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/pages/local_epub_library_page.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
+import 'package:wild/theme/material_you.dart';
+import 'package:wild/models/book_detail_hint.dart';
+import 'package:wild/widgets/book_card_ink.dart';
 
 class BookshelfPage extends StatefulWidget {
   const BookshelfPage({super.key});
@@ -408,64 +411,79 @@ class _BookCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<BookshelfCubit>().state;
     final isSelected = state.isSelecting && state.isBookSelected(item.bid);
+    final coverUrl = _getCoverUrl(item.aid);
 
-    return GestureDetector(
-      onLongPress: () {
-        if (!state.isSelecting) {
-          context.read<BookshelfCubit>().toggleSelectMode();
-          context.read<BookshelfCubit>().toggleBookSelection(item.bid);
-        }
-      },
-      onTap: () {
-        if (state.isSelecting) {
-          context.read<BookshelfCubit>().toggleBookSelection(item.bid);
-        } else {
-          Navigator.pushNamed(context, '/novel/info', arguments: item.aid);
-        }
-      },
-      child: Stack(
-        children: [
-          NovelCard(
-            title: item.title,
-            coverUrl: _getCoverUrl(item.aid),
-            source: sourceOf(item.aid),
-            padding: const EdgeInsets.all(8.0),
-            showAuthor: false,
-          ),
-          if (state.isSelecting)
-            Positioned(
-              right: 0,
-              top: 0,
-              child: Container(
-                width: 24,
-                height: 24,
-                margin: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
+    void onLongPress() {
+      if (!state.isSelecting) {
+        context.read<BookshelfCubit>().toggleSelectMode();
+        context.read<BookshelfCubit>().toggleBookSelection(item.bid);
+      }
+    }
+
+    void onTap() {
+      if (state.isSelecting) {
+        context.read<BookshelfCubit>().toggleBookSelection(item.bid);
+      } else {
+        BookDetailHint.remember(item.aid, item.title, coverUrl);
+        Navigator.pushNamed(context, '/novel/info', arguments: item.aid);
+      }
+    }
+
+    final content = Stack(
+      children: [
+        NovelCard(
+          title: item.title,
+          coverUrl: coverUrl,
+          source: sourceOf(item.aid),
+          padding: const EdgeInsets.all(8.0),
+          showAuthor: false,
+        ),
+        if (state.isSelecting)
+          Positioned(
+            right: 0,
+            top: 0,
+            child: Container(
+              width: 24,
+              height: 24,
+              margin: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color:
+                    isSelected
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.surface,
+                shape: BoxShape.circle,
+                border: Border.all(
                   color:
                       isSelected
                           ? Theme.of(context).colorScheme.primary
-                          : Theme.of(context).colorScheme.surface,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color:
-                        isSelected
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).colorScheme.outline,
-                    width: 2,
-                  ),
+                          : Theme.of(context).colorScheme.outline,
+                  width: 2,
                 ),
-                child:
-                    isSelected
-                        ? Icon(
-                          Icons.check_rounded,
-                          size: 16,
-                          color: Theme.of(context).colorScheme.onPrimary,
-                        )
-                        : null,
               ),
+              child:
+                  isSelected
+                      ? Icon(
+                        Icons.check_rounded,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.onPrimary,
+                      )
+                      : null,
             ),
-        ],
-      ),
+          ),
+      ],
+    );
+    if (usesMaterialYou) {
+      return BookCardInk(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: content,
+      );
+    }
+    return GestureDetector(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: content,
     );
   }
 

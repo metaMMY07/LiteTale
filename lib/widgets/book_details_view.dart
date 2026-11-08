@@ -14,21 +14,40 @@ import 'reader_controls.dart';
 class BookDetailsView extends StatefulWidget {
   const BookDetailsView({
     super.key,
-    required this.info,
+    required NovelInfo this.info,
     required this.volumes,
     required this.source,
-    required this.onRead,
+    required ValueChanged<Chapter> this.onRead,
+    this.hint,
     this.resumeChapterId,
     this.inShelf = false,
     this.onBookmark,
     this.onComments,
     this.onAuthor,
     this.onTag,
-  });
-  final NovelInfo info;
+  }) : loading = null;
+
+  const BookDetailsView.loading({
+    super.key,
+    required this.source,
+    required this.hint,
+    required Widget this.loading,
+  }) : info = null,
+       volumes = const [],
+       onRead = null,
+       resumeChapterId = null,
+       inShelf = false,
+       onBookmark = null,
+       onComments = null,
+       onAuthor = null,
+       onTag = null;
+
+  final NovelInfo? info;
+  final BookDetailHint? hint;
+  final Widget? loading;
   final List<Volume> volumes;
   final SourceId source;
-  final ValueChanged<Chapter> onRead;
+  final ValueChanged<Chapter>? onRead;
   final String? resumeChapterId;
   final bool inShelf;
   final Future<void> Function()? onBookmark;
@@ -40,38 +59,100 @@ class BookDetailsView extends StatefulWidget {
 
 class _BookDetailsViewState extends State<BookDetailsView> {
   final _open = <int>{};
+  final _volumeStarts = <int>[];
+  Chapter? _firstChapter, _resumeChapter;
+  int _chapterCount = 0, _rowCount = 0;
   bool _busy = false, _fullDescription = false;
-  late String _description;
+  String _description = '';
   @override
   void initState() {
     super.initState();
-    _configure();
+    _description = _readDescription();
+    _indexCatalog();
   }
 
   @override
   void didUpdateWidget(covariant BookDetailsView old) {
     super.didUpdateWidget(old);
-    if (old.info.introduce != widget.info.introduce) {
-      _description = _plainIntroduction(widget.info.introduce);
+    if (old.info?.introduce != widget.info?.introduce) {
+      _description = _readDescription();
     }
-    if (old.source != widget.source || old.info.title != widget.info.title) {
+    final changedBook =
+        old.source != widget.source ||
+        (old.info != null &&
+            widget.info != null &&
+            old.info?.title != widget.info?.title);
+    if (changedBook) {
       _open.clear();
       _fullDescription = false;
-      _configure();
+    }
+    if (changedBook || !identical(old.volumes, widget.volumes)) {
+      _indexCatalog();
+    } else if (old.resumeChapterId != widget.resumeChapterId) {
+      _findResume(openVolume: false);
     }
   }
 
-  void _configure() {
-    _description = _plainIntroduction(widget.info.introduce);
-    if (widget.volumes.length == 1) _open.add(0);
+  String _readDescription() {
+    final raw = widget.info?.introduce;
+    return raw == null || raw.isEmpty ? '' : _plainIntroduction(raw);
+  }
+
+  void _indexCatalog() {
+    _firstChapter = null;
+    _chapterCount = 0;
+    _open.removeWhere((i) => i >= widget.volumes.length);
     for (var i = 0; i < widget.volumes.length; i++) {
-      if (widget.resumeChapterId != null &&
-          widget.volumes[i].chapters.any(
-            (c) => c.cid == widget.resumeChapterId,
-          )) {
-        _open.add(i);
+      final chapters = widget.volumes[i].chapters;
+      _chapterCount += chapters.length;
+      if (chapters.isNotEmpty) _firstChapter ??= chapters.first;
+    }
+    if (widget.volumes.length == 1) _open.add(0);
+    _findResume(openVolume: true);
+    _indexRows();
+  }
+
+  void _findResume({required bool openVolume}) {
+    _resumeChapter = null;
+    final id = widget.resumeChapterId;
+    if (id == null) return;
+    for (var i = widget.volumes.length - 1; i >= 0; i--) {
+      final chapters = widget.volumes[i].chapters;
+      for (var j = chapters.length - 1; j >= 0; j--) {
+        if (chapters[j].cid != id) continue;
+        _resumeChapter = chapters[j];
+        if (openVolume) _open.add(i);
+        return;
       }
     }
+  }
+
+  void _indexRows() {
+    _volumeStarts.clear();
+    _rowCount = 0;
+    for (var i = 0; i < widget.volumes.length; i++) {
+      _volumeStarts.add(_rowCount);
+      _rowCount +=
+          1 + (_open.contains(i) ? widget.volumes[i].chapters.length : 0);
+    }
+  }
+
+  (int, Chapter?) _rowAt(int index) {
+    // Only materialize rows that the sliver asks to display.
+    var low = 0, high = _volumeStarts.length;
+    while (high - low > 1) {
+      final middle = (low + high) ~/ 2;
+      if (_volumeStarts[middle] <= index) {
+        low = middle;
+      } else {
+        high = middle;
+      }
+    }
+    final chapterIndex = index - _volumeStarts[low] - 1;
+    return (
+      low,
+      chapterIndex < 0 ? null : widget.volumes[low].chapters[chapterIndex],
+    );
   }
 
   Future<void> _bookmark() async {
@@ -86,28 +167,36 @@ class _BookDetailsViewState extends State<BookDetailsView> {
 
   @override
   Widget build(BuildContext context) {
+    final info = widget.info;
+    return CustomScrollView(
+      key: const PageStorageKey('book-detail-scroll'),
+      slivers: [
+        SliverToBoxAdapter(
+          child:
+              info == null && widget.hint == null
+                  ? const SizedBox.shrink()
+                  : BookDetailsHeader(
+                    info: info,
+                    hint: widget.hint,
+                    source: widget.source,
+                    volumes: info == null ? null : widget.volumes.length,
+                    chapters: info == null ? null : _chapterCount,
+                    onAuthor: widget.onAuthor,
+                  ),
+        ),
+        if (info == null)
+          SliverFillRemaining(child: widget.loading!)
+        else
+          ..._details(context, info),
+      ],
+    );
+  }
+
+  List<Widget> _details(BuildContext context, NovelInfo info) {
     final colors = Theme.of(context).colorScheme;
     final apple = Theme.of(context).platform == TargetPlatform.iOS;
-    Chapter? first, resume;
-    var chapters = 0;
-    final rows = <(int, Chapter?)>[];
-    for (var i = 0; i < widget.volumes.length; i++) {
-      final volume = widget.volumes[i];
-      chapters += volume.chapters.length;
-      if (first == null && volume.chapters.isNotEmpty) {
-        first = volume.chapters.first;
-      }
-      for (final chapter in volume.chapters) {
-        if (chapter.cid == widget.resumeChapterId) resume = chapter;
-      }
-      rows.add((i, null));
-      if (_open.contains(i)) {
-        for (final c in volume.chapters) {
-          rows.add((i, c));
-        }
-      }
-    }
-    final target = resume ?? first;
+    final resume = _resumeChapter;
+    final target = resume ?? _firstChapter;
     final allOpen = _open.length == widget.volumes.length;
     final actions = Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
@@ -159,7 +248,7 @@ class _BookDetailsViewState extends State<BookDetailsView> {
                 child: AppButton.filled(
                   key: const ValueKey('detail-read'),
                   onPressed:
-                      target == null ? null : () => widget.onRead(target),
+                      target == null ? null : () => widget.onRead!(target),
                   style: FilledButton.styleFrom(minimumSize: const Size(0, 56)),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -203,250 +292,242 @@ class _BookDetailsViewState extends State<BookDetailsView> {
         ],
       ),
     );
-    return CustomScrollView(
-      key: const PageStorageKey('book-detail-scroll'),
-      slivers: [
-        SliverToBoxAdapter(
-          child: BookDetailsHeader(
-            info: widget.info,
-            source: widget.source,
-            volumes: widget.volumes.length,
-            chapters: chapters,
-            onAuthor: widget.onAuthor,
-          ),
-        ),
-        SliverToBoxAdapter(child: actions),
-        if (widget.info.tags.where((t) => t.trim().isNotEmpty).isNotEmpty)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final tag in widget.info.tags.where(
-                    (t) => t.trim().isNotEmpty,
-                  ))
-                    InkWell(
-                      borderRadius: BorderRadius.circular(20),
-                      customBorder: apple ? const StadiumBorder() : null,
-                      onTap:
-                          widget.onTag == null
-                              ? null
-                              : () => widget.onTag!(tag),
-                      child: AppChip(
-                        capsule: apple,
-                        padding:
-                            apple
-                                ? const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 8,
-                                )
-                                : null,
-                        label: Text(tag),
-                        backgroundColor: colors.primaryContainer,
-                        labelStyle: TextStyle(color: colors.onPrimaryContainer),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        if (_description.isNotEmpty)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text('简介', style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 10),
-                  if (_fullDescription)
-                    Html(
-                      data: widget.info.introduce,
-                      style: {
-                        'body': Style(
-                          margin: Margins.zero,
-                          padding: HtmlPaddings.zero,
-                          color: colors.onSurface,
-                          fontFamily:
-                              Theme.of(
-                                context,
-                              ).textTheme.bodyMedium?.fontFamily,
-                          fontSize: FontSize(15),
-                        ),
-                      },
-                    )
-                  else
-                    Text(
-                      _description,
-                      maxLines: 5,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyMedium?.copyWith(height: 1.65),
-                    ),
-                  if (_description.length > 150)
-                    Align(
-                      alignment: AlignmentDirectional.centerEnd,
-                      child: AppButton.text(
-                        onPressed:
-                            () => setState(
-                              () => _fullDescription = !_fullDescription,
-                            ),
-                        child: Text(_fullDescription ? '收起简介' : '展开简介'),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
+    return [
+      SliverToBoxAdapter(child: actions),
+      if (info.tags.any((t) => t.trim().isNotEmpty))
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
-            child: Row(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                Expanded(
-                  child: Text(
-                    '目录',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-                if (widget.volumes.isNotEmpty)
-                  Text(
-                    '${widget.volumes.length} 卷 · $chapters 章',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colors.onSurfaceVariant,
+                for (final tag in info.tags.where((t) => t.trim().isNotEmpty))
+                  InkWell(
+                    borderRadius: BorderRadius.circular(20),
+                    customBorder: apple ? const StadiumBorder() : null,
+                    onTap:
+                        widget.onTag == null ? null : () => widget.onTag!(tag),
+                    child: AppChip(
+                      capsule: apple,
+                      padding:
+                          apple
+                              ? const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              )
+                              : null,
+                      label: Text(tag),
+                      backgroundColor: colors.primaryContainer,
+                      labelStyle: TextStyle(color: colors.onPrimaryContainer),
                     ),
                   ),
               ],
             ),
           ),
         ),
-        if (widget.volumes.length > 1)
-          SliverToBoxAdapter(
-            child: Align(
-              alignment: AlignmentDirectional.centerEnd,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: AppButton.text(
-                  onPressed:
-                      () => setState(() {
-                        if (allOpen) {
-                          _open.clear();
-                        } else {
-                          _open.addAll(
-                            List.generate(widget.volumes.length, (i) => i),
-                          );
-                        }
-                      }),
-                  child: Text(allOpen ? '收起全部' : '展开全部'),
+      if (_description.isNotEmpty)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('简介', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 10),
+                if (_fullDescription)
+                  Html(
+                    data: info.introduce,
+                    style: {
+                      'body': Style(
+                        margin: Margins.zero,
+                        padding: HtmlPaddings.zero,
+                        color: colors.onSurface,
+                        fontFamily:
+                            Theme.of(context).textTheme.bodyMedium?.fontFamily,
+                        fontSize: FontSize(15),
+                      ),
+                    },
+                  )
+                else
+                  Text(
+                    _description,
+                    maxLines: 5,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(height: 1.65),
+                  ),
+                if (_description.length > 150)
+                  Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: AppButton.text(
+                      onPressed:
+                          () => setState(
+                            () => _fullDescription = !_fullDescription,
+                          ),
+                      child: Text(_fullDescription ? '收起简介' : '展开简介'),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '目录',
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
+              ),
+              if (widget.volumes.isNotEmpty)
+                Text(
+                  '${widget.volumes.length} 卷 · $_chapterCount 章',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      if (widget.volumes.length > 1)
+        SliverToBoxAdapter(
+          child: Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: AppButton.text(
+                onPressed:
+                    () => setState(() {
+                      if (allOpen) {
+                        _open.clear();
+                      } else {
+                        for (var i = 0; i < widget.volumes.length; i++) {
+                          _open.add(i);
+                        }
+                      }
+                      _indexRows();
+                    }),
+                child: Text(allOpen ? '收起全部' : '展开全部'),
               ),
             ),
           ),
-        if (rows.isEmpty)
-          const SliverToBoxAdapter(
-            child: Padding(padding: EdgeInsets.all(24), child: Text('暂无目录')),
-          ),
-        SliverList(
-          delegate: SliverChildBuilderDelegate((context, index) {
-            final (volumeIndex, chapter) = rows[index];
-            final volume = widget.volumes[volumeIndex];
-            if (chapter == null) {
-              return AppleGlassCard(
-                margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  key: ValueKey('volume-$volumeIndex'),
-                  onTap:
-                      () => setState(() {
-                        if (!_open.remove(volumeIndex)) _open.add(volumeIndex);
-                      }),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 18,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            volume.title.trim().isEmpty ? '正文' : volume.title,
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          '${volume.chapters.length} 章',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: colors.onSurfaceVariant),
-                        ),
-                        const SizedBox(width: 8),
-                        Icon(
-                          _open.contains(volumeIndex)
-                              ? Icons.keyboard_arrow_up_rounded
-                              : Icons.keyboard_arrow_down_rounded,
-                          color: colors.primary,
-                        ),
-                      ],
-                    ),
+        ),
+      if (_rowCount == 0)
+        const SliverToBoxAdapter(
+          child: Padding(padding: EdgeInsets.all(24), child: Text('暂无目录')),
+        ),
+      SliverList(
+        delegate: SliverChildBuilderDelegate((context, index) {
+          final (volumeIndex, chapter) = _rowAt(index);
+          final volume = widget.volumes[volumeIndex];
+          if (chapter == null) {
+            return AppleGlassCard(
+              key: ValueKey('volume-row-$volumeIndex'),
+              margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                key: ValueKey('volume-$volumeIndex'),
+                onTap:
+                    () => setState(() {
+                      if (!_open.remove(volumeIndex)) _open.add(volumeIndex);
+                      _indexRows();
+                    }),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 18,
                   ),
-                ),
-              );
-            }
-            final current = chapter.cid == widget.resumeChapterId;
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Material(
-                color: current ? colors.primaryContainer : Colors.transparent,
-                borderRadius: BorderRadius.circular(12),
-                child: InkWell(
-                  key: ValueKey('chapter-$volumeIndex-${chapter.cid}'),
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => widget.onRead(chapter),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 16,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            chapter.title,
-                            style: Theme.of(
-                              context,
-                            ).textTheme.bodyMedium?.copyWith(
-                              color:
-                                  current
-                                      ? colors.onPrimaryContainer
-                                      : colors.onSurface,
-                            ),
-                          ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          volume.title.trim().isEmpty ? '正文' : volume.title,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
-                        const SizedBox(width: 12),
-                        Icon(
-                          current
-                              ? Icons.bookmark_rounded
-                              : Icons.chevron_right_rounded,
-                          size: 18,
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        '${volume.chapters.length} 章',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      AnimatedRotation(
+                        turns: _open.contains(volumeIndex) ? .5 : 0,
+                        duration:
+                            MediaQuery.disableAnimationsOf(context)
+                                ? Duration.zero
+                                : const Duration(milliseconds: 160),
+                        curve: Curves.easeOutQuad,
+                        child: Icon(
+                          Icons.keyboard_arrow_down_rounded,
                           color: colors.primary,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
             );
-          }, childCount: rows.length),
-        ),
-        const SliverToBoxAdapter(
-          child: SafeArea(top: false, child: SizedBox(height: 32)),
-        ),
-      ],
-    );
+          }
+          final current = chapter.cid == widget.resumeChapterId;
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Material(
+              color: current ? colors.primaryContainer : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                key: ValueKey('chapter-$volumeIndex-${chapter.cid}'),
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => widget.onRead!(chapter),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 16,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          chapter.title,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodyMedium?.copyWith(
+                            color:
+                                current
+                                    ? colors.onPrimaryContainer
+                                    : colors.onSurface,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Icon(
+                        current
+                            ? Icons.bookmark_rounded
+                            : Icons.chevron_right_rounded,
+                        size: 18,
+                        color: colors.primary,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }, childCount: _rowCount),
+      ),
+      const SliverToBoxAdapter(
+        child: SafeArea(top: false, child: SizedBox(height: 32)),
+      ),
+    ];
   }
 }
 
@@ -481,6 +562,11 @@ class BookDetailsHeader extends StatefulWidget {
   final SourceId source;
   final int? volumes, chapters;
   final VoidCallback? onAuthor;
+  String get _coverUrl {
+    final url = info?.imgUrl ?? '';
+    return url.isEmpty ? hint?.coverUrl ?? '' : url;
+  }
+
   @override
   State<BookDetailsHeader> createState() => _BookDetailsHeaderState();
 }
@@ -490,9 +576,7 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
   @override
   void didUpdateWidget(covariant BookDetailsHeader old) {
     super.didUpdateWidget(old);
-    if (old.source != widget.source ||
-        (old.info?.imgUrl ?? old.hint?.coverUrl) !=
-            (widget.info?.imgUrl ?? widget.hint?.coverUrl)) {
+    if (old.source != widget.source || old._coverUrl != widget._coverUrl) {
       _coverColor = null;
     }
   }
@@ -503,7 +587,7 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
         apple = Theme.of(context).platform == TargetPlatform.iOS;
     final info = widget.info;
     final title = info?.title ?? widget.hint?.title ?? '作品详情';
-    final cover = info?.imgUrl ?? widget.hint?.coverUrl ?? '';
+    final cover = widget._coverUrl;
     final author = info?.author.trim() ?? '',
         status = info?.status.trim() ?? '';
     return LayoutBuilder(
@@ -526,6 +610,7 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
                   key: ValueKey('${widget.source.name}:$cover'),
                   source: widget.source,
                   url: cover,
+                  preferPaintedSize: true,
                   fit: BoxFit.contain,
                   borderRadius: BorderRadius.circular(apple ? 10 : 16),
                   onColor:

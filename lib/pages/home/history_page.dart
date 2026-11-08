@@ -9,6 +9,10 @@ import 'package:wild/services/read_request.dart';
 import 'package:intl/intl.dart';
 import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/theme/material_you.dart';
+import 'package:wild/theme/horizontal_page_transitions.dart';
+import 'package:wild/pages/novel/novel_info_page.dart';
+import 'package:wild/pages/novel/reader_route.dart';
+import 'package:wild/models/book_detail_hint.dart';
 
 import 'history_cubit.dart';
 
@@ -17,7 +21,8 @@ class HistoryPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.watch<HistoryCubit>();
+    final cubit = context.read<HistoryCubit>();
+    final localOnly = context.select((HistoryCubit value) => value.localOnly);
     return Scaffold(
       appBar: AppBar(
         title: const Text('阅读历史'),
@@ -62,7 +67,7 @@ class HistoryPage extends StatelessWidget {
                 usesAppleGlass
                     ? AppleGlassChoiceBar(
                       labels: [activeSource.value.label, '本地 EPUB'],
-                      index: cubit.localOnly ? 1 : 0,
+                      index: localOnly ? 1 : 0,
                       onSelect: (index) => cubit.showLocal(index == 1),
                     )
                     : AppSegmentedButton<bool>(
@@ -76,7 +81,7 @@ class HistoryPage extends StatelessWidget {
                           label: Text('本地 EPUB'),
                         ),
                       ],
-                      selected: {cubit.localOnly},
+                      selected: {localOnly},
                       onSelectionChanged:
                           (selection) => cubit.showLocal(selection.single),
                     ),
@@ -95,13 +100,23 @@ class HistoryPage extends StatelessWidget {
             if (state.histories.isEmpty) {
               return const Center(child: Text('暂无阅读历史'));
             }
+            final indexes = {
+              for (var i = 0; i < state.histories.length; i++)
+                state.histories[i].novelId: i,
+            };
             return RefreshIndicator(
               onRefresh: () => context.read<HistoryCubit>().load(),
               child: ListView.builder(
                 itemCount: state.histories.length,
+                findChildIndexCallback:
+                    (key) =>
+                        key is ValueKey<String> ? indexes[key.value] : null,
                 itemBuilder: (context, index) {
                   final history = state.histories[index];
-                  return _HistoryItem(history: history);
+                  return _HistoryItem(
+                    key: ValueKey(history.novelId),
+                    history: history,
+                  );
                 },
               ),
             );
@@ -116,7 +131,7 @@ class HistoryPage extends StatelessWidget {
 class _HistoryItem extends StatelessWidget {
   final w8.ReadingHistory history;
 
-  const _HistoryItem({required this.history});
+  const _HistoryItem({super.key, required this.history});
 
   @override
   Widget build(BuildContext context) {
@@ -134,19 +149,36 @@ class _HistoryItem extends StatelessWidget {
     );
     final colorScheme = Theme.of(context).colorScheme;
     final historyCubit = context.read<HistoryCubit>();
+    Future<void> open(PageRoute<void> page) async {
+      if (ModalRoute.of(context)?.isCurrent == false) return;
+      final scope = bookNavigationScope(history.novelId);
+      final source = historyCubit.historySource;
+      await pushAndWaitForPageExit(context, page);
+      if (context.mounted &&
+          ModalRoute.of(context)?.isCurrent != false &&
+          source == historyCubit.historySource &&
+          scope == bookNavigationScope(history.novelId)) {
+        await historyCubit.load(keepContent: true);
+      }
+    }
 
     return AppleGlassCard(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: InkWell(
         onTap: () async {
-          await Navigator.pushNamed(
-            context,
-            '/novel/info',
-            arguments: history.novelId,
+          BookDetailHint.remember(
+            history.novelId,
+            history.novelName,
+            history.cover,
           );
-          if (context.mounted) {
-            historyCubit.load();
-          }
+          await open(
+            novelInfoRoute(
+              RouteSettings(
+                name: novelInfoRouteName,
+                arguments: history.novelId,
+              ),
+            ),
+          );
         },
         onLongPress: () {
           showAdaptiveDialog(
@@ -254,24 +286,23 @@ class _HistoryItem extends StatelessWidget {
 
                           if (!context.mounted) return;
 
-                          await Navigator.pushNamed(
-                            context,
-                            '/novel/reader',
-                            arguments: {
-                              'novelId': history.novelId,
-                              'chapterId': history.chapterId,
-                              'title': history.chapterTitle,
-                              'volumes': volumes,
-                              'novelInfo': novelInfo,
-                              'initialPage': history.progressPage,
-                              if (history.novelId.startsWith('epub:'))
-                                'initialTextOffset': history.progress,
-                            },
+                          await open(
+                            novelReaderRoute(
+                              RouteSettings(
+                                name: novelReaderRouteName,
+                                arguments: {
+                                  'novelId': history.novelId,
+                                  'chapterId': history.chapterId,
+                                  'title': history.chapterTitle,
+                                  'volumes': volumes,
+                                  'novelInfo': novelInfo,
+                                  'initialPage': history.progressPage,
+                                  if (history.novelId.startsWith('epub:'))
+                                    'initialTextOffset': history.progress,
+                                },
+                              ),
+                            ),
                           );
-                          // 返回后更新历史记录
-                          if (context.mounted) {
-                            historyCubit.load();
-                          }
                         } catch (e) {
                           if (e is ReadCancelled) return;
                           if (!context.mounted) return;
