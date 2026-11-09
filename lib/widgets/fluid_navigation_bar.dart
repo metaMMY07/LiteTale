@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' show ImageFilter, lerpDouble;
 
 import 'package:flutter/material.dart';
@@ -156,21 +157,14 @@ class _FluidNavigationBarState extends State<FluidNavigationBar>
                               SizedBox(
                                 height: _iconSlotHeight,
                                 child: Center(
-                                  child: AnimatedScale(
-                                    scale:
-                                        index == widget.selectedIndex
-                                            ? 1.08
-                                            : 1,
-                                    duration:
-                                        reduceMotion
-                                            ? Duration.zero
-                                            : const Duration(milliseconds: 190),
-                                    curve: Curves.easeOutCubic,
-                                    child: Badge(
-                                      isLabelVisible:
-                                          widget.destinations[index].showBadge,
-                                      label: const Text('新'),
-                                      child: Icon(
+                                  child: Badge(
+                                    isLabelVisible:
+                                        widget.destinations[index].showBadge,
+                                    label: const Text('新'),
+                                    child: _DestinationGlyphMotion(
+                                      selected: index == widget.selectedIndex,
+                                      reduceMotion: reduceMotion,
+                                      icon: Icon(
                                         index == widget.selectedIndex
                                             ? widget
                                                 .destinations[index]
@@ -212,6 +206,41 @@ class _FluidNavigationBarState extends State<FluidNavigationBar>
           ],
         ),
       ),
+    );
+  }
+}
+
+class _DestinationGlyphMotion extends StatelessWidget {
+  const _DestinationGlyphMotion({
+    required this.selected,
+    required this.reduceMotion,
+    required this.icon,
+  });
+
+  final bool selected, reduceMotion;
+  final Widget icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final target = selected ? 1.0 : 0.0;
+    if (reduceMotion) {
+      return Transform.scale(scale: 1 + .08 * target, child: icon);
+    }
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: target, end: target),
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOutCubic,
+      child: icon,
+      builder: (_, value, child) {
+        final lift = math.sin(value * math.pi);
+        return Transform.translate(
+          offset: Offset(0, -2.5 * lift),
+          child: Transform.rotate(
+            angle: -.12 * lift,
+            child: Transform.scale(scale: 1 + .08 * value, child: child),
+          ),
+        );
+      },
     );
   }
 }

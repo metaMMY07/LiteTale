@@ -132,6 +132,7 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
   int _request = 0;
   ReadRequest? _readRequest;
   bool _closing = false;
+  Future<bool>? _initialRouteArrival;
   final Future<SourceChapter> Function({
     required String aid,
     required String cid,
@@ -151,12 +152,14 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
     required this.initialAid,
     required this.initialCid,
     required this.initialVolumes,
+    Future<bool>? initialRouteArrival,
     Future<SourceChapter> Function({required String aid, required String cid})?
     read,
     int Function(String aid)? sessionGeneration,
     ReadingProgressQueue? progress,
     ReaderPrefetchLoad? prefetch,
-  }) : _read =
+  }) : _initialRouteArrival = initialRouteArrival,
+       _read =
            read == null
                ? w8.readerChapter
                : (({
@@ -328,6 +331,11 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
         ),
       );
       if (!current()) return;
+      if (_initialRouteArrival case final arrival?) {
+        if (!await readRequest.wait(arrival)) return;
+        _initialRouteArrival = null;
+        if (!current()) return;
+      }
       final rawContent = chapter.content;
       final parsedContent = _parseContent(
         rawContent,

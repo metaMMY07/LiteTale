@@ -46,6 +46,7 @@ import 'package:wild/models/reader_mark.dart';
 import 'package:wild/services/reader_mark_store.dart';
 import 'package:wild/widgets/reader_mark_selection.dart';
 import 'package:wild/widgets/reader_marks_panel.dart';
+import 'package:wild/theme/ios_page_arrival.dart';
 
 class HtmlReaderPage extends StatelessWidget {
   final NovelInfo novelInfo;
@@ -74,6 +75,7 @@ class HtmlReaderPage extends StatelessWidget {
                 initialAid: initialAid,
                 initialCid: initialCid,
                 initialVolumes: volumes,
+                initialRouteArrival: IosPageArrival.pendingOf(context),
               )..loadChapter(),
         ),
         BlocProvider(create: (context) => FullscreenCubit()),

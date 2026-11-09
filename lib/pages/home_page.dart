@@ -25,6 +25,17 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int _currentIndex = 0;
   late final HistoryCubit _historyCubit;
+  late List<Widget> _tabPages = _createTabPages();
+
+  List<Widget> _createTabPages() {
+    final sourceKey = '${activeSource.value}:${sourceRevision.value}';
+    return [
+      IndexPage(key: ValueKey('index:$sourceKey')),
+      BookshelfPage(key: ValueKey('shelf:$sourceKey')),
+      HistoryPage(key: ValueKey('history:$sourceKey')),
+      MorePage(key: ValueKey(activeSource.value)),
+    ];
+  }
 
   @override
   void initState() {
@@ -85,7 +96,7 @@ class _HomePageState extends State<HomePage> {
 
   void _sourceChanged() {
     if (!mounted) return;
-    setState(() {});
+    setState(() => _tabPages = _createTabPages());
     _loadBookshelf();
     _historyCubit.load();
     _autoSign();
@@ -145,34 +156,8 @@ class _HomePageState extends State<HomePage> {
             body: IndexedStack(
               index: _currentIndex,
               children: [
-                TickerMode(
-                  enabled: _currentIndex == 0,
-                  child: IndexPage(
-                    key: ValueKey(
-                      'index:${activeSource.value}:${sourceRevision.value}',
-                    ),
-                  ),
-                ),
-                TickerMode(
-                  enabled: _currentIndex == 1,
-                  child: BookshelfPage(
-                    key: ValueKey(
-                      'shelf:${activeSource.value}:${sourceRevision.value}',
-                    ),
-                  ),
-                ),
-                TickerMode(
-                  enabled: _currentIndex == 2,
-                  child: HistoryPage(
-                    key: ValueKey(
-                      'history:${activeSource.value}:${sourceRevision.value}',
-                    ),
-                  ),
-                ),
-                TickerMode(
-                  enabled: _currentIndex == 3,
-                  child: MorePage(key: ValueKey(activeSource.value)),
-                ),
+                for (var i = 0; i < _tabPages.length; i++)
+                  TickerMode(enabled: _currentIndex == i, child: _tabPages[i]),
               ],
             ),
             bottomNavigationBar:

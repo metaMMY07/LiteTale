@@ -169,7 +169,13 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                               child:
                                   Platform.isIOS
                                       ? HuanmengBrowserHost(
-                                        child: ThemeRevealHost(child: child!),
+                                        child: ThemeRevealHost(
+                                          // There are no Hero flights in these
+                                          // routes. Skip their hidden layout pass.
+                                          child: HeroControllerScope.none(
+                                            child: child!,
+                                          ),
+                                        ),
                                       )
                                       : ThemeRevealHost(child: child!),
                             ),

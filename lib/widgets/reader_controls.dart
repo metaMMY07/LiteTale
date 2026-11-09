@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:wild/widgets/material_control_motion.dart';
 import 'package:wild/widgets/platform_controls.dart';
 
 /// Floating reader chrome; neither toolbar changes the laid-out paper size.
@@ -59,6 +60,7 @@ class ReaderToolbar extends StatelessWidget {
             key: const ValueKey('reader-catalog'),
             label: '目录',
             onPressed: onCatalog,
+            motion: MaterialReaderMotion.catalog,
             icon:
                 usesAppleGlass
                     ? CupertinoIcons.list_bullet
@@ -80,6 +82,7 @@ class ReaderToolbar extends StatelessWidget {
             key: const ValueKey('reader-settings'),
             label: '阅读设置',
             onPressed: onSettings,
+            motion: MaterialReaderMotion.settings,
             icon:
                 usesAppleGlass ? CupertinoIcons.gear : Icons.settings_outlined,
           ),
@@ -98,12 +101,14 @@ class ReaderRoundAction extends StatelessWidget {
     required this.onPressed,
     this.size = 48,
     this.selected = false,
+    this.motion,
   });
   final String label;
   final IconData icon;
   final VoidCallback? onPressed;
   final double size;
   final bool selected;
+  final MaterialReaderMotion? motion;
 
   @override
   Widget build(BuildContext context) => SizedBox.square(
@@ -123,6 +128,13 @@ class ReaderRoundAction extends StatelessWidget {
                   ),
                 ),
               ),
+            )
+            : motion != null &&
+                Theme.of(context).platform == TargetPlatform.android
+            ? MaterialReaderMotionButton(
+              motion: motion!,
+              label: label,
+              onPressed: onPressed,
             )
             : IconButton.filledTonal(
               tooltip: label,

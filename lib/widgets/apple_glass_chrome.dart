@@ -7,6 +7,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:wild/theme/ios_page_arrival.dart';
 
 bool get usesAppleGlass => defaultTargetPlatform == TargetPlatform.iOS;
 
@@ -80,6 +81,7 @@ class AppleGlassSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!usesAppleGlass) return child;
+    final surface = Theme.of(context).colorScheme.surface;
     final content = Stack(
       children: [
         Positioned.fill(
@@ -91,13 +93,15 @@ class AppleGlassSurface extends StatelessWidget {
               'dark': Theme.of(context).brightness == Brightness.dark,
             },
             onAction: (_, _) {},
+            transitionFallback: ColoredBox(
+              color: Color.alphaBlend(
+                tint ?? Colors.transparent,
+                surface,
+              ).withValues(alpha: .86),
+            ),
             fallback: BackdropFilter(
               filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-              child: ColoredBox(
-                color: Theme.of(
-                  context,
-                ).colorScheme.surface.withValues(alpha: .64),
-              ),
+              child: ColoredBox(color: surface.withValues(alpha: .64)),
             ),
           ),
         ),
@@ -491,23 +495,37 @@ class _AppleChrome extends StatefulWidget {
     required this.parameters,
     required this.onAction,
     required this.fallback,
+    this.transitionFallback,
   });
   final Map<String, Object> parameters;
   final void Function(String action, Object? value) onAction;
   final Widget fallback;
+  final Widget? transitionFallback;
   @override
   State<_AppleChrome> createState() => _AppleChromeState();
 }
 
 class _AppleChromeState extends State<_AppleChrome> {
   MethodChannel? _channel;
+  ModalRoute<Object?>? _route;
+  UiKitView? _nativeView;
+  bool _tabActive = true;
+
+  bool get _isSurface => widget.parameters['kind'] == 'surface';
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of(context);
+  }
 
   void _created(int id) {
+    if (!mounted) return;
     _channel?.setMethodCallHandler(null);
     final channel = MethodChannel('litetale/apple_glass/$id');
     _channel = channel;
     channel.setMethodCallHandler((call) async {
-      if (!mounted || ModalRoute.of(context)?.isCurrent == false) return;
+      if (!mounted || !_tabActive || _route?.isCurrent == false) return;
       if (call.method == 'action') {
         final args = Map<Object?, Object?>.from(call.arguments as Map);
         if (widget.parameters['kind'] == 'slider' &&
@@ -517,14 +535,38 @@ class _AppleChromeState extends State<_AppleChrome> {
         widget.onAction(args['action'] as String, args['value']);
       }
     });
-    // UIKit creation is asynchronous; sync any value/range changed meanwhile.
-    if (widget.parameters['kind'] == 'slider') _update();
+    // UIKit creation is asynchronous. Sync only when the Flutter values
+    // changed since creation (including a selection made during attachment).
+    if (!_sameParameter(_nativeView?.creationParams, widget.parameters)) {
+      _update();
+    }
   }
 
   @override
   void didUpdateWidget(covariant _AppleChrome oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!mapEquals(widget.parameters, oldWidget.parameters)) _update();
+    if (_channel != null &&
+        !_sameParameter(widget.parameters, oldWidget.parameters)) {
+      _update();
+    }
+  }
+
+  // Choice labels and menu items are lists rebuilt by their parents. Comparing
+  // only the outer map sends redundant UIKit configuration/layout work.
+  static bool _sameParameter(Object? a, Object? b) {
+    if (identical(a, b) || a == b) return true;
+    if (a is List && b is List && a.length == b.length) {
+      for (var i = 0; i < a.length; i++) {
+        if (!_sameParameter(a[i], b[i])) return false;
+      }
+      return true;
+    }
+    if (a is Map && b is Map && a.length == b.length) {
+      return a.entries.every(
+        (e) => b.containsKey(e.key) && _sameParameter(e.value, b[e.key]),
+      );
+    }
+    return false;
   }
 
   Future<void> _update() async {
@@ -545,34 +587,56 @@ class _AppleChromeState extends State<_AppleChrome> {
 
   @override
   Widget build(BuildContext context) {
-    // UIKit chrome must never float above a reader, pushed page or popup.
-    if (widget.parameters['kind'] != 'surface' &&
-        ModalRoute.of(context)?.isCurrent == false) {
-      return const SizedBox.shrink();
+    final current = _route?.isCurrent != false;
+    final hidden = !_isSurface && !current;
+    _tabActive = TickerMode.of(context);
+    final Widget content;
+    if (kIsWeb || !Platform.isIOS) {
+      content = widget.fallback;
+    } else {
+      if (_nativeView == null &&
+          current &&
+          _tabActive &&
+          IosPageArrival.hasArrivedOf(context)) {
+        _nativeView = _createView();
+      }
+      content =
+          _nativeView ??
+          IgnorePointer(
+            child: ExcludeSemantics(
+              child: widget.transitionFallback ?? widget.fallback,
+            ),
+          );
     }
-    if (kIsWeb || !Platform.isIOS) return widget.fallback;
-    return UiKitView(
-      viewType: 'litetale/apple_glass',
-      creationParams: widget.parameters,
-      creationParamsCodec: const StandardMessageCodec(),
-      onPlatformViewCreated: _created,
-      // A slider owns horizontal drags and taps, but the surrounding settings
-      // sheet must retain vertical scrolling and its expand/collapse gesture.
-      gestureRecognizers:
-          widget.parameters['kind'] == 'slider'
-              ? <Factory<OneSequenceGestureRecognizer>>{
-                Factory<HorizontalDragGestureRecognizer>(
-                  () => HorizontalDragGestureRecognizer(),
-                ),
-                Factory<TapGestureRecognizer>(() => TapGestureRecognizer()),
-              }
-              : const <Factory<OneSequenceGestureRecognizer>>{},
-      // The floating bar overlaps tappable book covers. Keep those recognizers
-      // out of its gesture arena so a tab press reaches UIKit immediately.
-      hitTestBehavior:
-          widget.parameters['kind'] == 'surface'
-              ? PlatformViewHitTestBehavior.transparent
-              : PlatformViewHitTestBehavior.opaque,
+    // Offstage removes the UIView from the painted scene and hit testing
+    // without disposing its controller, menu or UITabBarController.
+    return Offstage(
+      offstage: hidden,
+      child: ExcludeFocus(excluding: hidden, child: content),
     );
   }
+
+  UiKitView _createView() => UiKitView(
+    viewType: 'litetale/apple_glass',
+    creationParams: widget.parameters,
+    creationParamsCodec: const StandardMessageCodec(),
+    onPlatformViewCreated: _created,
+    // A slider owns horizontal drags and taps, but the surrounding settings
+    // sheet must retain vertical scrolling and its expand/collapse gesture.
+    gestureRecognizers:
+        widget.parameters['kind'] == 'slider'
+            ? <Factory<OneSequenceGestureRecognizer>>{
+              Factory<HorizontalDragGestureRecognizer>(
+                () => HorizontalDragGestureRecognizer(),
+              ),
+              Factory<TapGestureRecognizer>(() => TapGestureRecognizer()),
+            }
+            : const <Factory<OneSequenceGestureRecognizer>>{},
+    // The floating bar overlaps tappable book covers. Keep those recognizers
+    // out of its gesture arena so a tab press reaches UIKit immediately.
+    hitTestBehavior:
+        _isSurface
+            ? PlatformViewHitTestBehavior.transparent
+            : PlatformViewHitTestBehavior.opaque,
+  );
 }

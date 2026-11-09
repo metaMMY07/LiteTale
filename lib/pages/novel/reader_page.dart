@@ -43,6 +43,7 @@ import 'dart:async';
 import 'package:wild/services/reader_mark_store.dart';
 import 'package:wild/widgets/reader_mark_selection.dart';
 import 'package:wild/widgets/reader_marks_panel.dart';
+import 'package:wild/theme/ios_page_arrival.dart';
 
 class ReaderPage extends StatelessWidget {
   final String aid;
@@ -105,6 +106,7 @@ class ReaderPage extends StatelessWidget {
                   fontSettingsCubit: context.read<FontSettingsCubit>(),
                   readerTheme: () => context.read<ThemeCubit>().state,
                   layoutReady: ReaderSystemUiScope.layoutReadyOf(context),
+                  initialRouteArrival: IosPageArrival.pendingOf(context),
                 )..loadChapter(
                   initialPage: initialPage,
                   initialTextOffset: initialTextOffset,

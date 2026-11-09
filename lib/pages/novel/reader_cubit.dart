@@ -35,6 +35,7 @@ class ReaderCubit extends Cubit<ReaderState> {
   EpubCssReader? _cssReader;
   final ReaderTheme Function()? readerTheme;
   final Future<void>? layoutReady;
+  Future<bool>? _initialRouteArrival;
   EpubBookFlow? _bookFlow;
   EpubFlowWindow? _bookWindow;
   bool _warmingBook = false;
@@ -90,6 +91,7 @@ class ReaderCubit extends Cubit<ReaderState> {
     required this.fontSettingsCubit,
     this.readerTheme,
     this.layoutReady,
+    Future<bool>? initialRouteArrival,
     Future<SourceChapter> Function({required String aid, required String cid})?
     read,
     int Function(String aid)? sessionGeneration,
@@ -97,7 +99,8 @@ class ReaderCubit extends Cubit<ReaderState> {
     ReaderPrefetchLoad? prefetch,
     Future<ReaderPosition?> Function(String bookId, String chapterId)?
     loadPosition,
-  }) : _read =
+  }) : _initialRouteArrival = initialRouteArrival,
+       _read =
            read == null
                ? readerChapter
                : (({
@@ -207,6 +210,16 @@ class ReaderCubit extends Cubit<ReaderState> {
       );
       if (_closing || isClosed || request != _request || !sourceMatches()) {
         return;
+      }
+      if (_initialRouteArrival case final arrival?) {
+        // Start the source request immediately. Only the first synchronous
+        // page layout waits for the iOS slide and its final system insets.
+        if (!await readRequest.wait(arrival)) return;
+        if (layoutReady case final ready?) await readRequest.wait(ready);
+        _initialRouteArrival = null;
+        if (_closing || isClosed || request != _request || !sourceMatches()) {
+          return;
+        }
       }
       if (_session(targetAid) != session) {
         emit(ReaderError('账号已变化，请重新打开章节。'));

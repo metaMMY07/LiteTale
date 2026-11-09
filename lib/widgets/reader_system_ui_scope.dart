@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:wild/theme/ios_page_arrival.dart';
 import 'package:wild/widgets/reading_progress_scope.dart';
 
 /// The route owns immersive mode, so changing chapters or repaginating does
@@ -17,15 +18,26 @@ class ReaderSystemUiScope extends StatefulWidget {
 
 class _ReaderSystemUiScopeState extends State<ReaderSystemUiScope>
     with WidgetsBindingObserver {
-  late final Future<void> _ready;
+  Future<void>? _ready;
+  bool _entered = false;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _ready = _enter();
   }
 
-  Future<void> _enter() async {
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _ready ??= _enter(IosPageArrival.pendingOf(context));
+  }
+
+  Future<void> _enter(Future<bool>? arrival) async {
+    // iOS insets can invalidate both pages if the system bars change while the
+    // reader is sliding in. Android retains its immediate immersive behavior.
+    if (arrival != null && !await arrival) return;
+    if (!mounted) return;
+    _entered = true;
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     // Cache hits can otherwise measure the previous route's status-bar insets
     // before the platform has applied fullscreen, then immediately reflow.
@@ -34,7 +46,7 @@ class _ReaderSystemUiScopeState extends State<ReaderSystemUiScope>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+    if (_entered && state == AppLifecycleState.resumed) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     }
   }
@@ -42,13 +54,13 @@ class _ReaderSystemUiScopeState extends State<ReaderSystemUiScope>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    if (_entered) SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => _ReaderLayoutReady(
-    ready: _ready,
+    ready: _ready!,
     child: ReadingProgressScope(child: widget.child),
   );
 }

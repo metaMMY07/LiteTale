@@ -7,6 +7,7 @@ import 'package:wild/sources/book_source.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'apple_glass_chrome.dart';
 import 'book_cover_image.dart';
+import 'material_control_motion.dart';
 import 'platform_controls.dart';
 import 'reader_controls.dart';
 
@@ -233,11 +234,17 @@ class _BookDetailsViewState extends State<BookDetailsView> {
                         child: Semantics(
                           label: widget.inShelf ? '移出书架' : '加入书架',
                           button: true,
-                          child: Icon(
-                            widget.inShelf
-                                ? Icons.bookmark_rounded
-                                : Icons.bookmark_border_rounded,
-                          ),
+                          child:
+                              Theme.of(context).platform ==
+                                      TargetPlatform.android
+                                  ? MaterialBookmarkGlyph(
+                                    selected: widget.inShelf,
+                                  )
+                                  : Icon(
+                                    widget.inShelf
+                                        ? Icons.bookmark_rounded
+                                        : Icons.bookmark_border_rounded,
+                                  ),
                         ),
                       ),
                     ),
@@ -572,13 +579,19 @@ class BookDetailsHeader extends StatefulWidget {
 }
 
 class _BookDetailsHeaderState extends State<BookDetailsHeader> {
-  Color? _coverColor;
+  final _coverColor = ValueNotifier<Color?>(null);
   @override
   void didUpdateWidget(covariant BookDetailsHeader old) {
     super.didUpdateWidget(old);
     if (old.source != widget.source || old._coverUrl != widget._coverUrl) {
-      _coverColor = null;
+      _coverColor.value = null;
     }
+  }
+
+  @override
+  void dispose() {
+    _coverColor.dispose();
+    super.dispose();
   }
 
   @override
@@ -613,14 +626,7 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
                   preferPaintedSize: true,
                   fit: BoxFit.contain,
                   borderRadius: BorderRadius.circular(apple ? 10 : 16),
-                  onColor:
-                      apple
-                          ? (color) {
-                            if (_coverColor != color) {
-                              setState(() => _coverColor = color);
-                            }
-                          }
-                          : null,
+                  onColor: apple ? (color) => _coverColor.value = color : null,
                 ),
               ),
               const SizedBox(width: 18),
@@ -724,26 +730,27 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
             child: content,
           );
         }
-        final tint = _coverColor ?? colors.primary;
-        return DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color.alphaBlend(
-                  tint.withValues(
-                    alpha:
-                        Theme.of(context).brightness == Brightness.dark
-                            ? .18
-                            : .11,
+        final strength =
+            Theme.of(context).brightness == Brightness.dark ? .18 : .11;
+        return ValueListenableBuilder<Color?>(
+          valueListenable: _coverColor,
+          builder:
+              (_, color, child) => DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color.alphaBlend(
+                        (color ?? colors.primary).withValues(alpha: strength),
+                        colors.surface,
+                      ),
+                      colors.surface,
+                    ],
                   ),
-                  colors.surface,
                 ),
-                colors.surface,
-              ],
-            ),
-          ),
+                child: child,
+              ),
           child: content,
         );
       },

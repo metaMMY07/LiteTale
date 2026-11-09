@@ -39,11 +39,6 @@ class _IndexPageState extends State<IndexPage>
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
-    _tabController.addListener(_tabsChanged);
-  }
-
-  void _tabsChanged() {
-    if (mounted && usesAppleGlass) setState(() {});
   }
 
   void _openSources() => Navigator.push(
@@ -160,15 +155,21 @@ class _IndexPageState extends State<IndexPage>
                         onTheme: _switchTheme,
                         onSearch: () => Navigator.pushNamed(context, '/search'),
                       ),
-                      AppleGlassSegments(
-                        index: _tabController.index,
-                        thirdLabel:
-                            activeSource.value == SourceId.huanmeng
-                                ? '完结'
-                                : '排行',
-                        lastLabel:
-                            activeSource.value == SourceId.wenku8 ? '完结' : '全部',
-                        onSelect: _tabController.animateTo,
+                      ListenableBuilder(
+                        listenable: _tabController,
+                        builder:
+                            (_, _) => AppleGlassSegments(
+                              index: _tabController.index,
+                              thirdLabel:
+                                  activeSource.value == SourceId.huanmeng
+                                      ? '完结'
+                                      : '排行',
+                              lastLabel:
+                                  activeSource.value == SourceId.wenku8
+                                      ? '完结'
+                                      : '全部',
+                              onSelect: _tabController.animateTo,
+                            ),
                       ),
                       const SizedBox(height: 8),
                     ],

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wild/theme/ios_page_arrival.dart';
 
 /// Wait until the pushed page's overlay is removed. A normal push Future
 /// resolves as soon as pop starts, while the previous page is still being drawn.
@@ -16,7 +17,7 @@ Future<void> pushAndWaitForPageExit(
 const horizontalPageTransitionsTheme = PageTransitionsTheme(
   builders: {
     TargetPlatform.android: HorizontalCoverPageTransitionsBuilder(),
-    TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+    TargetPlatform.iOS: LiteTaleCupertinoTransitionsBuilder(),
     TargetPlatform.fuchsia: HorizontalCoverPageTransitionsBuilder(),
     TargetPlatform.linux: HorizontalCoverPageTransitionsBuilder(),
     TargetPlatform.macOS: HorizontalCoverPageTransitionsBuilder(),
@@ -70,7 +71,7 @@ class HorizontalCoverPageRoute<T> extends MaterialPageRoute<T> {
     Animation<double> secondaryAnimation,
     Widget child,
   ) => (Theme.of(context).platform == TargetPlatform.iOS
-          ? const CupertinoPageTransitionsBuilder()
+          ? const LiteTaleCupertinoTransitionsBuilder()
           : const HorizontalCoverPageTransitionsBuilder())
       .buildTransitions(this, context, animation, secondaryAnimation, child);
 }

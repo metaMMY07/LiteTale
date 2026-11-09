@@ -159,14 +159,26 @@ class BookCoverPreviewCache {
         factors.add((ac(n ~/ 361), ac(n ~/ 19 % 19), ac(n % 19)));
       }
       final pixels = Uint8List(32 * 48 * 4);
+      // Every row/column shares the same basis terms. Do the trig once per
+      // axis rather than during every pixel's synchronous decode.
+      final xBasis = Float64List(32 * nx);
+      final yBasis = Float64List(48 * ny);
+      for (var x = 0; x < 32; x++) {
+        for (var i = 0; i < nx; i++) {
+          xBasis[x * nx + i] = math.cos(math.pi * x * i / 32);
+        }
+      }
+      for (var y = 0; y < 48; y++) {
+        for (var j = 0; j < ny; j++) {
+          yBasis[y * ny + j] = math.cos(math.pi * y * j / 48);
+        }
+      }
       for (var y = 0; y < 48; y++) {
         for (var x = 0; x < 32; x++) {
           var r = 0.0, g = 0.0, b = 0.0;
           for (var j = 0; j < ny; j++) {
             for (var i = 0; i < nx; i++) {
-              final basis =
-                      math.cos(math.pi * x * i / 32) *
-                      math.cos(math.pi * y * j / 48),
+              final basis = xBasis[x * nx + i] * yBasis[y * ny + j],
                   c = factors[i + j * nx];
               r += c.$1 * basis;
               g += c.$2 * basis;
