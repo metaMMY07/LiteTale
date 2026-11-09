@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_html/flutter_html.dart';
@@ -199,6 +201,40 @@ class _BookDetailsViewState extends State<BookDetailsView> {
     final resume = _resumeChapter;
     final target = resume ?? _firstChapter;
     final allOpen = _open.length == widget.volumes.length;
+    final actionHeight =
+        apple
+            ? math.max(
+              56.0,
+              MediaQuery.textScalerOf(context).scale(17) * 1.25 + 24,
+            )
+            : 56.0;
+    final readButton = AppButton.filled(
+      key: const ValueKey('detail-read'),
+      onPressed: target == null ? null : () => widget.onRead!(target),
+      style: FilledButton.styleFrom(minimumSize: const Size(0, 56)),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            apple ? CupertinoIcons.play_fill : Icons.menu_book_rounded,
+            size: 22,
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              target == null
+                  ? '暂无可读章节'
+                  : resume == null
+                  ? '开始阅读'
+                  : '继续阅读',
+              maxLines: apple ? 1 : 2,
+              overflow: apple ? TextOverflow.ellipsis : null,
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ],
+      ),
+    );
     final actions = Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       child: Column(
@@ -210,7 +246,7 @@ class _BookDetailsViewState extends State<BookDetailsView> {
                 if (apple)
                   ReaderRoundAction(
                     key: const ValueKey('detail-bookmark'),
-                    size: 56,
+                    size: actionHeight,
                     label: widget.inShelf ? '移出书架' : '加入书架',
                     selected: widget.inShelf,
                     icon:
@@ -252,35 +288,10 @@ class _BookDetailsViewState extends State<BookDetailsView> {
                 const SizedBox(width: 12),
               ],
               Expanded(
-                child: AppButton.filled(
-                  key: const ValueKey('detail-read'),
-                  onPressed:
-                      target == null ? null : () => widget.onRead!(target),
-                  style: FilledButton.styleFrom(minimumSize: const Size(0, 56)),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        apple
-                            ? CupertinoIcons.play_fill
-                            : Icons.menu_book_rounded,
-                        size: 22,
-                      ),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          target == null
-                              ? '暂无可读章节'
-                              : resume == null
-                              ? '开始阅读'
-                              : '继续阅读',
-                          maxLines: 2,
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                child:
+                    apple
+                        ? SizedBox(height: actionHeight, child: readButton)
+                        : readButton,
               ),
             ],
           ),

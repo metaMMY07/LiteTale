@@ -246,6 +246,13 @@ class AppleGlassMenu extends StatelessWidget {
       onAction: (a, v) {
         if (a == 'select') onSelect(v as String);
       },
+      transitionFallback: _GlassButtonPreview(
+        label: label,
+        icon: switch (symbol) {
+          'ellipsis' => CupertinoIcons.ellipsis,
+          _ => CupertinoIcons.line_horizontal_3_decrease,
+        },
+      ),
       fallback: PopupMenuButton<String>(
         tooltip: label,
         onSelected: onSelect,
@@ -264,7 +271,8 @@ class AppleGlassMenu extends StatelessWidget {
 }
 
 /// UIKit owns the material, selection animation, SF Symbols and accessibility.
-/// The fallback is for desktop widget tests; an iPhone uses the native view.
+/// The passive preview holds its place during a route slide; at rest the
+/// iPhone uses the native view.
 class AppleGlassBottomBar extends StatelessWidget {
   const AppleGlassBottomBar({
     super.key,
@@ -273,6 +281,19 @@ class AppleGlassBottomBar extends StatelessWidget {
   });
   final int index;
   final ValueChanged<int> onSelect;
+  static const _labels = ['发现', '书架', '历史', '我的'];
+  static const _icons = [
+    CupertinoIcons.compass,
+    CupertinoIcons.book,
+    CupertinoIcons.clock,
+    CupertinoIcons.person_crop_circle,
+  ];
+  static const _selectedIcons = [
+    CupertinoIcons.compass_fill,
+    CupertinoIcons.book_fill,
+    CupertinoIcons.clock_fill,
+    CupertinoIcons.person_crop_circle_fill,
+  ];
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -287,23 +308,13 @@ class AppleGlassBottomBar extends StatelessWidget {
       onAction: (action, value) {
         if (action == 'select') onSelect(value as int);
       },
+      transitionFallback: _DockPreview(index: index),
       fallback: CupertinoTabBar(
         currentIndex: index,
         onTap: onSelect,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(CupertinoIcons.compass),
-            label: '发现',
-          ),
-          BottomNavigationBarItem(icon: Icon(CupertinoIcons.book), label: '书架'),
-          BottomNavigationBarItem(
-            icon: Icon(CupertinoIcons.clock),
-            label: '历史',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(CupertinoIcons.person_crop_circle),
-            label: '我的',
-          ),
+        items: [
+          for (var i = 0; i < _labels.length; i++)
+            BottomNavigationBarItem(icon: Icon(_icons[i]), label: _labels[i]),
         ],
       ),
     ),
@@ -341,6 +352,7 @@ class AppleGlassToolbar extends StatelessWidget {
             onTheme();
         }
       },
+      transitionFallback: _ToolbarPreview(source: source),
       fallback: Row(
         children: [
           TextButton.icon(
@@ -365,6 +377,188 @@ class AppleGlassToolbar extends StatelessWidget {
         ],
       ),
     ),
+  );
+}
+
+// Simple paint during navigation, with matching bounds and readable labels.
+// Native glass handles all interaction and visual effects on the settled page.
+class _GlassButtonPreview extends StatelessWidget {
+  const _GlassButtonPreview({required this.icon, this.label = ''});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: _previewDecoration(colors),
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: label.isEmpty ? 0 : 12),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: label.isEmpty ? 21 : 16, color: colors.onSurface),
+            if (label.isNotEmpty) ...[
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: colors.onSurface, fontSize: 15),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+ShapeDecoration _previewDecoration(ColorScheme colors) => ShapeDecoration(
+  color: colors.surface.withValues(alpha: .9),
+  shape: StadiumBorder(
+    side: BorderSide(color: colors.outlineVariant.withValues(alpha: .16)),
+  ),
+);
+
+class _DockPreview extends StatelessWidget {
+  const _DockPreview({required this.index});
+
+  final int index;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          0,
+          16,
+          MediaQuery.viewPaddingOf(context).bottom + 4,
+        ),
+        child: SizedBox(
+          height: 60,
+          child: DecoratedBox(
+            decoration: _previewDecoration(colors),
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Row(
+                children: [
+                  for (var i = 0; i < AppleGlassBottomBar._labels.length; i++)
+                    Expanded(
+                      child: DecoratedBox(
+                        decoration: ShapeDecoration(
+                          color: i == index ? colors.primaryContainer : null,
+                          shape: const StadiumBorder(),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              i == index
+                                  ? AppleGlassBottomBar._selectedIcons[i]
+                                  : AppleGlassBottomBar._icons[i],
+                              size: 23,
+                              color:
+                                  i == index
+                                      ? colors.primary
+                                      : colors.onSurface,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              AppleGlassBottomBar._labels[i],
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textScaler: MediaQuery.textScalerOf(
+                                context,
+                              ).clamp(maxScaleFactor: 1.4),
+                              style: TextStyle(
+                                fontSize: 10,
+                                color:
+                                    i == index
+                                        ? colors.primary
+                                        : colors.onSurface,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ToolbarPreview extends StatelessWidget {
+  const _ToolbarPreview({required this.source});
+
+  final String source;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final width = constraints.maxWidth;
+      final leadingWidth = (width * .34).clamp(0.0, 136.0);
+      final titleInset = (leadingWidth + 16).clamp(112.0, double.infinity);
+      return Stack(
+        children: [
+          Positioned(
+            left: 8,
+            top: 6,
+            height: 44,
+            width: leadingWidth,
+            child: _GlassButtonPreview(
+              icon: CupertinoIcons.book,
+              label: source,
+            ),
+          ),
+          if (width > titleInset * 2)
+            Positioned(
+              left: titleInset,
+              right: titleInset,
+              top: 6,
+              height: 44,
+              child: Center(
+                child: Text(
+                  '发现',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+            ),
+          Positioned(
+            right: 60,
+            top: 6,
+            height: 44,
+            width: 44,
+            child: _GlassButtonPreview(
+              icon:
+                  Theme.of(context).brightness == Brightness.dark
+                      ? CupertinoIcons.sun_max
+                      : CupertinoIcons.moon,
+            ),
+          ),
+          const Positioned(
+            right: 8,
+            top: 6,
+            height: 44,
+            width: 44,
+            child: _GlassButtonPreview(icon: CupertinoIcons.search),
+          ),
+        ],
+      );
+    },
   );
 }
 
@@ -509,7 +703,8 @@ class _AppleChromeState extends State<_AppleChrome> {
   MethodChannel? _channel;
   ModalRoute<Object?>? _route;
   UiKitView? _nativeView;
-  bool _tabActive = true;
+  bool _nativeReady = false;
+  bool _acceptActions = false;
 
   bool get _isSurface => widget.parameters['kind'] == 'surface';
 
@@ -525,7 +720,7 @@ class _AppleChromeState extends State<_AppleChrome> {
     final channel = MethodChannel('litetale/apple_glass/$id');
     _channel = channel;
     channel.setMethodCallHandler((call) async {
-      if (!mounted || !_tabActive || _route?.isCurrent == false) return;
+      if (!mounted || !_acceptActions || _route?.isCurrent == false) return;
       if (call.method == 'action') {
         final args = Map<Object?, Object?>.from(call.arguments as Map);
         if (widget.parameters['kind'] == 'slider' &&
@@ -540,6 +735,7 @@ class _AppleChromeState extends State<_AppleChrome> {
     if (!_sameParameter(_nativeView?.creationParams, widget.parameters)) {
       _update();
     }
+    setState(() => _nativeReady = true);
   }
 
   @override
@@ -588,31 +784,49 @@ class _AppleChromeState extends State<_AppleChrome> {
   @override
   Widget build(BuildContext context) {
     final current = _route?.isCurrent != false;
-    final hidden = !_isSurface && !current;
-    _tabActive = TickerMode.of(context);
-    final Widget content;
     if (kIsWeb || !Platform.isIOS) {
-      content = widget.fallback;
-    } else {
-      if (_nativeView == null &&
-          current &&
-          _tabActive &&
-          IosPageArrival.hasArrivedOf(context)) {
-        _nativeView = _createView();
-      }
-      content =
-          _nativeView ??
-          IgnorePointer(
-            child: ExcludeSemantics(
-              child: widget.transitionFallback ?? widget.fallback,
-            ),
-          );
+      final hidden = !_isSurface && !current;
+      return Offstage(
+        offstage: hidden,
+        child: ExcludeFocus(excluding: hidden, child: widget.fallback),
+      );
     }
-    // Offstage removes the UIView from the painted scene and hit testing
-    // without disposing its controller, menu or UITabBarController.
+    final atRest = IosPageArrival.chromeAtRestOf(context);
+    final wantsNative =
+        atRest && TickerMode.of(context) && (current || _isSurface);
+    if (_nativeView == null && current && wantsNative) {
+      _nativeView = _createView();
+    }
+    final nativeVisible = wantsNative && _nativeReady;
+    _acceptActions = nativeVisible && current;
+    // Keep the preview through UIKit's asynchronous attach. On return, reuse
+    // the parked UIView after the covering page has completed its slide.
     return Offstage(
-      offstage: hidden,
-      child: ExcludeFocus(excluding: hidden, child: content),
+      offstage: !_isSurface && !current && atRest,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (!nativeVisible)
+            Positioned.fill(
+              key: const ValueKey('glass-preview'),
+              child: IgnorePointer(
+                child: ExcludeFocus(
+                  child: ExcludeSemantics(
+                    child: widget.transitionFallback ?? widget.fallback,
+                  ),
+                ),
+              ),
+            ),
+          if (_nativeView case final view?)
+            Positioned.fill(
+              key: const ValueKey('glass-native'),
+              child: Offstage(
+                offstage: !wantsNative,
+                child: ExcludeFocus(excluding: !_acceptActions, child: view),
+              ),
+            ),
+        ],
+      ),
     );
   }
 

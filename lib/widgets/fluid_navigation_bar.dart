@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' show ImageFilter, lerpDouble;
 
 import 'package:flutter/material.dart';
+import 'package:wild/widgets/fluid_navigation_glyph.dart';
 
 const _iconSlotTop = 10.0;
 const _iconSlotHeight = 40.0;
@@ -12,12 +13,14 @@ class FluidNavigationDestination {
     required this.icon,
     required this.selectedIcon,
     required this.label,
+    this.symbol,
     this.showBadge = false,
   });
 
   final IconData icon;
   final IconData selectedIcon;
   final String label;
+  final FluidNavSymbol? symbol;
   final bool showBadge;
 }
 
@@ -42,14 +45,13 @@ class FluidNavigationBar extends StatefulWidget {
 class _FluidNavigationBarState extends State<FluidNavigationBar>
     with SingleTickerProviderStateMixin {
   late final AnimationController _indicator;
-  late double _fromIndex;
-  late double _toIndex;
+  late _IndicatorPlan _plan;
+  bool _animate = true;
 
   @override
   void initState() {
     super.initState();
-    _fromIndex = widget.selectedIndex.toDouble();
-    _toIndex = _fromIndex;
+    _plan = _IndicatorPlan.rest(widget.selectedIndex);
     _indicator = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 380),
@@ -58,18 +60,33 @@ class _FluidNavigationBarState extends State<FluidNavigationBar>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _animate =
+        !MediaQuery.disableAnimationsOf(context) && TickerMode.of(context);
+    if (!_animate) _settle();
+  }
+
+  @override
   void didUpdateWidget(covariant FluidNavigationBar oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.selectedIndex == widget.selectedIndex) return;
-    final eased = Curves.easeInOutCubic.transform(_indicator.value);
-    _fromIndex = lerpDouble(_fromIndex, _toIndex, eased)!;
-    _toIndex = widget.selectedIndex.toDouble();
-    if (MediaQuery.disableAnimationsOf(context)) {
-      _fromIndex = _toIndex;
-      _indicator.value = 1;
+    if (!_animate) {
+      _settle();
     } else {
+      // Retarget each actual edge. Using a single estimated center would
+      // collapse a stretched pill for one frame when tapping another tab.
+      _plan = _IndicatorPlan(
+        _plan.indicesAt(_indicator.value),
+        widget.selectedIndex.toDouble(),
+      );
       _indicator.forward(from: 0);
     }
+  }
+
+  void _settle() {
+    _plan = _IndicatorPlan.rest(widget.selectedIndex);
+    _indicator.value = 1;
   }
 
   @override
@@ -83,7 +100,6 @@ class _FluidNavigationBarState extends State<FluidNavigationBar>
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final isLight = theme.brightness == Brightness.light;
-    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final labelStyle = theme.textTheme.labelMedium;
     return ClipRect(
       child: BackdropFilter(
@@ -101,7 +117,6 @@ class _FluidNavigationBarState extends State<FluidNavigationBar>
           child: _navigationContent(
             colors: colors,
             isLight: isLight,
-            reduceMotion: reduceMotion,
             labelStyle: labelStyle,
           ),
         ),
@@ -112,177 +127,200 @@ class _FluidNavigationBarState extends State<FluidNavigationBar>
   Widget _navigationContent({
     required ColorScheme colors,
     required bool isLight,
-    required bool reduceMotion,
     required TextStyle? labelStyle,
   }) {
+    final selectedInk = isLight ? colors.onPrimary : colors.onPrimaryContainer;
     return SafeArea(
       top: false,
       child: SizedBox(
         height: 78,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: RepaintBoundary(
-                child: CustomPaint(
-                  painter: _FluidIndicatorPainter(
-                    animation: _indicator,
-                    fromIndex: _fromIndex,
-                    toIndex: _toIndex,
-                    count: widget.destinations.length,
-                    color: isLight ? colors.primary : colors.primaryContainer,
-                  ),
-                ),
-              ),
-            ),
-            Row(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final count = widget.destinations.length;
+            if (count == 0) return const SizedBox.shrink();
+            final itemWidth = constraints.maxWidth / count;
+            return Stack(
               children: [
-                for (var index = 0; index < widget.destinations.length; index++)
-                  Expanded(
-                    child: Semantics(
-                      button: true,
-                      selected: index == widget.selectedIndex,
-                      label: widget.destinations[index].label,
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          splashFactory: NoSplash.splashFactory,
-                          overlayColor: WidgetStateProperty.all(
-                            Colors.transparent,
-                          ),
-                          onTap: () => widget.onDestinationSelected(index),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.start,
-                            children: [
-                              const SizedBox(height: _iconSlotTop),
-                              SizedBox(
-                                height: _iconSlotHeight,
-                                child: Center(
-                                  child: Badge(
-                                    isLabelVisible:
-                                        widget.destinations[index].showBadge,
-                                    label: const Text('新'),
-                                    child: _DestinationGlyphMotion(
-                                      selected: index == widget.selectedIndex,
-                                      reduceMotion: reduceMotion,
-                                      icon: Icon(
-                                        index == widget.selectedIndex
-                                            ? widget
-                                                .destinations[index]
-                                                .selectedIcon
-                                            : widget.destinations[index].icon,
-                                        size: 25,
-                                        color:
-                                            index == widget.selectedIndex
-                                                ? (isLight
-                                                    ? colors.onPrimary
-                                                    : colors.onPrimaryContainer)
-                                                : colors.onSurfaceVariant,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                widget.destinations[index].label,
-                                style: labelStyle?.copyWith(
-                                  color:
-                                      index == widget.selectedIndex
-                                          ? colors.onSurface
-                                          : colors.onSurfaceVariant,
-                                  fontWeight:
-                                      index == widget.selectedIndex
-                                          ? FontWeight.w700
-                                          : FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                Positioned.fill(
+                  child: RepaintBoundary(
+                    child: CustomPaint(
+                      painter: _FluidIndicatorPainter(
+                        animation: _indicator,
+                        plan: _plan,
+                        count: count,
+                        color:
+                            isLight ? colors.primary : colors.primaryContainer,
                       ),
                     ),
                   ),
+                ),
+                Row(
+                  children: [
+                    for (var index = 0; index < count; index++)
+                      Expanded(
+                        child: _destination(
+                          index,
+                          itemWidth,
+                          colors,
+                          selectedInk,
+                          labelStyle,
+                        ),
+                      ),
+                  ],
+                ),
               ],
-            ),
-          ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _destination(
+    int index,
+    double width,
+    ColorScheme colors,
+    Color selectedInk,
+    TextStyle? labelStyle,
+  ) {
+    final item = widget.destinations[index];
+    final selected = index == widget.selectedIndex;
+    final symbol = item.symbol;
+    final idleInk = colors.onSurfaceVariant;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: item.label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          splashFactory: NoSplash.splashFactory,
+          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+          onTap: () => widget.onDestinationSelected(index),
+          child: Column(
+            children: [
+              const SizedBox(height: _iconSlotTop),
+              SizedBox(
+                height: _iconSlotHeight,
+                child: Center(
+                  child: Badge(
+                    isLabelVisible: item.showBadge,
+                    label: const Text('新'),
+                    child:
+                        symbol == null
+                            ? Icon(
+                              selected ? item.selectedIcon : item.icon,
+                              size: fluidNavGlyphSize,
+                              color: selected ? selectedInk : idleInk,
+                            )
+                            : FluidNavigationGlyph(
+                              key: ValueKey(symbol),
+                              symbol: symbol,
+                              selected: selected,
+                              color: _IndicatorInk(
+                                _plan,
+                                width,
+                                index,
+                                idleInk,
+                                selectedInk,
+                              ).animate(_indicator),
+                            ),
+                  ),
+                ),
+              ),
+              Text(
+                item.label,
+                style: labelStyle?.copyWith(
+                  color: selected ? colors.onSurface : idleInk,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _DestinationGlyphMotion extends StatelessWidget {
-  const _DestinationGlyphMotion({
-    required this.selected,
-    required this.reduceMotion,
-    required this.icon,
-  });
+typedef _Edges = ({double left, double right});
 
-  final bool selected, reduceMotion;
-  final Widget icon;
+class _IndicatorPlan {
+  const _IndicatorPlan(this.start, this.target);
+
+  factory _IndicatorPlan.rest(int index) {
+    final i = index.toDouble();
+    return _IndicatorPlan((left: i, right: i), i);
+  }
+
+  final _Edges start;
+  final double target;
+
+  _Edges indicesAt(double t) {
+    final lead = Curves.easeOutCubic.transform(t);
+    final trail = Curves.easeInOutCubic.transform(t);
+    final rightward = target >= (start.left + start.right) / 2;
+    return (
+      left: lerpDouble(start.left, target, rightward ? trail : lead)!,
+      right: lerpDouble(start.right, target, rightward ? lead : trail)!,
+    );
+  }
+
+  _Edges pixelsAt(double t, double itemWidth) {
+    final halfPill = itemWidth.clamp(58.0, 88.0) / 2;
+    final indices = indicesAt(t);
+    return (
+      left: (indices.left + .5) * itemWidth - halfPill,
+      right: (indices.right + .5) * itemWidth + halfPill,
+    );
+  }
+}
+
+/// Contrast follows the pill across the icon slot instead of flipping the
+/// moment selection changes while the pill is still on the old destination.
+class _IndicatorInk extends Animatable<Color> {
+  _IndicatorInk(this.plan, this.width, this.index, this.idle, this.selected);
+  final _IndicatorPlan plan;
+  final double width;
+  final int index;
+  final Color idle, selected;
 
   @override
-  Widget build(BuildContext context) {
-    final target = selected ? 1.0 : 0.0;
-    if (reduceMotion) {
-      return Transform.scale(scale: 1 + .08 * target, child: icon);
-    }
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: target, end: target),
-      duration: const Duration(milliseconds: 160),
-      curve: Curves.easeOutCubic,
-      child: icon,
-      builder: (_, value, child) {
-        final lift = math.sin(value * math.pi);
-        return Transform.translate(
-          offset: Offset(0, -2.5 * lift),
-          child: Transform.rotate(
-            angle: -.12 * lift,
-            child: Transform.scale(scale: 1 + .08 * value, child: child),
-          ),
-        );
-      },
-    );
+  Color transform(double t) {
+    final edges = plan.pixelsAt(t, width);
+    final center = (index + .5) * width;
+    const half = fluidNavGlyphSize / 2;
+    final overlap =
+        math.min(edges.right, center + half) -
+        math.max(edges.left, center - half);
+    final portion = (overlap / fluidNavGlyphSize).clamp(0.0, 1.0);
+    return Color.lerp(idle, selected, Curves.easeInOut.transform(portion))!;
   }
 }
 
 class _FluidIndicatorPainter extends CustomPainter {
   _FluidIndicatorPainter({
     required this.animation,
-    required this.fromIndex,
-    required this.toIndex,
+    required this.plan,
     required this.count,
     required this.color,
   }) : super(repaint: animation);
 
   final Animation<double> animation;
-  final double fromIndex;
-  final double toIndex;
+  final _IndicatorPlan plan;
   final int count;
   final Color color;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (count == 0 || size.isEmpty) return;
-    final itemWidth = size.width / count;
-    final pillWidth = itemWidth.clamp(58.0, 88.0).toDouble();
-    final startCenter = (fromIndex + 0.5) * itemWidth;
-    final endCenter = (toIndex + 0.5) * itemWidth;
-    final startLeft = startCenter - pillWidth / 2;
-    final startRight = startCenter + pillWidth / 2;
-    final endLeft = endCenter - pillWidth / 2;
-    final endRight = endCenter + pillWidth / 2;
-    final progress = animation.value;
-    final lead = Curves.easeOutCubic.transform(progress);
-    final trail = Curves.easeInOutCubic.transform(progress);
-    final movingRight = endCenter >= startCenter;
-    final left = lerpDouble(startLeft, endLeft, movingRight ? trail : lead)!;
-    final right = lerpDouble(startRight, endRight, movingRight ? lead : trail)!;
+    final edges = plan.pixelsAt(animation.value, size.width / count);
     final indicatorTop =
         _iconSlotTop + (_iconSlotHeight - _indicatorHeight) / 2;
     final rect = Rect.fromLTRB(
-      left,
+      edges.left,
       indicatorTop,
-      right,
+      edges.right,
       indicatorTop + _indicatorHeight,
     );
     canvas.drawRRect(
@@ -293,8 +331,7 @@ class _FluidIndicatorPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _FluidIndicatorPainter oldDelegate) =>
-      oldDelegate.fromIndex != fromIndex ||
-      oldDelegate.toIndex != toIndex ||
+      oldDelegate.plan != plan ||
       oldDelegate.count != count ||
       oldDelegate.color != color ||
       oldDelegate.animation != animation;

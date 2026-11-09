@@ -10,6 +10,7 @@ import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/pages/update_cubit.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/widgets/fluid_navigation_bar.dart';
+import 'package:wild/widgets/fluid_navigation_glyph.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 
 import 'home/bookshelf_page.dart';
@@ -129,16 +130,19 @@ class _HomePageState extends State<HomePage> {
               selectedIcon:
                   usesMaterialYou ? Icons.explore_rounded : Icons.home,
               label: usesMaterialYou ? '发现' : '首页',
+              symbol: FluidNavSymbol.compass,
             ),
             const FluidNavigationDestination(
               icon: Icons.bookmarks_outlined,
               selectedIcon: Icons.bookmarks_rounded,
               label: '书架',
+              symbol: FluidNavSymbol.ribbonBook,
             ),
             const FluidNavigationDestination(
               icon: Icons.history_outlined,
               selectedIcon: Icons.history_rounded,
               label: '历史',
+              symbol: FluidNavSymbol.history,
             ),
             FluidNavigationDestination(
               icon:
@@ -148,6 +152,7 @@ class _HomePageState extends State<HomePage> {
               selectedIcon:
                   usesMaterialYou ? Icons.person_rounded : Icons.more_horiz,
               label: usesMaterialYou ? '我的' : '更多',
+              symbol: FluidNavSymbol.person,
               showBadge: state.updateInfo != null,
             ),
           ];
