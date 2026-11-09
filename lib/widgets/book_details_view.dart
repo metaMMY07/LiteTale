@@ -208,32 +208,27 @@ class _BookDetailsViewState extends State<BookDetailsView> {
               MediaQuery.textScalerOf(context).scale(17) * 1.25 + 24,
             )
             : 56.0;
-    final readButton = AppButton.filled(
-      key: const ValueKey('detail-read'),
-      onPressed: target == null ? null : () => widget.onRead!(target),
-      style: FilledButton.styleFrom(minimumSize: const Size(0, 56)),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            apple ? CupertinoIcons.play_fill : Icons.menu_book_rounded,
-            size: 22,
+    final readContent = Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          apple ? CupertinoIcons.play_fill : Icons.menu_book_rounded,
+          size: 22,
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            target == null
+                ? '暂无可读章节'
+                : resume == null
+                ? '开始阅读'
+                : '继续阅读',
+            maxLines: apple ? 1 : 2,
+            overflow: apple ? TextOverflow.ellipsis : null,
+            textAlign: TextAlign.center,
           ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              target == null
-                  ? '暂无可读章节'
-                  : resume == null
-                  ? '开始阅读'
-                  : '继续阅读',
-              maxLines: apple ? 1 : 2,
-              overflow: apple ? TextOverflow.ellipsis : null,
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
     final actions = Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
@@ -288,10 +283,24 @@ class _BookDetailsViewState extends State<BookDetailsView> {
                 const SizedBox(width: 12),
               ],
               Expanded(
-                child:
-                    apple
-                        ? SizedBox(height: actionHeight, child: readButton)
-                        : readButton,
+                child: AppButton.filled(
+                  key: const ValueKey('detail-read'),
+                  onPressed:
+                      target == null ? null : () => widget.onRead!(target),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 56),
+                    padding:
+                        apple
+                            ? const EdgeInsets.symmetric(horizontal: 16)
+                            : null,
+                  ),
+                  // Give the button itself the common height so both its
+                  // glass and its interactive content fill the same bounds.
+                  child:
+                      apple
+                          ? SizedBox(height: actionHeight, child: readContent)
+                          : readContent,
+                ),
               ),
             ],
           ),
