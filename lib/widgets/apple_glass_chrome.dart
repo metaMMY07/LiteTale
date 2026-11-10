@@ -93,7 +93,7 @@ class AppleGlassSurface extends StatelessWidget {
               'dark': Theme.of(context).brightness == Brightness.dark,
             },
             onAction: (_, _) {},
-            transitionFallback: ColoredBox(
+            attachmentFallback: ColoredBox(
               color: Color.alphaBlend(
                 tint ?? Colors.transparent,
                 surface,
@@ -144,6 +144,7 @@ class AppleGlassChoiceBar extends StatelessWidget {
       onAction: (a, v) {
         if (a == 'select') onSelect(v as int);
       },
+      attachmentFallback: _GlassSegmentsPreview(labels: labels, index: index),
       fallback:
           labels.length < 2
               ? Center(child: Text(labels.isEmpty ? '' : labels.first))
@@ -246,7 +247,7 @@ class AppleGlassMenu extends StatelessWidget {
       onAction: (a, v) {
         if (a == 'select') onSelect(v as String);
       },
-      transitionFallback: _GlassButtonPreview(
+      attachmentFallback: _GlassButtonPreview(
         label: label,
         icon: switch (symbol) {
           'ellipsis' => CupertinoIcons.ellipsis,
@@ -271,8 +272,6 @@ class AppleGlassMenu extends StatelessWidget {
 }
 
 /// UIKit owns the material, selection animation, SF Symbols and accessibility.
-/// The passive preview holds its place during a route slide; at rest the
-/// iPhone uses the native view.
 class AppleGlassBottomBar extends StatelessWidget {
   const AppleGlassBottomBar({
     super.key,
@@ -295,9 +294,12 @@ class AppleGlassBottomBar extends StatelessWidget {
     CupertinoIcons.person_crop_circle_fill,
   ];
 
+  static double heightFor(MediaQueryData media) =>
+      76 + media.viewPadding.bottom;
+
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: 76 + MediaQuery.viewPaddingOf(context).bottom,
+    height: heightFor(MediaQuery.of(context)),
     child: _AppleChrome(
       parameters: {
         'kind': 'tabs',
@@ -308,7 +310,7 @@ class AppleGlassBottomBar extends StatelessWidget {
       onAction: (action, value) {
         if (action == 'select') onSelect(value as int);
       },
-      transitionFallback: _DockPreview(index: index),
+      attachmentFallback: _DockPreview(index: index),
       fallback: CupertinoTabBar(
         currentIndex: index,
         onTap: onSelect,
@@ -352,7 +354,7 @@ class AppleGlassToolbar extends StatelessWidget {
             onTheme();
         }
       },
-      transitionFallback: _ToolbarPreview(source: source),
+      attachmentFallback: _ToolbarPreview(source: source),
       fallback: Row(
         children: [
           TextButton.icon(
@@ -380,8 +382,7 @@ class AppleGlassToolbar extends StatelessWidget {
   );
 }
 
-// Simple paint during navigation, with matching bounds and readable labels.
-// Native glass handles all interaction and visual effects on the settled page.
+// Simple paint while UIKit attaches, with matching bounds and readable labels.
 class _GlassButtonPreview extends StatelessWidget {
   const _GlassButtonPreview({required this.icon, this.label = ''});
 
@@ -411,6 +412,50 @@ class _GlassButtonPreview extends StatelessWidget {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GlassSegmentsPreview extends StatelessWidget {
+  const _GlassSegmentsPreview({required this.labels, required this.index});
+
+  final List<String> labels;
+  final int index;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: DecoratedBox(
+        decoration: ShapeDecoration(
+          color: colors.onSurface.withValues(alpha: .09),
+          shape: const StadiumBorder(),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(3),
+          child: Row(
+            children: [
+              for (var i = 0; i < labels.length; i++)
+                Expanded(
+                  child: DecoratedBox(
+                    decoration: ShapeDecoration(
+                      color: i == index ? colors.surface : null,
+                      shape: const StadiumBorder(),
+                    ),
+                    child: Center(
+                      child: Text(
+                        labels[i],
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -589,6 +634,10 @@ class AppleGlassSegments extends StatelessWidget {
       onAction: (action, value) {
         if (action == 'select') onSelect(value as int);
       },
+      attachmentFallback: _GlassSegmentsPreview(
+        labels: ['推荐', '分类', thirdLabel, lastLabel],
+        index: index,
+      ),
       fallback: CupertinoSlidingSegmentedControl<int>(
         groupValue: index,
         children: {
@@ -670,6 +719,11 @@ class AppleGlassSlider extends StatelessWidget {
             onChangeEnd?.call(v);
         }
       },
+      attachmentFallback: _GlassSliderPreview(
+        fraction:
+            max > min ? ((value - min) / (max - min)).clamp(0.0, 1.0) : 0.0,
+        activeColor: activeColor,
+      ),
       fallback: CupertinoSlider(
         value: value.clamp(min, max),
         min: min,
@@ -684,17 +738,75 @@ class AppleGlassSlider extends StatelessWidget {
   );
 }
 
+class _GlassSliderPreview extends StatelessWidget {
+  const _GlassSliderPreview({required this.fraction, this.activeColor});
+
+  final double fraction;
+  final Color? activeColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Center(
+            child: SizedBox(
+              width: double.infinity,
+              height: 5,
+              child: DecoratedBox(
+                decoration: ShapeDecoration(
+                  color: colors.onSurface.withValues(alpha: .15),
+                  shape: const StadiumBorder(),
+                ),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: FractionallySizedBox(
+                    widthFactor: fraction,
+                    heightFactor: 1,
+                    child: DecoratedBox(
+                      decoration: ShapeDecoration(
+                        color: activeColor ?? colors.primary,
+                        shape: const StadiumBorder(),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Align(
+            alignment: AlignmentDirectional(2 * fraction - 1, 0),
+            child: const SizedBox(
+              width: 32,
+              height: 20,
+              child: DecoratedBox(
+                decoration: ShapeDecoration(
+                  color: Colors.white,
+                  shape: StadiumBorder(),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AppleChrome extends StatefulWidget {
   const _AppleChrome({
     required this.parameters,
     required this.onAction,
     required this.fallback,
-    this.transitionFallback,
+    required this.attachmentFallback,
   });
   final Map<String, Object> parameters;
   final void Function(String action, Object? value) onAction;
   final Widget fallback;
-  final Widget? transitionFallback;
+  final Widget attachmentFallback;
   @override
   State<_AppleChrome> createState() => _AppleChromeState();
 }
@@ -784,45 +896,48 @@ class _AppleChromeState extends State<_AppleChrome> {
   @override
   Widget build(BuildContext context) {
     final current = _route?.isCurrent != false;
+    final onstage = TickerMode.of(context) && _route?.offstage != true;
+    final interactive =
+        current && onstage && IosPageArrival.chromeAtRestOf(context);
     if (kIsWeb || !Platform.isIOS) {
-      final hidden = !_isSurface && !current;
       return Offstage(
-        offstage: hidden,
-        child: ExcludeFocus(excluding: hidden, child: widget.fallback),
+        offstage: !onstage,
+        child: IgnorePointer(
+          ignoring: !interactive,
+          child: ExcludeFocus(excluding: !interactive, child: widget.fallback),
+        ),
       );
     }
-    final atRest = IosPageArrival.chromeAtRestOf(context);
-    final wantsNative =
-        atRest && TickerMode.of(context) && (current || _isSurface);
-    if (_nativeView == null && current && wantsNative) {
+    // Start attachment in the destination's first layout. Once attached, a
+    // live glass view follows its page even while an adjacent page slides.
+    // Only the Navigator's fully covered routes and inactive tabs are parked.
+    if (_nativeView == null && onstage) {
       _nativeView = _createView();
     }
-    final nativeVisible = wantsNative && _nativeReady;
-    _acceptActions = nativeVisible && current;
-    // Keep the preview through UIKit's asynchronous attach. On return, reuse
-    // the parked UIView after the covering page has completed its slide.
+    _acceptActions = interactive && _nativeReady;
     return Offstage(
-      offstage: !_isSurface && !current && atRest,
+      offstage: !onstage,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (!nativeVisible)
+          if (!_nativeReady)
             Positioned.fill(
               key: const ValueKey('glass-preview'),
               child: IgnorePointer(
                 child: ExcludeFocus(
-                  child: ExcludeSemantics(
-                    child: widget.transitionFallback ?? widget.fallback,
-                  ),
+                  child: ExcludeSemantics(child: widget.attachmentFallback),
                 ),
               ),
             ),
           if (_nativeView case final view?)
             Positioned.fill(
               key: const ValueKey('glass-native'),
-              child: Offstage(
-                offstage: !wantsNative,
-                child: ExcludeFocus(excluding: !_acceptActions, child: view),
+              child: IgnorePointer(
+                ignoring: !_acceptActions,
+                child: ExcludeSemantics(
+                  excluding: !_acceptActions,
+                  child: ExcludeFocus(excluding: !_acceptActions, child: view),
+                ),
               ),
             ),
         ],
@@ -846,8 +961,7 @@ class _AppleChromeState extends State<_AppleChrome> {
               Factory<TapGestureRecognizer>(() => TapGestureRecognizer()),
             }
             : const <Factory<OneSequenceGestureRecognizer>>{},
-    // The floating bar overlaps tappable book covers. Keep those recognizers
-    // out of its gesture arena so a tab press reaches UIKit immediately.
+    // Decorative glass never intercepts its Flutter button or card content.
     hitTestBehavior:
         _isSurface
             ? PlatformViewHitTestBehavior.transparent

@@ -230,6 +230,26 @@ class _BookDetailsViewState extends State<BookDetailsView> {
         ),
       ],
     );
+    final VoidCallback? onRead =
+        target == null ? null : () => widget.onRead!(target);
+    final readStyle = FilledButton.styleFrom(
+      minimumSize: const Size(0, 56),
+      padding: apple ? const EdgeInsets.symmetric(horizontal: 16) : null,
+    );
+    final readButton =
+        apple
+            ? AppButton.tonal(
+              key: const ValueKey('detail-read'),
+              onPressed: onRead,
+              style: readStyle,
+              child: SizedBox(height: actionHeight, child: readContent),
+            )
+            : AppButton.filled(
+              key: const ValueKey('detail-read'),
+              onPressed: onRead,
+              style: readStyle,
+              child: readContent,
+            );
     final actions = Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       child: Column(
@@ -282,26 +302,7 @@ class _BookDetailsViewState extends State<BookDetailsView> {
                   ),
                 const SizedBox(width: 12),
               ],
-              Expanded(
-                child: AppButton.filled(
-                  key: const ValueKey('detail-read'),
-                  onPressed:
-                      target == null ? null : () => widget.onRead!(target),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(0, 56),
-                    padding:
-                        apple
-                            ? const EdgeInsets.symmetric(horizontal: 16)
-                            : null,
-                  ),
-                  // Give the button itself the common height so both its
-                  // glass and its interactive content fill the same bounds.
-                  child:
-                      apple
-                          ? SizedBox(height: actionHeight, child: readContent)
-                          : readContent,
-                ),
-              ),
+              Expanded(child: readButton),
             ],
           ),
           if (resume != null)

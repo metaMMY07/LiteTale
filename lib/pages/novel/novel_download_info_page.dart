@@ -8,6 +8,7 @@ import 'package:wild/sources/source_api.dart';
 import 'package:wild/widgets/book_cover_image.dart';
 import 'package:wild/pages/novel/novel_download_info_cubit.dart';
 import 'package:wild/pages/novel/reader_page.dart';
+import 'package:wild/pages/novel/reader_route.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:wild/theme/app_fonts.dart';
@@ -134,6 +135,10 @@ class _NovelDownloadInfoContent extends StatelessWidget {
     await Navigator.push(
       context,
       HorizontalCoverPageRoute(
+        settings:
+            usesAppleGlass
+                ? const RouteSettings(name: novelReaderRouteName)
+                : null,
         builder:
             (context) => ReaderPage(
               aid: novelId,

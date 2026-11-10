@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/pages/auth_cubit.dart';
@@ -17,7 +18,9 @@ import 'home/bookshelf_page.dart';
 import 'home/history_page.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, this.tabSelection});
+
+  final ValueListenable<int>? tabSelection;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -41,6 +44,8 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _currentIndex = widget.tabSelection?.value ?? 0;
+    widget.tabSelection?.addListener(_selectExternalTab);
     _historyCubit = HistoryCubit()..load();
     // 加载书架数据
     _loadBookshelf();
@@ -79,10 +84,27 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    widget.tabSelection?.removeListener(_selectExternalTab);
     activeSource.removeListener(_sourceChanged);
     sourceRevision.removeListener(_sourceChanged);
     _historyCubit.close();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant HomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.tabSelection != widget.tabSelection) {
+      oldWidget.tabSelection?.removeListener(_selectExternalTab);
+      widget.tabSelection?.addListener(_selectExternalTab);
+      _selectExternalTab();
+    }
+  }
+
+  void _selectExternalTab() {
+    if (widget.tabSelection case final tabs?) {
+      _onDestinationSelected(tabs.value);
+    }
   }
 
   void _loadBookshelf() {
@@ -157,7 +179,9 @@ class _HomePageState extends State<HomePage> {
             ),
           ];
           return Scaffold(
-            extendBody: usesMaterialYou || usesAppleGlass,
+            extendBody:
+                usesMaterialYou ||
+                (usesAppleGlass && widget.tabSelection == null),
             body: IndexedStack(
               index: _currentIndex,
               children: [
@@ -167,10 +191,12 @@ class _HomePageState extends State<HomePage> {
             ),
             bottomNavigationBar:
                 usesAppleGlass
-                    ? AppleGlassBottomBar(
-                      index: _currentIndex,
-                      onSelect: _onDestinationSelected,
-                    )
+                    ? (widget.tabSelection == null
+                        ? AppleGlassBottomBar(
+                          index: _currentIndex,
+                          onSelect: _onDestinationSelected,
+                        )
+                        : null)
                     : usesMaterialYou
                     ? FluidNavigationBar(
                       destinations: destinations,

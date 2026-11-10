@@ -54,6 +54,7 @@ import 'package:wild/settings/reading_statistics.dart';
 import 'package:wild/settings/settings_theme.dart';
 import 'package:wild/theme/ios_glass_theme.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:wild/widgets/ios_app_dock.dart';
 
 final lightTheme = ThemeData(
   colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
@@ -125,6 +126,10 @@ class YourApp extends StatefulWidget {
 
 class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
   final _dynamicColorKey = GlobalKey<DynamicColorBuilderState>();
+  final _iosDock =
+      usesAppleGlass
+          ? IosDockController(fullscreenRoutes: const {novelReaderRouteName})
+          : null;
 
   @override
   void initState() {
@@ -142,6 +147,7 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _iosDock?.dispose();
     super.dispose();
   }
 
@@ -163,23 +169,31 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                       debugShowCheckedModeBanner: false,
                       themeAnimationDuration: Duration.zero,
                       themeAnimationCurve: Curves.easeInOutCubic,
-                      builder:
-                          (context, child) => Wenku8BrowserHost(
-                            child: BiliBrowserHost(
-                              child:
-                                  Platform.isIOS
-                                      ? HuanmengBrowserHost(
-                                        child: ThemeRevealHost(
-                                          // There are no Hero flights in these
-                                          // routes. Skip their hidden layout pass.
-                                          child: HeroControllerScope.none(
-                                            child: child!,
-                                          ),
-                                        ),
-                                      )
-                                      : ThemeRevealHost(child: child!),
-                            ),
+                      navigatorObservers: [if (_iosDock case final dock?) dock],
+                      builder: (context, child) {
+                        final dock = _iosDock;
+                        final app = ThemeRevealHost(
+                          child:
+                              dock == null
+                                  ? child!
+                                  // These routes have no Hero flights. Avoid
+                                  // their hidden destination measurement.
+                                  : HeroControllerScope.none(
+                                    child: IosAppDockHost(
+                                      controller: dock,
+                                      child: child!,
+                                    ),
+                                  ),
+                        );
+                        return Wenku8BrowserHost(
+                          child: BiliBrowserHost(
+                            child:
+                                Platform.isIOS
+                                    ? HuanmengBrowserHost(child: app)
+                                    : app,
                           ),
+                        );
+                      },
                       themeMode: switch (theme.themeMode) {
                         ReaderThemeMode.auto => ThemeMode.system,
                         ReaderThemeMode.light => ThemeMode.light,
@@ -243,9 +257,12 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                           '/login':
                               (context) =>
                                   const UpdateChecker(child: LoginPage()),
-                          '/home':
-                              (context) =>
-                                  const UpdateChecker(child: HomePage()),
+                          IosDockController.homeRouteName:
+                              (context) => UpdateChecker(
+                                child: HomePage(
+                                  tabSelection: _iosDock?.selection,
+                                ),
+                              ),
                           '/novel/reviews': (context) {
                             final args =
                                 ModalRoute.of(context)!.settings.arguments
