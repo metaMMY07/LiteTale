@@ -5,6 +5,7 @@ import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/services/read_request.dart';
+import 'package:wild/utils/wenku8_network_error.dart';
 import '../widgets/novel_cover_card.dart';
 import '../widgets/wenku8_recovery_button.dart';
 import '../widgets/bili_recovery_button.dart';
@@ -193,7 +194,12 @@ class _SearchPageState extends State<SearchPage> {
               const SizedBox(height: 16),
               const Text('搜索未完成'),
               const SizedBox(height: 8),
-              Text(_error.toString(), textAlign: TextAlign.center),
+              Text(
+                activeSource.value == SourceId.wenku8
+                    ? wenku8ReadErrorMessage(_error)
+                    : _error.toString(),
+                textAlign: TextAlign.center,
+              ),
               SourceWebsiteLink(source: activeSource.value),
               const SizedBox(height: 16),
               AppButton.filledIcon(

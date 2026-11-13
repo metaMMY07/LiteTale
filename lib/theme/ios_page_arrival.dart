@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:wild/theme/ios_dock_insets.dart';
 
 /// Preserves the Cupertino slide and edge swipe while exposing the first
 /// settled frame to work that should not compete with the entrance.
@@ -26,7 +27,7 @@ class LiteTaleCupertinoTransitionsBuilder
       // A delegated Cupertino transition may supply an idle animation to
       // buildTransitions even while the page above is moving.
       secondary: route.secondaryAnimation ?? secondaryAnimation,
-      child: child,
+      child: IosDockInsets.applyToPage(context, route, child),
     ),
   );
 }

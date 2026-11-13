@@ -2,6 +2,7 @@ import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/services/read_request.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:flutter/material.dart';
+import 'package:wild/theme/ios_dock_insets.dart';
 import 'package:wild/sources/source_api.dart' as api;
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
@@ -349,7 +350,10 @@ class _ShelfCatalogPageState extends State<ShelfCatalogPage> {
                   onRefresh: _load,
                   child: GridView.builder(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(12),
+                    padding: IosDockInsets.scrollPadding(
+                      context,
+                      const EdgeInsets.all(12),
+                    ),
                     gridDelegate: const BookGridDelegate(
                       childAspectRatio: 207 / 307,
                       crossAxisSpacing: 8,

@@ -35,11 +35,12 @@ class _BiliRecoveryButtonState extends State<BiliRecoveryButton> {
     BiliSiteVerificationRequired request,
   ) async {
     if (!context.mounted) return false;
-    final result = await Navigator.of(context).push<bool>(
-      HorizontalCoverPageRoute<bool>(
-        builder: (_) => BiliVerificationPage(request: request),
-      ),
+    final page = HorizontalCoverPageRoute<bool>(
+      fullscreenDialog: true,
+      builder: (_) => BiliVerificationPage(request: request),
     );
+    final result = await Navigator.of(context).push(page);
+    await page.completed;
     return result == true;
   }
 

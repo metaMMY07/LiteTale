@@ -146,6 +146,7 @@ class ReaderCubit extends Cubit<ReaderState> {
     String? cid,
     int? initialPage,
     int? initialTextOffset,
+    int? initialSourceOffset,
     ReaderMark? readerMark,
   }) async {
     if (_closing || isClosed) return;
@@ -163,6 +164,7 @@ class ReaderCubit extends Cubit<ReaderState> {
         initialPage:
             anchor?.axis == ReaderMarkAxis.page ? anchor!.offset : initialPage,
         initialTextOffset: readerMark == null ? initialTextOffset : null,
+        initialSourceOffset: readerMark == null ? initialSourceOffset : null,
         position:
             anchor == null || anchor.axis == ReaderMarkAxis.page
                 ? null
@@ -269,6 +271,8 @@ class ReaderCubit extends Cubit<ReaderState> {
       }
       if (savedPosition != null) {
         pageIndex = savedPosition.pageIn(pages);
+      } else if (initialSourceOffset != null && initialSourceOffset >= 0) {
+        pageIndex = _pageAtSourceOffset(pages, initialSourceOffset);
       } else if (_loadedDocument != null &&
           initialTextOffset != null &&
           initialTextOffset >= 0) {
@@ -654,6 +658,18 @@ class ReaderCubit extends Cubit<ReaderState> {
         location.offset < end;
   }
 
+  int _pageAtSourceOffset(List<ReaderPage> pages, int offset) {
+    var selected = 0;
+    for (var i = 0; i < pages.length; i++) {
+      final start = pages[i].markStart;
+      if (start == null) continue;
+      if (start > offset) break;
+      selected = i;
+      if (pages[i].isImage && start == offset) break;
+    }
+    return selected;
+  }
+
   int? _markPageIndex(ReaderMark mark, List<ReaderPage> pages, String text) {
     final location = mark.location;
     if (location.axis == ReaderMarkAxis.page) {
@@ -892,6 +908,7 @@ class ReaderCubit extends Cubit<ReaderState> {
     int request, {
     int? initialPage,
     int? initialTextOffset,
+    int? initialSourceOffset,
     ReaderPosition? position,
     bool? preserveControls,
     bool showLoading = true,
@@ -1019,6 +1036,12 @@ class ReaderCubit extends Cubit<ReaderState> {
         initialPage: initialPage ?? 0,
       );
       if (!current() || !identical(_bookFlow, flow)) return;
+      if (position == null && initialSourceOffset != null) {
+        final pages = window.refs[window.index].owner.pages;
+        final index = _pageAtSourceOffset(pages, initialSourceOffset);
+        if (index != 0) window = await flow.open(cid, initialPage: index);
+        if (!current() || !identical(_bookFlow, flow)) return;
+      }
       // The old paper remains interactive during font/viewport reflow. Resolve
       // the latest chapter-local anchor after asynchronous neighbour reads.
       // Reuse an already shaped page whenever it is inside this new window.

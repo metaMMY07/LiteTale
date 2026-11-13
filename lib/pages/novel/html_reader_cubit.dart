@@ -83,6 +83,7 @@ class HtmlReaderLoaded extends HtmlReaderState {
   final List<Volume> volumes;
   final String? sourceFont;
   final String? markContent;
+  final int initialOffset;
 
   const HtmlReaderLoaded({
     required this.aid,
@@ -93,6 +94,7 @@ class HtmlReaderLoaded extends HtmlReaderState {
     required this.volumes,
     this.sourceFont,
     this.markContent,
+    this.initialOffset = 0,
   });
 
   HtmlReaderLoaded copyWith({
@@ -112,6 +114,7 @@ class HtmlReaderLoaded extends HtmlReaderState {
       volumes: volumes ?? this.volumes,
       sourceFont: sourceFont,
       markContent: markContent,
+      initialOffset: initialOffset,
     );
   }
 
@@ -125,6 +128,7 @@ class HtmlReaderLoaded extends HtmlReaderState {
     volumes,
     sourceFont,
     markContent,
+    initialOffset,
   ];
 }
 
@@ -146,12 +150,18 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
   final String initialAid;
   final String initialCid;
   final List<Volume> initialVolumes;
+  int? _initialTextOffset;
+  int? _contentSession;
+  int? _contentSourceRevision;
+  int _lastSavedOffset = 0;
+  (String, String)? _requestedChapter;
 
   HtmlReaderCubit({
     required this.novelInfo,
     required this.initialAid,
     required this.initialCid,
     required this.initialVolumes,
+    int? initialTextOffset,
     Future<bool>? initialRouteArrival,
     Future<SourceChapter> Function({required String aid, required String cid})?
     read,
@@ -159,6 +169,7 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
     ReadingProgressQueue? progress,
     ReaderPrefetchLoad? prefetch,
   }) : _initialRouteArrival = initialRouteArrival,
+       _initialTextOffset = initialTextOffset,
        _read =
            read == null
                ? w8.readerChapter
@@ -186,9 +197,17 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
     throw Exception('Volume not found');
   }
 
-  void _updateHistory(String aid, String cid, String title, int session) {
+  void _updateHistory(
+    String aid,
+    String cid,
+    String title,
+    int session,
+    int offset,
+  ) {
     final volume = _findVolume(aid, cid);
     final sessionFor = _session;
+    final source = sourceOf(aid);
+    final revision = sourceRevision.value;
     _progress.enqueue(
       ReadingProgress(
         bookId: aid,
@@ -197,14 +216,42 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
         volumeTitle: volume.title,
         chapterId: cid,
         chapterTitle: title,
-        characters: 0,
-        page: 0,
+        characters: offset,
+        page: scrollReaderProgressPage,
         cover: novelInfo.imgUrl,
         author: novelInfo.author,
       ),
-      isValid: () => sessionFor(aid) == session,
+      isValid:
+          () =>
+              sessionFor(aid) == session &&
+              (source != SourceId.bili ||
+                  (activeSource.value == source &&
+                      sourceRevision.value == revision)),
     );
   }
+
+  void recordVisibleOffset(String aid, String cid, int offset) {
+    final current = state;
+    final session = _contentSession;
+    if (_closing ||
+        current is! HtmlReaderLoaded ||
+        current.aid != aid ||
+        current.cid != cid ||
+        session == null ||
+        _session(aid) != session ||
+        (sourceOf(aid) == SourceId.bili &&
+            (activeSource.value != SourceId.bili ||
+                sourceRevision.value != _contentSourceRevision)) ||
+        offset < 0 ||
+        offset == _lastSavedOffset) {
+      return;
+    }
+    _lastSavedOffset = offset;
+    _updateHistory(aid, cid, current.title, session, offset);
+  }
+
+  Future<void> retryChapter() =>
+      loadChapter(aid: _requestedChapter?.$1, cid: _requestedChapter?.$2);
 
   List<ParsedContent> _parseContent(
     String content, {
@@ -273,6 +320,7 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
     final readRequest = _readRequest = ReadRequest();
     final targetAid = aid ?? initialAid;
     final targetCid = cid ?? initialCid;
+    _requestedChapter = (targetAid, targetCid);
     _prefetch?.foreground(targetAid, targetCid);
     final session = _session(targetAid);
     final revision = sourceRevision.value;
@@ -341,10 +389,23 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
         rawContent,
         document: chapter.document,
       );
+      final markContent =
+          chapter.document == null
+              ? null
+              : readerMarkText(rawContent, chapter.document);
+      final saved =
+          targetAid == initialAid && targetCid == initialCid
+              ? _initialTextOffset ?? 0
+              : 0;
+      final offset = saved.clamp(0, (markContent ?? rawContent).length);
 
       // 更新阅读历史
       if (!current()) return;
-      _updateHistory(targetAid, targetCid, chapterTitle, session);
+      _initialTextOffset = null;
+      _contentSession = session;
+      _contentSourceRevision = revision;
+      _lastSavedOffset = offset;
+      _updateHistory(targetAid, targetCid, chapterTitle, session, offset);
 
       emit(
         HtmlReaderLoaded(
@@ -355,10 +416,8 @@ class HtmlReaderCubit extends Cubit<HtmlReaderState> {
           parsedContent: parsedContent,
           volumes: initialVolumes,
           sourceFont: chapter.fontFamily,
-          markContent:
-              chapter.document == null
-                  ? null
-                  : readerMarkText(rawContent, chapter.document),
+          markContent: markContent,
+          initialOffset: offset,
         ),
       );
       _prefetch?.schedule(

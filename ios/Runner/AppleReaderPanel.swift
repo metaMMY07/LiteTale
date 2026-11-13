@@ -372,7 +372,7 @@ private struct ReaderNativeRow: View {
           }.padding(.vertical, 8)
         }
       } else {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: row.kind == "choice" ? .center : .top, spacing: 12) {
           Image(systemName: row.data["icon"] as? String ?? "slider.horizontal.3")
             .font(.system(size: 22)).foregroundColor(Color(model.accent)).frame(width: 28, height: 28)
             .accessibilityHidden(true)

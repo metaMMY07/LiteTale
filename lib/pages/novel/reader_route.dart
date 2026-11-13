@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/apple_books_open_page.dart';
+import 'package:wild/services/reading_progress.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
@@ -41,12 +42,16 @@ PageRoute<void> novelReaderRoute(RouteSettings settings) {
       final cid = args['chapterId'] as String;
       final volumes = (args['volumes'] as List).cast<Volume>();
       final info = args['novelInfo'] as NovelInfo;
+      final initialPage = args['initialPage'] as int?;
+      final initialTextOffset = args['initialTextOffset'] as int?;
+      final fromScroll = initialPage == scrollReaderProgressPage;
       if (context.read<ReaderTypeCubit>().state == ReaderType.html) {
         return HtmlReaderPage(
           novelInfo: info,
           initialAid: aid,
           initialCid: cid,
           volumes: volumes,
+          initialTextOffset: fromScroll ? initialTextOffset : null,
         );
       }
       return MultiBlocProvider(
@@ -64,8 +69,9 @@ PageRoute<void> novelReaderRoute(RouteSettings settings) {
           initialTitle: args['title'] as String,
           volumes: volumes,
           novelInfo: info,
-          initialPage: args['initialPage'] as int?,
-          initialTextOffset: args['initialTextOffset'] as int?,
+          initialPage: fromScroll ? null : initialPage,
+          initialTextOffset: fromScroll ? null : initialTextOffset,
+          initialSourceOffset: fromScroll ? initialTextOffset : null,
         ),
       );
     },

@@ -53,6 +53,7 @@ class ReaderPage extends StatelessWidget {
   final NovelInfo novelInfo;
   final int? initialPage;
   final int? initialTextOffset;
+  final int? initialSourceOffset;
   final ReaderMarkStore? markStore;
 
   const ReaderPage({
@@ -64,6 +65,7 @@ class ReaderPage extends StatelessWidget {
     required this.novelInfo,
     this.initialPage,
     this.initialTextOffset,
+    this.initialSourceOffset,
     this.markStore,
   });
 
@@ -110,6 +112,7 @@ class ReaderPage extends StatelessWidget {
                 )..loadChapter(
                   initialPage: initialPage,
                   initialTextOffset: initialTextOffset,
+                  initialSourceOffset: initialSourceOffset,
                 ),
           ),
         ],

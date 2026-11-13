@@ -10,6 +10,8 @@ import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
 import 'package:wild/widgets/source_website.dart';
 import 'package:wild/theme/material_you.dart';
+import 'package:wild/theme/ios_dock_insets.dart';
+import 'package:wild/utils/wenku8_network_error.dart';
 
 class CategoryPage extends StatefulWidget {
   final String? initialTag;
@@ -380,11 +382,23 @@ class _CategoryPageState extends State<CategoryPage> {
             ],
           ),
         ),
-        if (_tagError != null)
-          Wenku8RecoveryButton(
-            error: _tagError,
-            source: SourceId.wenku8,
-            onRecovered: _loadTags,
+        if (_tagError case final error?)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                Text(
+                  wenku8ReadErrorMessage(error),
+                  textAlign: TextAlign.center,
+                ),
+                Wenku8RecoveryButton(
+                  error: error,
+                  source: SourceId.wenku8,
+                  siteVerificationOnly: true,
+                  onRecovered: _loadTags,
+                ),
+              ],
+            ),
           ),
         // Novel grid or error state
         Expanded(
@@ -404,10 +418,13 @@ class _CategoryPageState extends State<CategoryPage> {
                   ? RefreshIndicator(
                     onRefresh: () => _loadTagPage(_selectedTag!, refresh: true),
                     child: ListView(
-                      padding: const EdgeInsets.all(16),
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: IosDockInsets.scrollPadding(
+                        context,
+                        const EdgeInsets.all(16),
+                      ),
                       children: [
                         SizedBox(
-                          height: MediaQuery.of(context).size.height - 100,
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.start,
                             children: [
@@ -423,7 +440,7 @@ class _CategoryPageState extends State<CategoryPage> {
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                _pageError.toString(),
+                                wenku8ReadErrorMessage(_pageError),
                                 style: Theme.of(context).textTheme.bodyMedium,
                                 textAlign: TextAlign.start,
                               ),
@@ -431,6 +448,7 @@ class _CategoryPageState extends State<CategoryPage> {
                               Wenku8RecoveryButton(
                                 error: _pageError,
                                 source: SourceId.wenku8,
+                                siteVerificationOnly: true,
                                 onRecovered:
                                     () => _loadTagPage(
                                       _selectedTag!,
@@ -456,6 +474,9 @@ class _CategoryPageState extends State<CategoryPage> {
                     source: SourceId.wenku8,
                     requestKey: _pageRequest,
                   )
+                  : _currentPage!.records.isEmpty &&
+                      _currentPage!.currentPage >= _currentPage!.maxPage
+                  ? const Center(child: Text('当前分类暂无书目'))
                   : NotificationListener<ScrollNotification>(
                     onNotification: (notification) {
                       if (notification is ScrollEndNotification &&
@@ -469,7 +490,10 @@ class _CategoryPageState extends State<CategoryPage> {
                       return true;
                     },
                     child: GridView.builder(
-                      padding: const EdgeInsets.all(8),
+                      padding: IosDockInsets.scrollPadding(
+                        context,
+                        const EdgeInsets.all(8),
+                      ),
                       gridDelegate: const BookGridDelegate(
                         childAspectRatio: 207 / 307,
                         crossAxisSpacing: 8,
@@ -493,6 +517,14 @@ class _CategoryPageState extends State<CategoryPage> {
                                   ),
                                   const SourceWebsiteLink(
                                     source: SourceId.wenku8,
+                                    showAddress: false,
+                                  ),
+                                  Wenku8RecoveryButton(
+                                    error: _pageError,
+                                    source: SourceId.wenku8,
+                                    siteVerificationOnly: true,
+                                    onRecovered:
+                                        () => _loadTagPage(_selectedTag!),
                                   ),
                                 ],
                               ),

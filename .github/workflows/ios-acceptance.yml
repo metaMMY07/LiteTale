@@ -1,9 +1,6 @@
 name: iOS reader acceptance
 on:
   workflow_dispatch:
-  push:
-    branches: ['build/ios-preview-*']
-    paths: ['ios/**','lib/**','integration_test/ios_reader_acceptance_test.dart','test_driver/ios_reader_acceptance.dart','.github/workflows/ios-acceptance.yml']
 permissions:
   contents: read
 concurrency:

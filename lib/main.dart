@@ -28,7 +28,7 @@ import 'package:wild/src/rust/frb_generated.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/pages/home/bookshelf_cubit.dart';
 import 'package:wild/pages/home/category_page.dart';
-import 'package:wild/pages/articlelist/articlelist_page.dart';
+import 'package:wild/pages/home/index_page.dart' show ArticlelistPage;
 import 'package:wild/pages/recommend/recommend_page.dart';
 import 'package:wild/pages/home/more_page.dart';
 import 'package:wild/pages/search_page.dart';
@@ -297,7 +297,11 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                             }
                             return const CategoryPage();
                           },
-                          '/articlelist': (context) => const ArticlelistPage(),
+                          '/articlelist':
+                              (context) => Scaffold(
+                                appBar: AppBar(title: const Text('完结')),
+                                body: const ArticlelistPage(),
+                              ),
                           '/recommend': (context) => const RecommendPage(),
                           '/more': (context) => const MorePage(),
                           '/search': (context) {

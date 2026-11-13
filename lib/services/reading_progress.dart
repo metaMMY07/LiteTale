@@ -4,6 +4,9 @@ import 'package:wild/services/epub_reader_position.dart';
 import 'package:wild/services/reader_position.dart';
 import 'package:wild/src/rust/api/wenku8.dart' as storage;
 
+/// Distinguishes a scroll-mode text anchor from a page index in history.
+const scrollReaderProgressPage = 0x7fffffff;
+
 /// An accepted position, independent of mutable reader state and pagination.
 class ReadingProgress {
   const ReadingProgress({

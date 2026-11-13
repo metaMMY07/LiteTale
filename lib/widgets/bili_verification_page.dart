@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:wild/services/bili_browser.dart';
 import 'package:wild/utils/bili_site_dom.dart';
 import 'package:wild/widgets/app_loading_indicator.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/wenku_webview.dart';
 
 /// Ordinary, user-visible site verification. No cookie or challenge token is
@@ -76,9 +77,8 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
       _blocked = false;
     });
     try {
-      await _web
-          .loadUrl('${widget.request.target}')
-          .timeout(const Duration(seconds: 5));
+      final entry = widget.request.searchEntry ?? widget.request.target;
+      await _web.loadUrl('$entry').timeout(const Duration(seconds: 5));
     } catch (_) {
       if (mounted && !_closed) {
         setState(() => _error = '原站网页未能打开，请检查网络后重试。');
@@ -100,6 +100,27 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
         return;
       }
       final blocked = BiliBrowserSession.isAccessDeniedProbe(raw);
+      final keyword = widget.request.searchKeyword;
+      final entry = widget.request.searchEntry;
+      if (!blocked &&
+          keyword != null &&
+          entry != null &&
+          await _web.currentUrl().timeout(const Duration(seconds: 5)) ==
+              '$entry' &&
+          mounted &&
+          !_closed &&
+          navigation == _navigation &&
+          inspection == _inspection) {
+        await _web
+            .executeScript(biliFillSearchFieldScript(keyword))
+            .timeout(const Duration(seconds: 5));
+      }
+      if (!mounted ||
+          _closed ||
+          navigation != _navigation ||
+          inspection != _inspection) {
+        return;
+      }
       setState(() {
         if (_blocked && !blocked) _error = null;
         _blocked = blocked;
@@ -183,15 +204,24 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
       body: Column(
         children: [
           if (_error case final message?)
-            MaterialBanner(
-              content: Text(message),
-              actions: [
-                AppButton.text(
-                  onPressed: () => setState(() => _error = null),
-                  child: const Text('知道了'),
+            if (usesAppleGlass)
+              AppleGlassCard(
+                margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(message),
                 ),
-              ],
-            ),
+              )
+            else
+              MaterialBanner(
+                content: Text(message),
+                actions: [
+                  AppButton.text(
+                    onPressed: () => setState(() => _error = null),
+                    child: const Text('知道了'),
+                  ),
+                ],
+              ),
           Expanded(
             child:
                 _initialized
@@ -212,6 +242,8 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
                         ? '原站拒绝访问，当前页面没有可完成的验证。请返回并稍后重试。'
                         : widget.request.contentRequired
                         ? '请按原站提示完成阅读要求，正文完整显示后再继续。'
+                        : widget.request.searchEntry != null
+                        ? '请在原站搜索「${widget.request.searchKeyword}」，按网页提示填写验证码，结果显示后再返回。'
                         : '请在网页内完成原站验证，显示正常书目或正文后再继续。',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),

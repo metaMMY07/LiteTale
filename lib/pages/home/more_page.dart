@@ -4,6 +4,7 @@ import 'package:wild/sources/book_source.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/settings/settings_widgets.dart' show SettingsTileGroup;
 import 'package:wild/theme/horizontal_page_transitions.dart';
+import 'package:wild/theme/ios_dock_insets.dart';
 import 'package:wild/pages/auth_cubit.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/home/account_page.dart';
@@ -224,7 +225,10 @@ class MorePage extends StatelessWidget {
         topInset: 12,
         // The home Scaffold extends beneath its glass navigation bar. Reserve
         // its inherited inset so the final operation can scroll above the bar.
-        bottomInset: 12 + MediaQuery.paddingOf(context).bottom,
+        bottomInset:
+            12 +
+            MediaQuery.paddingOf(context).bottom -
+            IosDockInsets.bottomOf(context),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

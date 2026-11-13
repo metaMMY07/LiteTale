@@ -37,6 +37,9 @@ class BiliSiteVerificationRequired extends BiliBrowserException {
     required this.revision,
     this.desktopSite = false,
     this.contentRequired = false,
+    this.searchKeyword,
+    this.searchEntry,
+    this.searchPage,
   }) : super(
          contentRequired
              ? '原站正文尚未完整加载，请打开原站完成阅读要求后继续。'
@@ -48,6 +51,9 @@ class BiliSiteVerificationRequired extends BiliBrowserException {
   final int revision;
   final bool desktopSite;
   final bool contentRequired;
+  final String? searchKeyword;
+  final Uri? searchEntry;
+  final int? searchPage;
 }
 
 class _VerifiedBiliPage {
@@ -80,15 +86,18 @@ class BiliBrowserSession extends ChangeNotifier {
   Completer<BiliBrowserPort>? _attachment;
   Future<void> _queue = Future.value();
   final _searchPages = <String, Map<int, Uri>>{};
+  final _verifiedSearches = <(String, int), _VerifiedBiliPage>{};
   final _verifiedPages = <String, _VerifiedBiliPage>{};
 
-  static String verificationScript(BiliSiteVerificationRequired request) =>
-      switch (request.kind) {
-        BiliProbeKind.document => biliDocumentProbeScript,
-        BiliProbeKind.searchForm => biliHomeReadyScript,
-        BiliProbeKind.searchResults => biliSearchProbeScript,
-        BiliProbeKind.chapter => biliChapterProbeScript,
-      };
+  static String verificationScript(
+    BiliSiteVerificationRequired request,
+  ) => switch (request.kind) {
+    BiliProbeKind.document => biliDocumentProbeScript,
+    BiliProbeKind.searchForm =>
+      request.searchEntry == null ? biliHomeReadyScript : biliSearchProbeScript,
+    BiliProbeKind.searchResults => biliSearchProbeScript,
+    BiliProbeKind.chapter => biliChapterProbeScript,
+  };
 
   static BiliProbeKind _kind(String script) {
     if (script == biliDocumentProbeScript) return BiliProbeKind.document;
@@ -177,15 +186,22 @@ class BiliBrowserSession extends ChangeNotifier {
       throw BiliSiteAccessDenied(request.target);
     }
     final uri = Uri.tryParse('${value['url']}');
+    final keyword = request.searchKeyword;
+    final page = request.searchPage;
+    final loadedSearch =
+        uri != null &&
+        keyword != null &&
+        request.searchEntry != null &&
+        const {'/search.html', '/S6/'}.contains(uri.path) &&
+        !uri.hasFragment &&
+        (uri.queryParametersAll['page'] == null ||
+            listEquals(uri.queryParametersAll['page'], ['${page ?? 1}'])) &&
+        (uri.queryParametersAll['searchkey'] == null ||
+            listEquals(uri.queryParametersAll['searchkey'], [keyword]));
     if (!allowsNavigation('${request.target}') ||
         uri == null ||
         !allowsVerificationNavigation('$uri', request) ||
-        uri.path != request.target.path ||
-        uri.queryParametersAll.length !=
-            request.target.queryParametersAll.length ||
-        !request.target.queryParametersAll.entries.every(
-          (entry) => listEquals(uri.queryParametersAll[entry.key], entry.value),
-        ) ||
+        (!_samePage(uri, request.target) && !loadedSearch) ||
         value['verificationRequired'] == true ||
         value['contentIncomplete'] == true ||
         value['error'] != null ||
@@ -221,8 +237,33 @@ class BiliBrowserSession extends ChangeNotifier {
             (value['html'] as String).trim().isEmpty)) {
       throw const BiliBrowserException('原站页面尚未加载完成，请稍后再试。');
     }
+    if (keyword != null && page != null) {
+      _parseSearchPage(value, page, keyword);
+    }
     await persistSession().timeout(const Duration(seconds: 5));
     if (!current()) return false;
+    if (keyword != null && page != null) {
+      _verifiedSearches.removeWhere(
+        (_, entry) =>
+            entry.revision != request.revision ||
+            !DateTime.now().isBefore(entry.expires),
+      );
+      final bytes = utf8.encode(jsonEncode(value)).length;
+      _verifiedSearches[(keyword, page)] = _VerifiedBiliPage(
+        Map.unmodifiable(value),
+        request.revision,
+        DateTime.now().add(verifiedPageTtl),
+        bytes,
+      );
+      while (_verifiedSearches.length > 4 ||
+          _verifiedSearches.values.fold<int>(
+                0,
+                (size, entry) => size + entry.bytes,
+              ) >
+              512 * 1024) {
+        _verifiedSearches.remove(_verifiedSearches.keys.first);
+      }
+    }
     if (request.kind == BiliProbeKind.document ||
         request.kind == BiliProbeKind.chapter) {
       final data = Map<String, dynamic>.from(value)
@@ -437,6 +478,9 @@ class BiliBrowserSession extends ChangeNotifier {
     bool Function(Map<String, dynamic>)? accepts,
     Uri? verificationTarget,
     bool desktopSite = false,
+    String? searchKeyword,
+    Uri? searchEntry,
+    int? searchPage,
   }) => ReadDiagnostics.measure(
     'bili',
     'page_ready',
@@ -447,6 +491,9 @@ class BiliBrowserSession extends ChangeNotifier {
       accepts: accepts,
       verificationTarget: verificationTarget,
       desktopSite: desktopSite,
+      searchKeyword: searchKeyword,
+      searchEntry: searchEntry,
+      searchPage: searchPage,
     ),
   );
 
@@ -457,6 +504,9 @@ class BiliBrowserSession extends ChangeNotifier {
     bool Function(Map<String, dynamic>)? accepts,
     Uri? verificationTarget,
     bool desktopSite = false,
+    String? searchKeyword,
+    Uri? searchEntry,
+    int? searchPage,
   }) async {
     Duration? verificationStarted;
     while (clock.elapsed < operationTimeout) {
@@ -510,13 +560,18 @@ class BiliBrowserSession extends ChangeNotifier {
               continue;
             }
           }
+          final loaded = Uri.parse('${value['url']}');
           throw BiliSiteVerificationRequired(
             target:
                 verificationTarget ??
-                Uri.parse('${value['url']}').replace(query: '', fragment: ''),
+                loaded.replace(queryParameters: {}).removeFragment(),
             kind: _kind(script),
             desktopSite: desktopSite,
             revision: sourceRevision.value,
+            searchKeyword: searchKeyword,
+            searchEntry:
+                searchEntry?.origin == loaded.origin ? searchEntry : null,
+            searchPage: searchPage,
           );
         }
         throw BiliBrowserException('${value['error']}');
@@ -598,71 +653,95 @@ class BiliBrowserSession extends ChangeNotifier {
     return '${value['html']}';
   }
 
-  Future<PageStatsNovelCover> search(String keyword, int page) => _operation((
-    port,
-    js,
-    load,
-    mode,
-    clock,
-  ) async {
+  Future<PageStatsNovelCover> search(String keyword, int page) async {
+    ReadRequest.current?.check();
     final query = keyword.trim();
     if (query.isEmpty || query.length > 200 || page < 1 || page > 100) {
       throw const FormatException('搜索关键词或页码无效');
     }
-    Uri? requestedPage;
-    if (page == 1) {
-      _searchPages.remove(query);
-      final desktop = defaultTargetPlatform == TargetPlatform.windows;
-      final entry =
-          desktop
-              ? 'https://www.linovelib.com/'
-              : 'https://www.bilinovel.net/search.html';
-      await load(entry);
-      await _poll(
-        js,
-        biliHomeReadyScript,
-        clock,
-        verificationTarget: Uri.parse(entry),
-        accepts:
-            (value) =>
-                Uri.parse('${value['url']}').path == Uri.parse(entry).path,
-      );
-      // The ordinary site's asynchronous resource initialization must finish
-      // before submitting its own form. No guard tokens are forged or read.
-      await ReadDiagnostics.measure(
-        'bili',
-        'site_initialization',
-        () => Future<void>.delayed(startupGrace),
-      );
-      if (await js(biliSubmitSearchScript(query)) != true) {
-        throw const BiliBrowserException('原站搜索表单已变化');
-      }
-    } else {
-      final next = _searchPages[query]?[page];
-      if (next == null) throw const BiliBrowserException('搜索分页已失效，请重新搜索');
-      requestedPage = next;
-      await load('$next');
+    final verified = _verifiedSearches.remove((query, page));
+    if (verified != null &&
+        activeSource.value == SourceId.bili &&
+        verified.revision == sourceRevision.value &&
+        DateTime.now().isBefore(verified.expires)) {
+      return _acceptSearchPage(verified.data, page, query);
     }
-    final value = await _poll(
-      js,
-      biliSearchProbeScript,
-      clock,
-      verificationTarget: requestedPage,
-      accepts: (value) {
-        final expected = requestedPage;
-        if (expected == null) return true;
-        // loadRequest may return before the previous document is replaced.
-        // Match the real next link, regardless of query parameter order.
-        final actual = Uri.parse('${value['url']}');
-        final query = actual.queryParametersAll;
-        final expectedQuery = expected.queryParametersAll;
-        return actual.path == expected.path &&
-            query.length == expectedQuery.length &&
-            expectedQuery.entries.every(
-              (entry) => listEquals(query[entry.key], entry.value),
-            );
-      },
-    );
+    return _operation((port, js, load, mode, clock) async {
+      Uri? requestedPage;
+      Uri? searchEntry;
+      if (page == 1) {
+        _searchPages.remove(query);
+        final desktop = defaultTargetPlatform == TargetPlatform.windows;
+        final entry =
+            desktop
+                ? 'https://www.linovelib.com/'
+                : 'https://www.bilinovel.net/search.html';
+        searchEntry = Uri.parse(entry);
+        await load(entry);
+        await _poll(
+          js,
+          biliHomeReadyScript,
+          clock,
+          verificationTarget: searchEntry,
+          searchKeyword: query,
+          searchEntry: searchEntry,
+          searchPage: page,
+          accepts:
+              (value) => _samePage(Uri.parse('${value['url']}'), searchEntry!),
+        );
+        // The ordinary site's asynchronous resource initialization must finish
+        // before submitting its own form. No guard tokens are forged or read.
+        await ReadDiagnostics.measure(
+          'bili',
+          'site_initialization',
+          () => Future<void>.delayed(startupGrace),
+        );
+        if (await js(biliSubmitSearchScript(query)) != true) {
+          throw const BiliBrowserException('原站搜索表单已变化');
+        }
+      } else {
+        final next = _searchPages[query]?[page];
+        if (next == null) throw const BiliBrowserException('搜索分页已失效，请重新搜索');
+        requestedPage = next;
+        await load('$next');
+      }
+      final value = await _poll(
+        js,
+        biliSearchProbeScript,
+        clock,
+        verificationTarget: requestedPage,
+        searchKeyword: query,
+        searchEntry: searchEntry,
+        searchPage: page,
+        accepts: (value) {
+          final expected = requestedPage;
+          if (expected == null) {
+            final actual = Uri.parse('${value['url']}');
+            if (value['ready'] == true && actual.path == '/') return false;
+            final keywords = actual.queryParametersAll['searchkey'];
+            return keywords == null || listEquals(keywords, [query]);
+          }
+          // loadRequest may return before the previous document is replaced.
+          // Match the real next link, regardless of query parameter order.
+          final actual = Uri.parse('${value['url']}');
+          final actualQuery = actual.queryParametersAll;
+          final expectedQuery = expected.queryParametersAll;
+          return actual.path == expected.path &&
+              actualQuery.length == expectedQuery.length &&
+              expectedQuery.entries.every(
+                (entry) => listEquals(actualQuery[entry.key], entry.value),
+              );
+        },
+      );
+      return _acceptSearchPage(value, page, query);
+    });
+  }
+
+  ({PageStatsNovelCover result, Uri? next}) _parseSearchPage(
+    Map<String, dynamic> value,
+    int page,
+    String query,
+  ) {
     final books = <NovelCover>[];
     final seen = <String>{};
     final resultPage = Uri.parse('${value['url']}');
@@ -692,9 +771,9 @@ class BiliBrowserSession extends ChangeNotifier {
       );
       if (books.length > 100) throw const BiliBrowserException('搜索结果过多');
     }
-    var maxPage = page;
+    Uri? next;
     if (value['next'] case final String raw) {
-      final next = Uri.tryParse(raw);
+      next = Uri.tryParse(raw);
       if (next == null ||
           !allowsNavigation(raw) ||
           !const ['/S6/', '/search.html'].contains(next.path) ||
@@ -703,18 +782,32 @@ class BiliBrowserSession extends ChangeNotifier {
           raw == value['url']) {
         throw const BiliBrowserException('原站搜索分页地址无效');
       }
+    }
+    return (
+      result: PageStatsNovelCover(
+        currentPage: page,
+        maxPage: next == null ? page : page + 1,
+        records: books,
+      ),
+      next: next,
+    );
+  }
+
+  PageStatsNovelCover _acceptSearchPage(
+    Map<String, dynamic> value,
+    int page,
+    String query,
+  ) {
+    final parsed = _parseSearchPage(value, page, query);
+    if (page == 1) _searchPages.remove(query);
+    if (parsed.next case final next?) {
       if (_searchPages.length >= 16 && !_searchPages.containsKey(query)) {
         _searchPages.remove(_searchPages.keys.first);
       }
       (_searchPages[query] ??= {})[page + 1] = next;
-      maxPage = page + 1;
     }
-    return PageStatsNovelCover(
-      currentPage: page,
-      maxPage: maxPage,
-      records: books,
-    );
-  });
+    return parsed.result;
+  }
 
   Future<SourceChapter> chapter(String bookId, String chapterId) => _operation((
     port,
@@ -777,6 +870,7 @@ class BiliBrowserSession extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _verifiedPages.clear();
+    _verifiedSearches.clear();
     _invalidate();
     super.dispose();
   }

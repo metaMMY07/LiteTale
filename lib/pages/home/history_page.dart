@@ -12,6 +12,7 @@ import 'package:wild/theme/material_you.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/pages/novel/novel_info_page.dart';
 import 'package:wild/pages/novel/reader_route.dart';
+import 'package:wild/services/reading_progress.dart';
 import 'package:wild/models/book_detail_hint.dart';
 
 import 'history_cubit.dart';
@@ -297,7 +298,9 @@ class _HistoryItem extends StatelessWidget {
                                   'volumes': volumes,
                                   'novelInfo': novelInfo,
                                   'initialPage': history.progressPage,
-                                  if (history.novelId.startsWith('epub:'))
+                                  if (history.novelId.startsWith('epub:') ||
+                                      history.progressPage ==
+                                          scrollReaderProgressPage)
                                     'initialTextOffset': history.progress,
                                 },
                               ),

@@ -6,6 +6,7 @@ import 'package:wild/pages/light_novel_shelf_browser_page.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/services/light_novel_shelf_service.dart';
 import 'package:wild/services/shelf_api_error.dart';
+import 'package:wild/theme/ios_dock_insets.dart';
 import 'package:wild/src/rust/wenku8/models.dart' as w8;
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
@@ -46,7 +47,10 @@ class RecommendPage extends StatelessWidget {
             if (state is RecommendError) {
               final isWenku8 = activeSource.value == SourceId.wenku8;
               final showSiteEntry =
-                  isWenku8 && shouldOfferWenku8SiteVerification(state.message);
+                  isWenku8 &&
+                  shouldOfferWenku8SiteVerification(
+                    state.cause ?? state.message,
+                  );
               return Center(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.all(24),
@@ -65,7 +69,9 @@ class RecommendPage extends StatelessWidget {
                         const SizedBox(height: 16),
                         Text(
                           isWenku8
-                              ? wenku8HomeErrorMessage(state.message)
+                              ? wenku8HomeErrorMessage(
+                                state.cause ?? state.message,
+                              )
                               : state.cause is ShelfApiException ||
                                   state.cause is BiliApiException ||
                                   state.cause is BiliSiteException ||
@@ -206,15 +212,18 @@ class SearchOnlySourceNotice extends StatelessWidget {
 
 Future<void> _openWenku8Site(BuildContext context) async {
   if (activeSource.value != SourceId.wenku8) return;
+  final revision = sourceRevision.value;
   final apiHost = context.read<ApiHostCubit>().state;
-  final blocks = await Navigator.of(context).push<List<w8.HomeBlock>>(
-    HorizontalCoverPageRoute<List<w8.HomeBlock>>(
-      builder: (_) => Wenku8VerificationPage(apiHost: apiHost),
-    ),
+  final page = HorizontalCoverPageRoute<List<w8.HomeBlock>>(
+    fullscreenDialog: true,
+    builder: (_) => Wenku8VerificationPage(apiHost: apiHost),
   );
+  final blocks = await Navigator.of(context).push(page);
+  await page.completed;
   if (blocks != null &&
       context.mounted &&
-      activeSource.value == SourceId.wenku8) {
+      activeSource.value == SourceId.wenku8 &&
+      sourceRevision.value == revision) {
     context.read<RecommendCubit>().showWenku8WebViewFallback(blocks);
   }
 }
@@ -243,6 +252,7 @@ class RecommendationFeed extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dockInset = IosDockInsets.bottomOf(context);
     void nearEnd(ScrollMetrics metrics) {
       if (hasMore &&
           !loadingMore &&
@@ -352,6 +362,8 @@ class RecommendationFeed extends StatelessWidget {
                           ),
                 ),
               ),
+            if (dockInset > 0)
+              SliverToBoxAdapter(child: SizedBox(height: dockInset)),
           ],
         ),
       ),

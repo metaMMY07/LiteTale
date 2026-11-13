@@ -9,6 +9,7 @@ import 'package:wild/widgets/book_cover_image.dart';
 import 'package:wild/pages/novel/novel_download_info_cubit.dart';
 import 'package:wild/pages/novel/reader_page.dart';
 import 'package:wild/pages/novel/reader_route.dart';
+import 'package:wild/services/reading_progress.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:wild/theme/app_fonts.dart';
@@ -132,9 +133,9 @@ class _NovelDownloadInfoContent extends StatelessWidget {
       initialPage = currentState.readingHistory!.progressPage;
     }
 
-    await Navigator.push(
+    await pushAndWaitForPageExit(
       context,
-      HorizontalCoverPageRoute(
+      HorizontalCoverPageRoute<void>(
         settings:
             usesAppleGlass
                 ? const RouteSettings(name: novelReaderRouteName)
@@ -157,12 +158,16 @@ class _NovelDownloadInfoContent extends StatelessWidget {
                 trending: download.trending,
                 heat: '',
               ),
-              initialPage: initialPage,
+              initialPage:
+                  initialPage == scrollReaderProgressPage ? null : initialPage,
+              initialSourceOffset:
+                  initialPage == scrollReaderProgressPage
+                      ? currentState.readingHistory!.progress
+                      : null,
             ),
       ),
     );
-    // 返回后更新历史记录
-    context.read<NovelDownloadInfoCubit>().loadHistory();
+    if (context.mounted) context.read<NovelDownloadInfoCubit>().loadHistory();
   }
 
   @override

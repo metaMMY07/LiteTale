@@ -283,11 +283,20 @@ class ReaderMarkSelection extends ValueNotifier<ReaderTextSelection?> {
     final view = _view;
     if (view == null) return null;
     final top = view.top + topInset;
-    final regions =
-        _visible(group).where((r) => r.bounds!.bottom > top).toList()
-          ..sort((a, b) => a.bounds!.top.compareTo(b.bounds!.top));
-    if (regions.isEmpty) return null;
-    final region = regions.first, rect = region.bounds!;
+    _MarkedRegionState? region;
+    Rect? rect;
+    for (final candidate in _regions) {
+      if (candidate.widget.group != group) continue;
+      final bounds = candidate.bounds;
+      if (bounds == null || bounds.bottom <= top || !bounds.overlaps(view)) {
+        continue;
+      }
+      if (rect == null || bounds.top < rect.top) {
+        region = candidate;
+        rect = bounds;
+      }
+    }
+    if (region == null || rect == null) return null;
     final point = region.position(Offset(rect.left, math.max(top, rect.top)));
     final location = region.widget.location;
     return location.at(location.offset + (point?.offset ?? 0));

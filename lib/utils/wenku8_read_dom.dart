@@ -373,14 +373,15 @@ String wenku8ReadDomExtractionScript(
             });
             title = name ? cleanText(name.textContent) : cleanText(image.getAttribute('alt'));
           }
-          var cover = safePageImage(image.getAttribute('src') || '');
+          var cover = safePageImage(image.getAttribute('data-original') || '') ||
+            safePageImage(image.getAttribute('data-src') || '') || safePageImage(image.getAttribute('src') || '');
           if (book && title && cover) {
             seen.add(book.aid);
             records.push({title: title, image: cover, detailUrl: book.url, aid: book.aid});
           }
         });
       });
-      var stats = document.querySelector('em#pagestats');
+      var stats = document.querySelector('#pagestats');
       var parts = (stats ? cleanText(stats.textContent) : '').split('/');
       var current = parts.length > 0 && /^[0-9]+$/.test(parts[0].trim()) ? Number(parts[0].trim()) : 0;
       var maximum = parts.length > 1 && /^[0-9]+$/.test(parts[1].trim()) ? Number(parts[1].trim()) : 0;
@@ -393,6 +394,14 @@ String wenku8ReadDomExtractionScript(
           firstRow && !cleanText(firstRow.textContent) && !grid.querySelector('img') &&
           !Array.from(grid.querySelectorAll('a[href]')).some(function(anchor) { return !!directBookLink(anchor); });
         if (noResults || emptyGrid) return {currentPage: 1, maxPage: 1, records: [], emptyReason: 'no_results'};
+      }
+      if (!records.length && current === 1 && maximum === 1 &&
+          ['/modules/article/tags.php','/modules/article/toplist.php','/modules/article/articlelist.php'].includes(page.pathname)) {
+        var grid = document.querySelector('table.grid');
+        if (grid && !grid.querySelector('img') &&
+            !Array.from(grid.querySelectorAll('a[href]')).some(function(anchor) { return !!directBookLink(anchor); })) {
+          return {currentPage: 1, maxPage: 1, records: [], emptyReason: 'empty_catalog'};
+        }
       }
       return {currentPage: current, maxPage: maximum, records: records};
     }
@@ -693,13 +702,17 @@ Object parseWenku8ReadWebViewResult(
           'records',
           'emptyReason',
         });
-        if (page!.path != '/modules/article/search.php' ||
-            fields['emptyReason'] != 'no_results' ||
+        final emptyReason = fields['emptyReason'];
+        final validReason =
+            page!.path == '/modules/article/search.php'
+                ? emptyReason == 'no_results'
+                : emptyReason == 'empty_catalog';
+        if (!validReason ||
             fields['currentPage'] != 1 ||
             fields['maxPage'] != 1 ||
             fields['records'] is! List ||
             (fields['records'] as List).isNotEmpty) {
-          throw const FormatException('文库8搜索空结果标记无效。');
+          throw const FormatException('文库8空书目结果无效。');
         }
         return const PageStatsNovelCover(
           currentPage: 1,

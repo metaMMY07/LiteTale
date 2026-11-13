@@ -18,6 +18,7 @@ import 'package:wild/theme/horizontal_page_transitions.dart';
 
 import 'novel_info_cubit.dart';
 import 'reader_route.dart';
+import 'package:wild/services/reading_progress.dart';
 
 const novelInfoRouteName = '/novel/info';
 
@@ -243,7 +244,8 @@ class _NovelInfoContent extends StatelessWidget {
             'volumes': currentState.volumes,
             'novelInfo': currentState.novelInfo,
             'initialPage': initialPage,
-            if (novelId.startsWith('epub:') &&
+            if ((novelId.startsWith('epub:') ||
+                    initialPage == scrollReaderProgressPage) &&
                 currentState.readingHistory?.chapterId == chapterId)
               'initialTextOffset': currentState.readingHistory!.progress,
           },

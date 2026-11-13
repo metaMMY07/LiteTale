@@ -40,6 +40,7 @@ import 'dart:io';
 import 'package:wild/settings/settings_preferences.dart';
 import 'package:wild/settings/reading_session_scope.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
+import 'package:wild/widgets/wenku8_recovery_button.dart';
 import 'dart:async';
 import 'package:flutter/rendering.dart' show RenderAbstractViewport;
 import 'package:wild/models/reader_mark.dart';
@@ -47,6 +48,7 @@ import 'package:wild/services/reader_mark_store.dart';
 import 'package:wild/widgets/reader_mark_selection.dart';
 import 'package:wild/widgets/reader_marks_panel.dart';
 import 'package:wild/theme/ios_page_arrival.dart';
+import 'package:wild/services/reading_progress.dart';
 
 class HtmlReaderPage extends StatelessWidget {
   final NovelInfo novelInfo;
@@ -54,6 +56,7 @@ class HtmlReaderPage extends StatelessWidget {
   final String initialCid;
   final List<Volume> volumes;
   final ReaderMarkStore? markStore;
+  final int? initialTextOffset;
 
   const HtmlReaderPage({
     super.key,
@@ -62,6 +65,7 @@ class HtmlReaderPage extends StatelessWidget {
     required this.initialCid,
     required this.volumes,
     this.markStore,
+    this.initialTextOffset,
   });
 
   @override
@@ -75,6 +79,7 @@ class HtmlReaderPage extends StatelessWidget {
                 initialAid: initialAid,
                 initialCid: initialCid,
                 initialVolumes: volumes,
+                initialTextOffset: initialTextOffset,
                 initialRouteArrival: IosPageArrival.pendingOf(context),
               )..loadChapter(),
         ),
@@ -111,6 +116,9 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
   late final ReaderMarkSelection _marks;
   bool _selecting = false;
   int _jumpRevision = 0;
+  bool _progressScheduled = false;
+  bool _restoringOffset = false;
+  bool _leaving = false;
   ({ReaderMarkChapter chapter, int index, int revision})? _landing;
 
   @override
@@ -148,7 +156,7 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
         if (!fullscreen.state) fullscreen.toggle();
       },
     )..addListener(_selectionChanged);
-    _scrollController.addListener(_marks.clear);
+    _scrollController.addListener(_onScroll);
     unawaited(_marks.store.load(_marks.book).catchError((Object _) {}));
     WidgetsBinding.instance.addObserver(this);
     _autoScroller = FrameAutoScroller(
@@ -189,6 +197,29 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
       context.read<TopBarHeightCubit>().state +
       MediaQueryData.fromView(View.of(context)).padding.top;
 
+  void _onScroll() {
+    _marks.clear();
+    if (_progressScheduled || _restoringOffset || _leaving) return;
+    _progressScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _progressScheduled = false;
+      if (mounted && !_leaving) _saveVisiblePosition();
+    });
+  }
+
+  void _saveVisiblePosition() {
+    if (_restoringOffset || !_scrollController.hasClients) return;
+    final cubit = context.read<HtmlReaderCubit>();
+    final location = _marks.visiblePosition(0, _topInset);
+    if (location != null) {
+      cubit.recordVisibleOffset(
+        location.chapter.aid,
+        location.chapter.cid,
+        location.offset,
+      );
+    }
+  }
+
   Future<void> _showChapterList(BuildContext context) async {
     final cubit = context.read<HtmlReaderCubit>();
     final chapter = await showReaderChapterSheet(
@@ -198,6 +229,7 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
       currentCid: cubit.initialCid,
     );
     if (mounted && !cubit.isClosed && chapter != null) {
+      _saveVisiblePosition();
       _marks.clear();
       _landing = null;
       await cubit.loadChapter(aid: chapter.aid, cid: chapter.cid);
@@ -276,33 +308,60 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
       showReaderMarkError(context, '未能定位该标记');
       return;
     }
+    await _restoreOffset(state, offset, revision);
+  }
+
+  Future<void> _restoreOffset(
+    HtmlReaderLoaded state,
+    int offset,
+    int revision,
+  ) async {
+    final cubit = context.read<HtmlReaderCubit>();
+    final chapter = (aid: state.aid, cid: state.cid);
     var index = 0;
     while (index + 1 < state.parsedContent.length &&
         state.parsedContent[index + 1].offset <= offset) {
       index++;
     }
-    setState(
-      () => _landing = (chapter: chapter, index: index, revision: revision),
-    );
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted ||
-        revision != _jumpRevision ||
-        !identical(cubit.state, state) ||
-        !_scrollController.hasClients) {
-      return;
-    }
-    final rendered = _marks.renderedPosition(target.at(offset));
-    if (rendered != null) {
-      final viewport = RenderAbstractViewport.maybeOf(rendered.box);
-      if (viewport == null) return;
-      final scroll = _scrollController.position;
-      final y =
-          viewport
-              .getOffsetToReveal(rendered.box, 0, rect: rendered.rect)
-              .offset;
-      _scrollController.jumpTo(
-        (y - _topInset).clamp(scroll.minScrollExtent, scroll.maxScrollExtent),
+    _restoringOffset = true;
+    try {
+      setState(
+        () => _landing = (chapter: chapter, index: index, revision: revision),
       );
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted ||
+          _leaving ||
+          revision != _jumpRevision ||
+          !identical(cubit.state, state) ||
+          !_scrollController.hasClients) {
+        return;
+      }
+      final position = ReaderMarkLocation(
+        chapter,
+        state.title,
+        ReaderMarkAxis.text,
+        offset,
+      );
+      final rendered = _marks.renderedPosition(position);
+      if (rendered != null) {
+        final viewport = RenderAbstractViewport.maybeOf(rendered.box);
+        if (viewport != null) {
+          final scroll = _scrollController.position;
+          final y =
+              viewport
+                  .getOffsetToReveal(rendered.box, 0, rect: rendered.rect)
+                  .offset;
+          _scrollController.jumpTo(
+            (y - _topInset).clamp(
+              scroll.minScrollExtent,
+              scroll.maxScrollExtent,
+            ),
+          );
+        }
+      }
+      cubit.recordVisibleOffset(state.aid, state.cid, offset);
+    } finally {
+      if (revision == _jumpRevision) _restoringOffset = false;
     }
   }
 
@@ -336,6 +395,8 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
       _stopAutoScroll();
+      _saveVisiblePosition();
+      unawaited(ReadingProgressQueue.instance.flushBounded());
     } else if (context.read<AutoScrollCubit>().state) {
       _startAutoScroll();
     }
@@ -356,6 +417,7 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
         if (!settingsPreferencesOf(context, listen: false).boundaryChapters) {
           return;
         }
+        _saveVisiblePosition();
         context.read<HtmlReaderCubit>().goToPreviousChapter();
       } else {
         // 向上滚动一屏
@@ -376,6 +438,7 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
         if (!settingsPreferencesOf(context, listen: false).boundaryChapters) {
           return;
         }
+        _saveVisiblePosition();
         context.read<HtmlReaderCubit>().goToNextChapter();
       } else {
         // 向下滚动一屏
@@ -418,10 +481,14 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                   previous.aid != current.aid,
           listener: (context, state) {
             _marks.clear();
-            if (_landing != null &&
-                (state is! HtmlReaderLoaded ||
-                    _landing!.chapter != (aid: state.aid, cid: state.cid))) {
-              setState(() => _landing = null);
+            if (state is! HtmlReaderLoaded) {
+              _restoringOffset = false;
+              if (_landing != null) setState(() => _landing = null);
+            } else if (state.initialOffset > 0 &&
+                state.parsedContent.isNotEmpty) {
+              unawaited(
+                _restoreOffset(state, state.initialOffset, ++_jumpRevision),
+              );
             }
           },
           builder: (context, state) {
@@ -467,6 +534,13 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                                 (!settingsPreferencesOf(context).preventBack ||
                                     !isFullscreen),
                             onPopInvokedWithResult: (didPop, result) {
+                              if (didPop) {
+                                _saveVisiblePosition();
+                                _leaving = true;
+                                unawaited(
+                                  ReadingProgressQueue.instance.flushBounded(),
+                                );
+                              }
                               if (!didPop && _marks.clear()) return;
                               if (!didPop && isFullscreen) {
                                 context.read<FullscreenCubit>().toggle();
@@ -538,31 +612,25 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                                                       ),
                                                     ),
                                                     AppButton.elevated(
-                                                      onPressed: () {
-                                                        context
-                                                            .read<
-                                                              HtmlReaderCubit
-                                                            >()
-                                                            .loadChapter();
-                                                      },
+                                                      onPressed:
+                                                          cubit.retryChapter,
                                                       child: const Text('重试'),
+                                                    ),
+                                                    Wenku8RecoveryButton(
+                                                      error: state.cause,
+                                                      source: sourceOf(
+                                                        cubit.initialAid,
+                                                      ),
+                                                      onRecovered:
+                                                          cubit.retryChapter,
                                                     ),
                                                     BiliRecoveryButton(
                                                       error: state.cause,
                                                       source: sourceOf(
-                                                        context
-                                                            .read<
-                                                              HtmlReaderCubit
-                                                            >()
-                                                            .initialAid,
+                                                        cubit.initialAid,
                                                       ),
                                                       onRecovered:
-                                                          () =>
-                                                              context
-                                                                  .read<
-                                                                    HtmlReaderCubit
-                                                                  >()
-                                                                  .loadChapter(),
+                                                          cubit.retryChapter,
                                                     ),
                                                   ],
                                                 ),
@@ -605,10 +673,14 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                                                       .read<HtmlReaderCubit>()
                                                       .initialAid,
                                                 ),
-                                                onPreviousChapter:
-                                                    cubit.goToPreviousChapter,
-                                                onNextChapter:
-                                                    cubit.goToNextChapter,
+                                                onPreviousChapter: () {
+                                                  _saveVisiblePosition();
+                                                  cubit.goToPreviousChapter();
+                                                },
+                                                onNextChapter: () {
+                                                  _saveVisiblePosition();
+                                                  cubit.goToNextChapter();
+                                                },
                                                 scrollController:
                                                     _scrollController,
                                               ),

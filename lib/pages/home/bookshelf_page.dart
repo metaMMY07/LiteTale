@@ -13,6 +13,7 @@ import 'package:wild/widgets/source_website.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/pages/local_epub_library_page.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
+import 'package:wild/theme/ios_dock_insets.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/models/book_detail_hint.dart';
 import 'package:wild/widgets/book_card_ink.dart';
@@ -68,7 +69,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
           onRefresh: () => context.read<BookshelfCubit>().loadBookcases(),
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(16),
+            padding: IosDockInsets.scrollPadding(
+              context,
+              const EdgeInsets.all(16),
+            ),
             children: [
               Column(
                 mainAxisAlignment: MainAxisAlignment.start,
@@ -237,7 +241,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
                               )
                               : GridView.builder(
                                 physics: const AlwaysScrollableScrollPhysics(),
-                                padding: const EdgeInsets.all(8),
+                                padding: IosDockInsets.scrollPadding(
+                                  context,
+                                  const EdgeInsets.all(8),
+                                ),
                                 gridDelegate: const BookGridDelegate(
                                   childAspectRatio: 0.7,
                                   crossAxisSpacing: 8,

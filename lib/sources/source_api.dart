@@ -145,13 +145,33 @@ void _wenkuId(String id) {
 }
 
 Future<List<TagGroup>> tags() => _wenkuBrowser.nativeOrBrowser(
-  w8.tags,
+  () async {
+    final groups = await w8.tags();
+    if (groups.isEmpty) {
+      throw const Wenku8CatalogFormatException('文库8分类列表为空。');
+    }
+    return groups;
+  },
   () => _wenkuRead(
     'tags',
     '/modules/article/tags.php',
     query: {'charset': 'gbk'},
   ),
 );
+
+Future<w8.PageStatsNovelCover> _wenkuCatalog(
+  Future<w8.PageStatsNovelCover> Function() native,
+  Future<w8.PageStatsNovelCover> Function() browser,
+) => _wenkuBrowser.nativeOrBrowser(() async {
+  final value = await native();
+  if (value.currentPage < 1 ||
+      value.maxPage < value.currentPage ||
+      (value.records.isEmpty &&
+          (value.currentPage != 1 || value.maxPage != 1))) {
+    throw const Wenku8CatalogFormatException('文库8未返回有效的书目页码。');
+  }
+  return value;
+}, browser);
 
 Future<w8.PageStatsNovelCover> _wenkuEncodedList(
   String path,
@@ -170,7 +190,7 @@ Future<w8.PageStatsNovelCover> tagPage({
   required String tag,
   required String v,
   required int pageNumber,
-}) => _wenkuBrowser.nativeOrBrowser(
+}) => _wenkuCatalog(
   () => w8.tagPage(tag: tag, v: v, pageNumber: pageNumber),
   () async => _wenkuEncodedList(
     '/modules/article/tags.php',
@@ -181,7 +201,7 @@ Future<w8.PageStatsNovelCover> tagPage({
 Future<w8.PageStatsNovelCover> toplist({
   required String sort,
   required int page,
-}) => _wenkuBrowser.nativeOrBrowser(
+}) => _wenkuCatalog(
   () => w8.toplist(sort: sort, page: page),
   () => _wenkuRead(
     'list',
@@ -193,7 +213,7 @@ Future<w8.PageStatsNovelCover> toplist({
 Future<w8.PageStatsNovelCover> articlelist({
   required int fullflag,
   required int page,
-}) => _wenkuBrowser.nativeOrBrowser(
+}) => _wenkuCatalog(
   () => w8.articlelist(fullflag: fullflag, page: page),
   () => _wenkuRead(
     'list',

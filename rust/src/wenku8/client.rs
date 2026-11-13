@@ -794,15 +794,16 @@ impl Wenku8Client {
     }
 
     pub async fn tags(&self) -> Result<Vec<TagGroup>> {
-        let resp = self
-            .client
-            .get(format!(
-                "{}/modules/article/tags.php?charset=gbk",
-                self.load_api_host().await
-            ))
-            .header("User-Agent", self.load_user_agent().await)
-            .send()
-            .await?;
+        let url = format!(
+            "{}/modules/article/tags.php?charset=gbk",
+            self.load_api_host().await,
+        );
+        let resp = send_idempotent_get(
+            self.client
+                .get(url)
+                .header("User-Agent", self.load_user_agent().await),
+        )
+        .await?;
 
         if !resp.status().is_success() {
             return Err(anyhow!("Failed to get tags: HTTP {}", resp.status()));
@@ -827,16 +828,16 @@ impl Wenku8Client {
         for ul in ul_elements {
             let li = ul.select(&li_selector);
             for li in li {
-                if li.inner_html().ends_with("Tags：") {
-                    if !group_name.is_empty() {
+                let label = li.text().collect::<String>();
+                if let Some(label) = label.trim().strip_suffix("Tags：") {
+                    if !group_name.is_empty() && !tags.is_empty() {
                         tag_groups.push(TagGroup {
                             title: group_name.clone(),
-                            tags: tags.clone(),
+                            tags: std::mem::take(&mut tags),
                         });
                     }
-                    group_name = li
-                        .inner_html()
-                        .replace("Tags：", "")
+                    group_name = label
+                        .trim()
                         .replace("系", "")
                         .replace("属性", "")
                         .replace("类", "");
@@ -845,12 +846,23 @@ impl Wenku8Client {
                     let a = li.select(&a_selector);
                     for a in a {
                         let tag = a.text().collect::<String>();
-                        tags.push(tag.clone());
+                        if !tag.trim().is_empty() {
+                            tags.push(tag.trim().to_string());
+                        }
                     }
                 }
             }
         }
 
+        if !group_name.is_empty() && !tags.is_empty() {
+            tag_groups.push(TagGroup {
+                title: group_name,
+                tags,
+            });
+        }
+        if tag_groups.is_empty() {
+            return Err(anyhow!("wenku8_catalog_layout: no tag groups"));
+        }
         Ok(tag_groups)
     }
 
@@ -870,19 +882,19 @@ impl Wenku8Client {
             v,
             page_number,
         );
-        let response = self
-            .client
-            .get(url)
-            .header("User-Agent", self.load_user_agent().await)
-            .send()
-            .await?;
+        let response = send_idempotent_get(
+            self.client
+                .get(url)
+                .header("User-Agent", self.load_user_agent().await),
+        )
+        .await?;
         if !response.status().is_success() {
             return Err(anyhow!("Failed to get tag page: {}", response.status()));
         }
 
         let text = response.bytes().await?;
         let text = decode_gbk(text)?;
-        Self::parse_tag_page(text.as_str())
+        Self::parse_catalog_page(text.as_str())
     }
 
     pub(crate) fn parse_books(novels: &mut Vec<NovelCover>, html: &Html) -> Result<()> {
@@ -899,17 +911,17 @@ impl Wenku8Client {
                         let title = parent
                             .value()
                             .attr("title")
-                            .ok_or_else(|| anyhow!("Failed to find title"))?
+                            .ok_or_else(|| anyhow!("wenku8_catalog_layout: missing cover title"))?
                             .to_string();
                         let mut img = img
                             .value()
                             .attr("src")
-                            .ok_or_else(|| anyhow!("Failed to find img"))?
+                            .ok_or_else(|| anyhow!("wenku8_catalog_layout: missing cover image"))?
                             .to_string();
                         let detail_url = parent
                             .value()
                             .attr("href")
-                            .ok_or_else(|| anyhow!("Failed to find detail_url"))?
+                            .ok_or_else(|| anyhow!("wenku8_catalog_layout: missing book URL"))?
                             .to_string();
                         let aid = detail_url
                             .split('/')
@@ -930,7 +942,7 @@ impl Wenku8Client {
     }
 
     pub(crate) fn parse_page_stats(html: &Html) -> Result<(i32, i32)> {
-        let page_stats_selector = Selector::parse("em#pagestats").unwrap();
+        let page_stats_selector = Selector::parse("#pagestats").unwrap();
         let mut current_page = 0;
         let mut max_page = 0;
         for page_stats in html.select(&page_stats_selector) {
@@ -1249,7 +1261,7 @@ impl Wenku8Client {
     }
 
     pub(crate) fn parse_toplist(text: &str) -> Result<PageStats<NovelCover>> {
-        Self::parse_tag_page(text)
+        Self::parse_catalog_page(text)
     }
 
     pub async fn articlelist(&self, fullflag: i32, page: i32) -> Result<PageStats<NovelCover>> {
@@ -1273,7 +1285,18 @@ impl Wenku8Client {
     }
 
     pub(crate) fn parse_articlelist(text: &str) -> Result<PageStats<NovelCover>> {
-        Self::parse_tag_page(text)
+        Self::parse_catalog_page(text)
+    }
+
+    fn parse_catalog_page(text: &str) -> Result<PageStats<NovelCover>> {
+        let page = Self::parse_tag_page(text)?;
+        if page.current_page < 1
+            || page.max_page < page.current_page
+            || (page.records.is_empty() && (page.current_page != 1 || page.max_page != 1))
+        {
+            return Err(anyhow!("wenku8_catalog_layout: invalid page statistics"));
+        }
+        Ok(page)
     }
 
     async fn search_index_page(&self, page: i32) -> Result<PageStats<SearchIndexEntry>> {

@@ -20,6 +20,33 @@ String biliSubmitSearchScript(String keyword) => '''(() => {
   return true;
 })()''';
 
+String biliFillSearchFieldScript(String keyword) => '''(() => {
+  const field = document.querySelector('#searchkey[name="searchkey"]');
+  if (!field || field.value.trim()) return false;
+  field.value = ${jsonEncode(keyword)};
+  field.dispatchEvent(new Event('input', {bubbles:true}));
+  return true;
+})()''';
+
+const _biliSearchVerificationGuard = r'''
+  function biliCheckSearchVerification(out) {
+    if (!['/S6/','/search.html','/'].includes(location.pathname)) return false;
+    const field = [...document.querySelectorAll('input[name]')].find(input =>
+      /^(?:captcha|captcha_code|checkcode|verifycode|verify_code|seccode)$/i.test(input.name) &&
+      !['hidden','password'].includes(input.type) && input.getClientRects().length > 0 &&
+      !(input.form && input.form.querySelector('input[type="password"]')));
+    const form = field && (field.form || field.closest('form'));
+    const hasCode = form && [...form.querySelectorAll('img')].some(img =>
+      /captcha|checkcode|verifycode|seccode|验证码|驗證碼/i.test(
+        [img.getAttribute('src'), img.alt, img.id].join(' ')));
+    const hasSearch = form && !!form.querySelector('[name="searchkey"]');
+    if (!field || !form || !(hasCode || hasSearch)) return false;
+    out.ready=false;out.verificationRequired=true;
+    out.error='原站搜索需要验证码，请打开原站填写后继续';
+    return true;
+  }
+''';
+
 // Access state is identified in the site's error/challenge panels, never by
 // scanning a novel's prose or search result text.
 const _biliAccessGuard = r'''
@@ -52,9 +79,10 @@ const biliAccessProbeScript =
 const biliHomeReadyScript =
     r'''(() => {''' +
     _biliAccessGuard +
+    _biliSearchVerificationGuard +
     r'''
   const out={url:location.href,ready:!!document.querySelector('#searchkey[name="searchkey"]')};
-  if (biliCheckAccess(out)) return JSON.stringify(out);
+  if (biliCheckAccess(out) || biliCheckSearchVerification(out)) return JSON.stringify(out);
   return JSON.stringify(out);
 })()''';
 
@@ -105,10 +133,10 @@ const biliDocumentProbeScript =
 const biliSearchProbeScript =
     r'''(() => {''' +
     _biliAccessGuard +
+    _biliSearchVerificationGuard +
     r'''
   const result = {url:location.href, ready:false, books:[], next:null};
-  const body = document.body ? document.body.innerText : '';
-  if (biliCheckAccess(result)) return JSON.stringify(result);
+  if (biliCheckAccess(result) || biliCheckSearchVerification(result)) return JSON.stringify(result);
   if (window.__liteTaleBiliSearchPending) return JSON.stringify(result);
   if (document.readyState === 'loading' || location.pathname === '/' || !document.body) return JSON.stringify(result);
   const images = root => {
@@ -126,6 +154,12 @@ const biliSearchProbeScript =
     result.ready = true; return JSON.stringify(result);
   }
   if (!['/S6/','/search.html'].includes(location.pathname)) return JSON.stringify(result);
+  const body = document.body.innerText;
+  // The mobile search form and its suggestions are also at /search.html.
+  if (location.pathname === '/search.html' &&
+      document.querySelector('#searchkey[name="searchkey"]') &&
+      !document.querySelector('.search-list,.search-result,.bookbox,.rank_d_list,table.grid,.book-list,#searchResult,#list_content') &&
+      !/没有找到|未找到|无搜索结果|没有相关|查无|未搜索到|没有搜到/.test(body)) return JSON.stringify(result);
   const seen = new Set();
   const scopes = [...document.querySelectorAll('.search-list,.search-result,.bookbox,.rank_d_list,table.grid,.book-list,#searchResult,#list_content')];
   for (const root of (scopes.length ? scopes : [document.body])) {

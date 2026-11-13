@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'dart:math' as math;
 
+import 'package:flutter/cupertino.dart' show CupertinoModalPopupRoute;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:wild/theme/ios_dock_insets.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 
 typedef _DockState = ({bool mounted, bool fullscreen, bool blocked});
@@ -38,7 +39,10 @@ class IosDockController extends NavigatorObserver {
       _dismissing.any((route) => route is PopupRoute) ||
       _routes.lastOrNull is! PageRoute;
   bool _isFullscreen(Route<dynamic> route) =>
-      fullscreenRoutes.contains(route.settings.name);
+      fullscreenRoutes.contains(route.settings.name) ||
+      (route is PageRoute && route.fullscreenDialog) ||
+      route is ModalBottomSheetRoute ||
+      route is CupertinoModalPopupRoute;
   bool get _fullscreen =>
       _dismissing.any(_isFullscreen) || _routes.any(_isFullscreen);
 
@@ -142,7 +146,7 @@ class IosDockController extends NavigatorObserver {
 }
 
 /// Mounts the UIKit bar as a sibling of the Navigator so no page transition
-/// can move, cover or reattach it. Pages use the remaining viewport.
+/// can move or reattach it. Pages paint under its translucent surface.
 class IosAppDockHost extends StatelessWidget {
   const IosAppDockHost({
     super.key,
@@ -159,35 +163,27 @@ class IosAppDockHost extends StatelessWidget {
     child: child,
     builder: (context, state, child) {
       final media = MediaQuery.of(context);
-      final visible = state.mounted && !state.fullscreen;
-      final blocked = state.fullscreen || state.blocked;
-      final extent = visible ? AppleGlassBottomBar.heightFor(media) : 0.0;
-      final pageMedia =
-          visible
-              ? media.copyWith(
-                size: Size(
-                  media.size.width,
-                  math.max(0.0, media.size.height - extent),
-                ),
-                padding: media.padding.copyWith(bottom: 0),
-                viewPadding: media.viewPadding.copyWith(bottom: 0),
-                viewInsets: media.viewInsets.copyWith(
-                  bottom: math.max(0.0, media.viewInsets.bottom - extent),
-                ),
-                systemGestureInsets: media.systemGestureInsets.copyWith(
-                  bottom: 0,
-                ),
-              )
-              : media;
-      return ColoredBox(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(child: MediaQuery(data: pageMedia, child: child!)),
-            if (state.mounted)
-              Offstage(
-                offstage: state.fullscreen,
+      final keyboard = media.viewInsets.bottom > 0;
+      final hidden = state.fullscreen || keyboard;
+      final blocked = hidden || state.blocked;
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          IosDockInsets(
+            height:
+                state.mounted && !keyboard
+                    ? AppleGlassBottomBar.heightFor(media)
+                    : 0,
+            fullscreenRoutes: controller.fullscreenRoutes,
+            child: child!,
+          ),
+          if (state.mounted)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Offstage(
+                offstage: hidden,
                 child: IgnorePointer(
                   ignoring: blocked,
                   child: ExcludeSemantics(
@@ -206,8 +202,8 @@ class IosAppDockHost extends StatelessWidget {
                   ),
                 ),
               ),
-          ],
-        ),
+            ),
+        ],
       );
     },
   );

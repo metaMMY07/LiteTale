@@ -15,6 +15,14 @@ import 'package:wild/utils/wenku8_search_navigation.dart';
 import 'package:wild/utils/wenku8_document_read.dart';
 import 'package:wild/utils/wenku8_bookshelf_dom.dart';
 
+export 'package:wild/utils/wenku8_network_error.dart'
+    show
+        Wenku8BrowserException,
+        Wenku8SiteVerificationRequired,
+        Wenku8SiteLoginRequired,
+        Wenku8SiteAccessDenied,
+        Wenku8CatalogFormatException;
+
 /// The browser owns its cookies. Only bounded, typed page data leaves it.
 abstract interface class Wenku8BrowserPort {
   Future<void> loadUrl(String url);
@@ -79,19 +87,6 @@ class _BoundedBrowserPort
         )
         : Future.value(false);
   }
-}
-
-class Wenku8BrowserException implements Exception {
-  const Wenku8BrowserException(this.message);
-  final String message;
-  @override
-  String toString() => message;
-}
-
-class Wenku8SiteVerificationRequired extends Wenku8BrowserException {
-  const Wenku8SiteVerificationRequired({this.target})
-    : super('文库8要求站点验证。请打开站点完成验证或登录，再返回重试。');
-  final Uri? target;
 }
 
 class _BrowserOperation {
@@ -517,7 +512,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
     bool searchResult = false,
   }) async {
     final deadline = DateTime.now().add(pageTimeout);
-    var verification = false;
+    DateTime? verificationSince;
     while (DateTime.now().isBefore(deadline)) {
       if (_navigationError case final error?) throw error;
       {
@@ -533,6 +528,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
           throw const Wenku8BrowserException('文库8网页离开了当前站点，已停止读取。');
         }
         if (state['rateLimited'] == true) throw rateLimits.record(host);
+        if (state['accessDenied'] == true) throw const Wenku8SiteAccessDenied();
         final path = Uri.parse(url).path;
         if (searchResult &&
             path != '/login.php' &&
@@ -543,7 +539,11 @@ class Wenku8BrowserSession extends ChangeNotifier {
           continue;
         }
         if (state['challenge'] == true) {
-          verification = true;
+          final now = DateTime.now();
+          verificationSince ??= now;
+          if (now.difference(verificationSince) >= const Duration(seconds: 3)) {
+            throw Wenku8SiteVerificationRequired(target: target);
+          }
         } else if (state['domReady'] == true ||
             state['ready'] == true ||
             (searchResult && state['searchReady'] == true)) {
@@ -558,14 +558,16 @@ class Wenku8BrowserSession extends ChangeNotifier {
               _readingSessionRevision++;
               _sessionInvalidations.add(null);
             }
-            throw const Wenku8BrowserException('文库8登录已失效，请重新登录。');
+            throw Wenku8SiteLoginRequired(loaded);
           }
           return;
         }
       }
       await Future<void>.delayed(pollInterval);
     }
-    if (verification) throw Wenku8SiteVerificationRequired(target: target);
+    if (verificationSince != null) {
+      throw Wenku8SiteVerificationRequired(target: target);
+    }
     throw const Wenku8BrowserException('文库8网页加载超时，请重试。');
   }
 
@@ -792,6 +794,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
         if (!sameOrigin(target.toString(), host)) {
           throw const Wenku8BrowserException('文库8请求地址不属于当前站点。');
         }
+        await _admitRequest(host);
         await port.executeScript(
           'window.__liteTaleNavigating = true; location.assign(${jsonEncode(target.toString())}); true;',
         );
@@ -841,6 +844,16 @@ class Wenku8BrowserSession extends ChangeNotifier {
             )
             as T;
       }
+      if ((kind == 'tags' ||
+              (kind == 'list' &&
+                  const {
+                    '/modules/article/tags.php',
+                    '/modules/article/toplist.php',
+                    '/modules/article/articlelist.php',
+                  }.contains(target.path))) &&
+          !_matchesCatalogTarget(Uri.parse(loaded), target)) {
+        throw const Wenku8BrowserException('文库8跳转到了其他页面，请返回重试。');
+      }
       final raw = await port.executeScript(
         wenku8ReadDomExtractionScript(host, kind: kind, aid: aid),
       );
@@ -875,6 +888,23 @@ class Wenku8BrowserSession extends ChangeNotifier {
       }
     }
   });
+
+  static bool _matchesCatalogTarget(Uri loaded, Uri target) {
+    if (loaded.origin != target.origin ||
+        loaded.path != target.path ||
+        loaded.hasFragment) {
+      return false;
+    }
+    // Category names are percent-encoded GBK, so compare the query without
+    // decoding its values as UTF-8. The site can omit the encoding hint.
+    List<String> query(Uri uri) =>
+        uri.query
+            .split('&')
+            .where((part) => part.isNotEmpty && part != 'charset=gbk')
+            .toList()
+          ..sort();
+    return listEquals(query(loaded), query(target));
+  }
 
   Future<Uint8List> captcha() => _serial(() async {
     final host = await apiHost();
@@ -970,23 +1000,46 @@ class Wenku8BrowserSession extends ChangeNotifier {
   Future<bool> adoptVisiblePage(
     String host,
     Object? snapshot, {
+    Uri? target,
     Future<void> Function()? persistSession,
+    bool Function()? isCurrent,
   }) async {
+    Future<void> checkCurrent() async {
+      if (host != await apiHost() || isCurrent?.call() == false) {
+        throw const Wenku8BrowserException('文库8会话已变化，请返回重新打开。');
+      }
+    }
+
+    await checkCurrent();
     final data = snapshot is String ? jsonDecode(snapshot) : snapshot;
     if (data is! Map || !sameOrigin(data['url'] as String? ?? '', host)) {
       throw const Wenku8BrowserException('当前网页不是配置的文库8站点。');
     }
+    if (data['rateLimited'] == true) throw rateLimits.record(host);
+    if (data['accessDenied'] == true) throw const Wenku8SiteAccessDenied();
     if (data['challenge'] == true || data['ready'] != true) {
-      throw const Wenku8SiteVerificationRequired();
+      throw Wenku8SiteVerificationRequired(target: target);
     }
-    if (data['loginForm'] != true &&
+    final loaded = Uri.parse(data['url'] as String);
+    final targetReady =
+        target != null &&
+        _matchesCatalogTarget(loaded, target) &&
+        (data['catalogReady'] == true ||
+            data['searchReady'] == true ||
+            (data['chapterReady'] == true &&
+                RegExp(
+                  r'^/novel/\d+/[1-9]\d*/\d+\.htm$',
+                ).hasMatch(loaded.path)));
+    if (!targetReady &&
+        (data['loginForm'] != true || loaded.path != '/login.php') &&
         data['authenticated'] != true &&
         data['home'] != true) {
-      throw const Wenku8BrowserException('请在文库8登录页或首页完成验证后返回。');
+      throw const Wenku8BrowserException('请等文库8正常显示书目或登录页面后再返回。');
     }
+    await persistSession?.call().timeout(const Duration(seconds: 5));
+    await checkCurrent();
     _readingSessionRevision++;
     _cancelBackgroundRead?.call();
-    await persistSession?.call();
     await enable(host);
     _loginTransport = null;
     _captchaEpoch = null;
@@ -1160,8 +1213,10 @@ class Wenku8BrowserSession extends ChangeNotifier {
   // Login errors need no style/layout calculation for an entire book page.
   var text = location.pathname === '/login.php' && document.body ?
     document.body.textContent.slice(0,32000) : '';
-  var challenge = !!document.querySelector('#challenge-form,#cf-challenge-running,.cf-browser-verification,#cf-wrapper') ||
-    /just a moment|attention required|sorry, you have been blocked/.test(title);
+  var challenge = !!document.querySelector('#challenge-form,#cf-challenge-running,.cf-browser-verification,.cf-turnstile,iframe[src*="challenges.cloudflare.com"]') ||
+    /just a moment|checking your browser/.test(title);
+  var accessDenied = !challenge && (/attention required.*cloudflare|sorry, you have been blocked|^403 forbidden/.test(title) ||
+    !!document.querySelector('#cf-error-details [data-translate="block_headline"]'));
   var rateLimited = /^(?:error\s*[:#]?\s*)?429(?:\s|$)|\bhttp\s*429\b|too many requests/.test(title) ||
     /^(?:error\s*[:#]?\s*)?429(?:\s|$)|\bhttp\s*429\b|too many requests/i.test(
       Array.from(document.querySelectorAll('h1,h2')).slice(0,4).map(function(n){return n.textContent;}).join(' '));
@@ -1180,10 +1235,16 @@ class Wenku8BrowserSession extends ChangeNotifier {
   var searchReady=location.pathname==='/modules/article/search.php' &&
     !!document.querySelector('table.grid') && !!pages &&
     (Number(pages[2])===1 || !!document.querySelector('#pagelink a.last'));
+  var catalogReady = (location.pathname === '/modules/article/tags.php' &&
+    !!document.querySelector('ul.ultops a')) ||
+    (/^\/modules\/article\/(?:tags|toplist|articlelist)\.php$/.test(location.pathname) &&
+    !!document.querySelector('table.grid') && (!!document.querySelector('table.grid a[href*="/book/"]') || !!pages));
+  var chapterReady = /^\/novel\/\d+\/[1-9]\d*\/\d+\.htm$/.test(location.pathname) &&
+    !!document.querySelector('#content') && !!document.querySelector('#content').textContent.trim();
   return JSON.stringify({url:location.href,ready:document.readyState === 'complete',
     navigating:window.__liteTaleNavigating === true,
     domReady:!!document.body && (document.readyState === 'interactive' || document.readyState === 'complete'),
-    challenge:challenge,rateLimited:rateLimited,searchReady:searchReady,loginForm:loginForm,authenticated:!challenge && signedIn,
+    challenge:challenge,accessDenied:accessDenied,rateLimited:rateLimited,searchReady:searchReady,catalogReady:catalogReady,chapterReady:chapterReady,loginForm:loginForm,authenticated:!challenge && !accessDenied && signedIn,
     home:!!document.querySelector('#centers,div.main'),loginError:error});
 })()
 ''';

@@ -11,11 +11,14 @@ import 'package:wild/settings/source_settings_page.dart';
 import 'package:wild/pages/novel/theme_cubit.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
+import 'package:wild/theme/ios_dock_insets.dart';
+import 'package:wild/utils/wenku8_network_error.dart';
 import 'package:wild/widgets/book_grid_delegate.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
 import 'package:wild/widgets/theme_reveal_host.dart';
 import 'package:wild/widgets/discovery_tab.dart';
 import 'package:wild/widgets/source_website.dart';
+import 'package:wild/widgets/wenku8_recovery_button.dart';
 
 import '../../src/rust/api/database.dart';
 import 'package:wild/sources/source_api.dart';
@@ -360,7 +363,7 @@ class _ToplistPageState extends State<ToplistPage> {
   String _selectedSort = 'lastupdate';
   PageStatsNovelCover? _currentPage;
   bool _isLoading = false;
-  String? _errorMessage;
+  Object? _error;
   static const _keySort = 'toplist_page_sort';
   int _request = 0;
 
@@ -409,9 +412,9 @@ class _ToplistPageState extends State<ToplistPage> {
         activeSource.value == SourceId.wenku8;
     setState(() {
       _isLoading = true;
+      _error = null;
       if (refresh) {
         _currentPage = null;
-        _errorMessage = null;
       }
     });
 
@@ -432,13 +435,12 @@ class _ToplistPageState extends State<ToplistPage> {
           );
         }
         _isLoading = false;
-        _errorMessage = null;
       });
     } catch (e) {
       if (!current()) return;
       setState(() {
         _isLoading = false;
-        _errorMessage = e.toString();
+        _error = e;
       });
     }
   }
@@ -465,7 +467,7 @@ class _ToplistPageState extends State<ToplistPage> {
               if (_selectedSort == value) return;
               setState(() {
                 _selectedSort = value;
-                _errorMessage = null;
+                _error = null;
               });
               _loadToplist(refresh: true);
               _saveState();
@@ -489,7 +491,7 @@ class _ToplistPageState extends State<ToplistPage> {
                             if (selected) {
                               setState(() {
                                 _selectedSort = value;
-                                _errorMessage = null;
+                                _error = null;
                               });
                               _loadToplist(refresh: true);
                               _saveState();
@@ -504,58 +506,35 @@ class _ToplistPageState extends State<ToplistPage> {
         // Novel grid or error state
         Expanded(
           child:
-              _errorMessage != null
-                  ? RefreshIndicator(
-                    onRefresh: () => _loadToplist(refresh: true),
-                    child: ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: [
-                        SizedBox(
-                          height: MediaQuery.of(context).size.height - 100,
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.start,
-                            children: [
-                              Icon(
-                                Icons.error_outline_rounded,
-                                size: 48,
-                                color: Theme.of(context).colorScheme.error,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                '加载失败 (下拉刷新)',
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                _errorMessage!,
-                                style: Theme.of(context).textTheme.bodyMedium,
-                                textAlign: TextAlign.start,
-                              ),
-                              const SourceWebsiteLink(source: SourceId.wenku8),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+              _error != null && _currentPage == null
+                  ? _Wenku8CatalogError(
+                    error: _error!,
+                    onRetry: () => _loadToplist(refresh: true),
                   )
                   : _currentPage == null
                   ? SourceLoadingIndicator(
                     source: SourceId.wenku8,
                     requestKey: _request,
                   )
+                  : _currentPage!.records.isEmpty
+                  ? const Center(child: Text('暂无排行书目'))
                   : NotificationListener<ScrollNotification>(
                     onNotification: (notification) {
                       if (notification is ScrollEndNotification &&
                           notification.metrics.pixels >=
                               notification.metrics.maxScrollExtent - 200 &&
                           !_isLoading &&
+                          _error == null &&
                           _currentPage!.currentPage < _currentPage!.maxPage) {
                         _loadToplist();
                       }
                       return true;
                     },
                     child: GridView.builder(
-                      padding: const EdgeInsets.all(8),
+                      padding: IosDockInsets.scrollPadding(
+                        context,
+                        const EdgeInsets.all(8),
+                      ),
                       gridDelegate: const BookGridDelegate(
                         childAspectRatio: 207 / 307,
                         crossAxisSpacing: 8,
@@ -568,6 +547,13 @@ class _ToplistPageState extends State<ToplistPage> {
                               : 0),
                       itemBuilder: (context, index) {
                         if (index >= _currentPage!.records.length) {
+                          if (_error case final error?) {
+                            return _Wenku8CatalogError(
+                              error: error,
+                              onRetry: _loadToplist,
+                              inline: true,
+                            );
+                          }
                           if (_isLoading) {
                             return SourceLoadingIndicator(
                               source: SourceId.wenku8,
@@ -603,7 +589,7 @@ class ArticlelistPage extends StatefulWidget {
 class _ArticlelistPageState extends State<ArticlelistPage> {
   PageStatsNovelCover? _currentPage;
   bool _isLoading = false;
-  String? _errorMessage;
+  Object? _error;
   int _request = 0;
 
   @override
@@ -623,9 +609,9 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
         activeSource.value == SourceId.wenku8;
     setState(() {
       _isLoading = true;
+      _error = null;
       if (refresh) {
         _currentPage = null;
-        _errorMessage = null;
       }
     });
 
@@ -646,13 +632,12 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
           );
         }
         _isLoading = false;
-        _errorMessage = null;
       });
     } catch (e) {
       if (!current()) return;
       setState(() {
         _isLoading = false;
-        _errorMessage = e.toString();
+        _error = e;
       });
     }
   }
@@ -665,55 +650,32 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
 
   @override
   Widget build(BuildContext context) {
-    return _errorMessage != null
-        ? RefreshIndicator(
-          onRefresh: () => _loadArticlelist(refresh: true),
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              SizedBox(
-                height: MediaQuery.of(context).size.height - 100,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.error_outline_rounded,
-                      size: 48,
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      '加载失败 (下拉刷新)',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _errorMessage!,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                      textAlign: TextAlign.start,
-                    ),
-                    const SourceWebsiteLink(source: SourceId.wenku8),
-                  ],
-                ),
-              ),
-            ],
-          ),
+    return _error != null && _currentPage == null
+        ? _Wenku8CatalogError(
+          error: _error!,
+          onRetry: () => _loadArticlelist(refresh: true),
         )
         : _currentPage == null
         ? SourceLoadingIndicator(source: SourceId.wenku8, requestKey: _request)
+        : _currentPage!.records.isEmpty
+        ? const Center(child: Text('暂无完结书目'))
         : NotificationListener<ScrollNotification>(
           onNotification: (notification) {
             if (notification is ScrollEndNotification &&
                 notification.metrics.pixels >=
                     notification.metrics.maxScrollExtent - 200 &&
                 !_isLoading &&
+                _error == null &&
                 _currentPage!.currentPage < _currentPage!.maxPage) {
               _loadArticlelist();
             }
             return true;
           },
           child: GridView.builder(
-            padding: const EdgeInsets.all(8),
+            padding: IosDockInsets.scrollPadding(
+              context,
+              const EdgeInsets.all(8),
+            ),
             gridDelegate: const BookGridDelegate(
               childAspectRatio: 207 / 307,
               crossAxisSpacing: 8,
@@ -724,6 +686,13 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
                 (_currentPage!.currentPage < _currentPage!.maxPage ? 1 : 0),
             itemBuilder: (context, index) {
               if (index >= _currentPage!.records.length) {
+                if (_error case final error?) {
+                  return _Wenku8CatalogError(
+                    error: error,
+                    onRetry: _loadArticlelist,
+                    inline: true,
+                  );
+                }
                 if (_isLoading) {
                   return SourceLoadingIndicator(
                     source: SourceId.wenku8,
@@ -743,5 +712,43 @@ class _ArticlelistPageState extends State<ArticlelistPage> {
             },
           ),
         );
+  }
+}
+
+class _Wenku8CatalogError extends StatelessWidget {
+  const _Wenku8CatalogError({
+    required this.error,
+    required this.onRetry,
+    this.inline = false,
+  });
+
+  final Object error;
+  final Future<void> Function() onRetry;
+  final bool inline;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding:
+          inline
+              ? const EdgeInsets.all(4)
+              : IosDockInsets.scrollPadding(context, const EdgeInsets.all(16)),
+      children: [
+        Text(wenku8ReadErrorMessage(error), textAlign: TextAlign.center),
+        const SizedBox(height: 8),
+        AppButton.text(onPressed: onRetry, child: const Text('重试')),
+        Wenku8RecoveryButton(
+          error: error,
+          source: SourceId.wenku8,
+          siteVerificationOnly: true,
+          onRecovered: onRetry,
+        ),
+        const SourceWebsiteLink(source: SourceId.wenku8, showAddress: false),
+      ],
+    );
+    return inline
+        ? content
+        : RefreshIndicator(onRefresh: onRetry, child: content);
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:wild/theme/ios_dock_insets.dart';
 
 /// Operation cards fill the row between the page insets. The scroll viewport
 /// also covers the insets so dragging near either screen edge still scrolls.
@@ -40,7 +41,10 @@ class LeftAlignedScrollView extends StatelessWidget {
         child: ConstrainedBox(
           constraints: BoxConstraints(minWidth: constraints.maxWidth),
           child: Padding(
-            padding: EdgeInsets.only(top: topInset, bottom: bottomInset),
+            padding: EdgeInsets.only(
+              top: topInset,
+              bottom: bottomInset + IosDockInsets.bottomOf(context),
+            ),
             child: Align(
               alignment: AlignmentDirectional.topStart,
               child: Padding(
@@ -91,7 +95,10 @@ class LeftAlignedListView extends StatelessWidget {
       return ListView.builder(
         controller: controller,
         physics: physics,
-        padding: EdgeInsets.fromLTRB(inset, topInset, inset, bottomInset),
+        padding: IosDockInsets.scrollPadding(
+          context,
+          EdgeInsets.fromLTRB(inset, topInset, inset, bottomInset),
+        ),
         itemCount: itemCount,
         itemBuilder:
             (context, index) => Align(
@@ -142,7 +149,10 @@ class LeftAlignedCustomScrollView extends StatelessWidget {
         physics: physics,
         slivers: [
           SliverPadding(
-            padding: EdgeInsets.fromLTRB(inset, topInset, inset, bottomInset),
+            padding: IosDockInsets.scrollPadding(
+              context,
+              EdgeInsets.fromLTRB(inset, topInset, inset, bottomInset),
+            ),
             sliver: SliverConstrainedCrossAxis(
               maxExtent: contentWidth,
               sliver: SliverMainAxisGroup(slivers: slivers),

@@ -68,6 +68,7 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) return;
       final authenticated = await Navigator.of(context).push<bool>(
         HorizontalCoverPageRoute<bool>(
+          fullscreenDialog: true,
           builder:
               (_) => Wenku8VerificationPage(
                 apiHost: host,
