@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:wild/theme/ios_page_arrival.dart';
 
 /// Wait until the pushed page's overlay is removed. A normal push Future
@@ -11,9 +12,6 @@ Future<void> pushAndWaitForPageExit(
   await page.completed;
 }
 
-/// A page covers its predecessor from the right and uncovers it to the right.
-/// The page underneath stays still. No opacity, scale, or shared-element work is
-/// performed during the transition.
 const horizontalPageTransitionsTheme = PageTransitionsTheme(
   builders: {
     TargetPlatform.android: HorizontalCoverPageTransitionsBuilder(),
@@ -25,6 +23,7 @@ const horizontalPageTransitionsTheme = PageTransitionsTheme(
   },
 );
 
+/// Slides over a stationary predecessor on platforms without Cupertino motion.
 class HorizontalCoverPageTransitionsBuilder extends PageTransitionsBuilder {
   const HorizontalCoverPageTransitionsBuilder();
 
@@ -56,13 +55,62 @@ class HorizontalCoverPageRoute<T> extends MaterialPageRoute<T> {
     required super.builder,
     super.settings,
     super.fullscreenDialog,
+    this.animateEntrance = true,
+    this.cachePageDuringTransition = false,
   });
 
-  @override
-  Duration get transitionDuration => const Duration(milliseconds: 300);
+  final bool animateEntrance;
+  final bool cachePageDuringTransition;
+
+  bool get _usesIosMotion {
+    final context = navigator?.context;
+    return context != null && Theme.of(context).platform == TargetPlatform.iOS;
+  }
+
+  bool get _reduceMotion {
+    final context = navigator?.context;
+    return context != null &&
+        MediaQuery.maybeDisableAnimationsOf(context) == true;
+  }
 
   @override
-  Duration get reverseTransitionDuration => const Duration(milliseconds: 300);
+  Duration get transitionDuration =>
+      !animateEntrance || (_usesIosMotion && _reduceMotion)
+          ? Duration.zero
+          : const Duration(milliseconds: 300);
+
+  @override
+  Duration get reverseTransitionDuration =>
+      _usesIosMotion && _reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 300);
+
+  @override
+  Simulation? createSimulation({required bool forward}) {
+    if (!_usesIosMotion ||
+        _reduceMotion ||
+        fullscreenDialog ||
+        popGestureInProgress ||
+        (forward && (!animateEntrance || isFirst))) {
+      return null;
+    }
+    final start = animation!.value;
+    final end = forward ? 1.0 : 0.0;
+    // The iOS recording's incoming edge follows a critically damped spring
+    // with an immediate start. The recorded return settles more quickly.
+    final spring =
+        forward
+            ? const SpringDescription(mass: 1, stiffness: 441, damping: 42)
+            : const SpringDescription(mass: 1, stiffness: 1600, damping: 80);
+    return SpringSimulation(
+      spring,
+      start,
+      end,
+      (end - start) * (forward ? 9 : 0),
+      tolerance: const Tolerance(distance: .001, velocity: .02),
+      snapToEnd: true,
+    );
+  }
 
   @override
   Widget buildTransitions(
@@ -71,7 +119,10 @@ class HorizontalCoverPageRoute<T> extends MaterialPageRoute<T> {
     Animation<double> secondaryAnimation,
     Widget child,
   ) => (Theme.of(context).platform == TargetPlatform.iOS
-          ? const LiteTaleCupertinoTransitionsBuilder()
+          ? LiteTaleCupertinoTransitionsBuilder(
+            useLinearProgress: !fullscreenDialog,
+            cachePageDuringTransition: cachePageDuringTransition,
+          )
           : const HorizontalCoverPageTransitionsBuilder())
       .buildTransitions(this, context, animation, secondaryAnimation, child);
 }

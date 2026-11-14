@@ -30,6 +30,73 @@ const volumes = [
 
 void main() {
   test(
+    'scroll resume keeps its text position and saves only the current chapter',
+    () async {
+      final saved = <ReadingProgress>[];
+      final queue = ReadingProgressQueue(
+        write: (progress) async => saved.add(progress),
+      );
+      final reader = HtmlReaderCubit(
+        novelInfo: book,
+        initialAid: 'lns:1',
+        initialCid: 'a',
+        initialVolumes: volumes,
+        initialTextOffset: 3,
+        progress: queue,
+        read:
+            ({required aid, required cid}) async =>
+                const SourceChapter('首段\n第二段内容'),
+      );
+      addTearDown(reader.close);
+      await reader.loadChapter();
+      expect((reader.state as HtmlReaderLoaded).initialOffset, 3);
+      await queue.flush();
+      expect(saved.single.characters, 3);
+      expect(saved.single.page, scrollReaderProgressPage);
+      reader.recordVisibleOffset('lns:1', 'a', 5);
+      reader.recordVisibleOffset('lns:1', 'b', 1);
+      await queue.flush();
+      expect(saved.last.chapterId, 'a');
+      expect(saved.last.characters, 5);
+      await reader.goToNextChapter();
+      await queue.flush();
+      expect(saved.last.chapterId, 'b');
+      expect(saved.last.characters, 0);
+    },
+  );
+
+  test(
+    'leaving the iOS entrance does not publish parsed text or history',
+    () async {
+      final arrival = Completer<bool>();
+      final started = Completer<void>();
+      final saved = <ReadingProgress>[];
+      final queue = ReadingProgressQueue(write: (p) async => saved.add(p));
+      final reader = HtmlReaderCubit(
+        novelInfo: book,
+        initialAid: 'lns:1',
+        initialCid: 'a',
+        initialVolumes: volumes,
+        progress: queue,
+        initialRouteArrival: arrival.future,
+        read: ({required aid, required cid}) async {
+          started.complete();
+          return const SourceChapter('正文');
+        },
+      );
+      final load = reader.loadChapter();
+      await started.future;
+      await Future<void>.delayed(Duration.zero);
+      expect(reader.state, isA<HtmlReaderLoading>());
+      arrival.complete(false);
+      await load;
+      expect(reader.state, isA<HtmlReaderLoading>());
+      await queue.flush();
+      expect(saved, isEmpty);
+      await reader.close();
+    },
+  );
+  test(
     'late chapter and font cannot overwrite newest chapter/history',
     () async {
       final a = Completer<SourceChapter>();

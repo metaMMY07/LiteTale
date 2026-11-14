@@ -7,7 +7,7 @@ class BiliBrowserHost extends StatefulWidget {
   const BiliBrowserHost({super.key, required this.child});
   final Widget child;
 
-  static WenkuWebView? takeSearchView(
+  static ({WenkuWebView web, VoidCallback restoreHandlers})? takeSearchView(
     BuildContext context,
     BiliSiteVerificationRequired request,
   ) {
@@ -17,7 +17,7 @@ class BiliBrowserHost extends StatefulWidget {
         !renderer.session.showHeldSearch(request, renderer)) {
       return null;
     }
-    return renderer.web;
+    return (web: renderer.web, restoreHandlers: renderer.restorePageHandlers);
   }
 
   @override
@@ -96,10 +96,9 @@ class _RendererState extends State<_Renderer> implements BiliBrowserPort {
     try {
       await web.initialize(
         onLoaded: () {},
-        onError: (_) => session.navigationFailed(this),
+        onError: _pageError,
         allowMainFrameNavigation: session.allowsRendererNavigation,
-        onNavigationBlocked:
-            () => session.navigationFailed(this, blocked: true),
+        onNavigationBlocked: _pageBlocked,
         normalBrowserUserAgent: true,
         enableVerificationCookies: true,
       );
@@ -115,6 +114,16 @@ class _RendererState extends State<_Renderer> implements BiliBrowserPort {
       }
     }
   }
+
+  void _pageError(String _) => session.navigationFailed(this);
+  void _pageBlocked() => session.navigationFailed(this, blocked: true);
+
+  void restorePageHandlers() => web.setPageHandlers(
+    onLoaded: () {},
+    onError: _pageError,
+    allowMainFrameNavigation: session.allowsRendererNavigation,
+    onNavigationBlocked: _pageBlocked,
+  );
 
   @override
   Future<void> loadUrl(String url) => web.loadUrl(url);

@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wild/models/book_detail_hint.dart';
 import 'package:wild/services/book_cover_preview.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
@@ -10,6 +12,7 @@ import 'package:wild/theme/ios_glass_theme.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/book_cover_image.dart';
 import 'package:wild/widgets/book_details_view.dart';
+import 'package:wild/widgets/cached_image.dart';
 import 'package:wild/widgets/platform_controls.dart';
 import 'support/epub_fixture.dart';
 
@@ -20,6 +23,42 @@ class _Image extends ImageProvider<_Image> {
   @override
   ImageStreamCompleter loadImage(_Image key, ImageDecoderCallback decode) =>
       OneFrameImageStreamCompleter(ready.future);
+}
+
+class _PreviewSpy extends BookCoverPreviewCache {
+  var work = 0;
+
+  @override
+  Future<BookCoverPreview?> fromUrl(String key, String url) async {
+    work++;
+    return null;
+  }
+
+  @override
+  Future<BookCoverPreview?> capture(String key, ui.Image image) async {
+    work++;
+    return null;
+  }
+}
+
+class _LongCatalog extends ListBase<Chapter> {
+  var reads = 0;
+
+  @override
+  int get length => 10000;
+  @override
+  set length(int value) => throw UnsupportedError('read-only catalog');
+
+  @override
+  Chapter operator [](int index) {
+    RangeError.checkValidIndex(index, this);
+    reads++;
+    return Chapter(title: '章节 $index', cid: 'c$index', aid: 'bili:1', url: '');
+  }
+
+  @override
+  void operator []=(int index, Chapter value) =>
+      throw UnsupportedError('read-only catalog');
 }
 
 const info = NovelInfo(
@@ -78,6 +117,122 @@ Widget _cover(
 );
 
 void main() {
+  testWidgets('opening a long volume builds the nearby chapters only', (
+    tester,
+  ) async {
+    final long = _LongCatalog();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: BookDetailsView(
+            info: info,
+            volumes: [
+              volumes.first,
+              Volume(id: 'long', title: '长卷', chapters: long),
+            ],
+            source: SourceId.bili,
+            onRead: (_) {},
+          ),
+        ),
+      ),
+    );
+    final volume = find.byKey(const ValueKey('volume-1'));
+    await tester.ensureVisible(volume);
+    await tester.tap(volume);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('chapter-1-c0')), findsOneWidget);
+    expect(long.reads, lessThan(100));
+  });
+
+  testWidgets(
+    'a ready grid decode serves detail without Android preview work',
+    (tester) async {
+      const url = 'https://example.invalid/open-book.png';
+      final coverCache = _PreviewSpy();
+      final imageCache = PaintingBinding.instance.imageCache;
+      final gridProvider = ResizeImage(
+        CachedImageProvider(url, source: SourceId.bili),
+        width: 320,
+      );
+      final image = await _pixels(tester);
+      final key = await gridProvider.obtainKey(ImageConfiguration.empty);
+      imageCache.putIfAbsent(
+        key,
+        () => OneFrameImageStreamCompleter(
+          SynchronousFuture(ImageInfo(image: image)),
+        ),
+      );
+      addTearDown(() => imageCache.evict(key));
+      coverCache.reveal('bili:${sourceRevision.value}:$url', pixels: 320);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: materialYouTheme(
+            Brightness.light,
+          ).copyWith(platform: TargetPlatform.android),
+          home: Scaffold(
+            body: BookCoverImage(
+              source: SourceId.bili,
+              url: url,
+              width: 112,
+              height: 168,
+              cacheWidth: 128,
+              preferPaintedSize: true,
+              previewCache: coverCache,
+            ),
+          ),
+        ),
+      );
+      final raw = tester.widget<RawImage>(find.byType(RawImage));
+      expect(raw.image, isNotNull);
+      expect(
+        find.byKey(const ValueKey('cover-android-placeholder')),
+        findsNothing,
+      );
+      expect(coverCache.work, 0);
+    },
+  );
+
+  testWidgets('loaded detail updates the same header and cover elements', (
+    tester,
+  ) async {
+    const hint = BookDetailHint(title: '列表标题', coverUrl: '');
+    final ready = ValueNotifier(false);
+    addTearDown(ready.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ValueListenableBuilder<bool>(
+            valueListenable: ready,
+            builder:
+                (context, loaded, _) =>
+                    loaded
+                        ? BookDetailsView(
+                          info: info,
+                          hint: hint,
+                          volumes: volumes,
+                          source: SourceId.bili,
+                          onRead: (_) {},
+                        )
+                        : const BookDetailsView.loading(
+                          source: SourceId.bili,
+                          hint: hint,
+                          loading: Center(child: Text('等待详情')),
+                        ),
+          ),
+        ),
+      ),
+    );
+    final header = tester.state(find.byType(BookDetailsHeader));
+    final cover = tester.element(find.byType(BookCoverImage));
+    expect(find.text('列表标题'), findsOneWidget);
+    ready.value = true;
+    await tester.pump();
+    expect(find.text(info.title), findsOneWidget);
+    expect(find.text('等待详情'), findsNothing);
+    expect(tester.state(find.byType(BookDetailsHeader)), same(header));
+    expect(tester.element(find.byType(BookCoverImage)), same(cover));
+  });
+
   testWidgets(
     'new cover fades in place; a previously displayed memory hit is immediate',
     (tester) async {

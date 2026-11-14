@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wild/pages/search_page.dart';
 import 'package:wild/services/bili_browser.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
@@ -111,6 +112,56 @@ void main() {
     );
     expect(find.byType(OutlinedButton), findsNothing);
   });
+
+  testWidgets(
+    'each search can open a new CAPTCHA and cancellation keeps the query',
+    (tester) async {
+      final navigator = GlobalKey<NavigatorState>();
+      final target = Uri.parse('https://www.bilinovel.net/search.html');
+      var searches = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: navigator,
+          home: SearchPage(
+            initialSearchKey: '新约',
+            historyLoader: () async => [],
+            searcher: ({
+              required searchType,
+              required searchKey,
+              required page,
+            }) async {
+              searches++;
+              throw BiliSiteVerificationRequired(
+                target: target,
+                kind: BiliProbeKind.searchResults,
+                revision: sourceRevision.value,
+                searchChallenge: true,
+                searchEntry: target,
+                searchKeyword: searchKey,
+                searchPage: page,
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('搜索验证'), findsOneWidget);
+      navigator.currentState!.pop(false);
+      await tester.pumpAndSettle();
+      expect(find.text('搜索验证'), findsNothing);
+      expect(find.text('新约'), findsOneWidget);
+      expect(find.text('打开哔哩原站验证'), findsOneWidget);
+      expect(searches, 1);
+      await tester.enterText(find.byType(TextField), '海床');
+      await tester.tap(find.byTooltip('执行搜索'));
+      await tester.pumpAndSettle();
+      expect(find.text('搜索验证'), findsOneWidget);
+      expect(searches, 2);
+      navigator.currentState!.pop(false);
+      await tester.pumpAndSettle();
+      expect(find.text('海床'), findsOneWidget);
+    },
+  );
   testWidgets(
     'partial content offers a reading flow and retries after confirmation',
     (tester) async {

@@ -218,4 +218,49 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ReaderToolbar), findsOneWidget);
   });
+
+  testWidgets(
+    'scroll reader opens a saved chapter at the visible text anchor',
+    (tester) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final old = api.bookSources[SourceId.lnovel]!;
+      final lines = List.generate(110, (index) => '第 $index 段，滚动阅读测试。');
+      api.bookSources[SourceId.lnovel] = _ReaderTapSource(lines.join('\n'));
+      addTearDown(() => api.bookSources[SourceId.lnovel] = old);
+      const aid = 'lnv:scroll-resume-fixture', cid = 'a';
+      final offset = lines
+          .take(60)
+          .fold(0, (count, line) => count + line.length + 1);
+      await tester.pumpWidget(
+        providers(
+          BlocProvider(
+            create: (_) => FontSettingsCubit(),
+            child: MaterialApp(
+              home: HtmlReaderPage(
+                initialAid: aid,
+                initialCid: cid,
+                initialTextOffset: offset,
+                novelInfo: info,
+                volumes: const [
+                  Volume(
+                    id: 'v',
+                    title: '卷',
+                    chapters: [
+                      Chapter(aid: aid, cid: cid, title: '正文', url: ''),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text(lines[0]), findsNothing);
+      expect(find.text(lines[60]).hitTestable(), findsOneWidget);
+      expect(tester.getTopLeft(find.text(lines[60])).dy, lessThan(180));
+    },
+  );
 }

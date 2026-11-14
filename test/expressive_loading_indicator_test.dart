@@ -38,6 +38,30 @@ Future<void> saveIndicatorPreview(WidgetTester tester, String name) async {
 }
 
 void main() {
+  testWidgets(
+    'iOS uses a thicker ring at full-page and inline sizes',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [AppLoadingIndicator(), AppLoadingIndicator(size: 24)],
+            ),
+          ),
+        ),
+      );
+      expect(
+        tester
+            .widgetList<CircularProgressIndicator>(
+              find.byType(CircularProgressIndicator),
+            )
+            .map((indicator) => indicator.strokeWidth),
+        [3.5, 2.5],
+      );
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
   testWidgets('ordinary spinner rotates inside its own paint boundary', (
     tester,
   ) async {

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:wild/theme/ios_page_arrival.dart';
 
 typedef AppleReaderChange =
     Future<Map<String, Object?>> Function(Map<Object?, Object?> event);
@@ -14,13 +15,20 @@ class AppleReaderPanel {
   static int _nextId = 0;
   static final _routes = <int, _AppleReaderRoute>{};
   static Future<bool>? _support;
+  static bool? _supported;
   static bool _listening = false;
 
+  static bool? get knownSupport => _supported;
+
   static Future<bool> get available {
-    if (kIsWeb || !Platform.isIOS) return SynchronousFuture(false);
+    if (kIsWeb || !Platform.isIOS) return SynchronousFuture(_supported = false);
     return _support ??= channel
         .invokeMethod<bool>('supported')
-        .then((v) => v == true, onError: (Object _) => false);
+        .timeout(const Duration(seconds: 1))
+        .then(
+          (v) => _supported = v == true,
+          onError: (Object _) => _supported = false,
+        );
   }
 
   static Future<Map<Object?, Object?>?> show(
@@ -148,6 +156,7 @@ class AppleReaderSettingsView extends StatefulWidget {
 
 class _AppleReaderSettingsViewState extends State<AppleReaderSettingsView> {
   MethodChannel? _channel;
+  bool _acceptChanges = false;
   @override
   void didUpdateWidget(covariant AppleReaderSettingsView oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -166,25 +175,31 @@ class _AppleReaderSettingsViewState extends State<AppleReaderSettingsView> {
 
   @override
   Widget build(BuildContext context) {
-    if (ModalRoute.of(context)?.isCurrent == false)
-      return const SizedBox.shrink();
-    return UiKitView(
-      viewType: 'litetale/reader_settings',
-      creationParams: widget.configuration(),
-      creationParamsCodec: const StandardMessageCodec(),
-      onPlatformViewCreated: (id) {
-        _channel?.setMethodCallHandler(null);
-        final channel = MethodChannel('litetale/reader_settings/$id');
-        _channel = channel;
-        channel.setMethodCallHandler((call) async {
-          if (!mounted || ModalRoute.of(context)?.isCurrent == false)
-            return null;
-          if (call.method != 'change' || call.arguments is! Map) return null;
-          return widget.onChange(
-            Map<Object?, Object?>.from(call.arguments as Map),
-          );
-        });
-      },
+    final route = ModalRoute.of(context);
+    final atRest = IosPageArrival.chromeAtRestOf(context);
+    final onstage = TickerMode.of(context) && route?.offstage != true;
+    _acceptChanges = onstage && atRest && route?.isCurrent != false;
+    return Offstage(
+      offstage: !onstage,
+      child: IgnorePointer(ignoring: !_acceptChanges, child: _buildForm()),
     );
   }
+
+  Widget _buildForm() => UiKitView(
+    viewType: 'litetale/reader_settings',
+    creationParams: widget.configuration(),
+    creationParamsCodec: const StandardMessageCodec(),
+    onPlatformViewCreated: (id) {
+      _channel?.setMethodCallHandler(null);
+      final channel = MethodChannel('litetale/reader_settings/$id');
+      _channel = channel;
+      channel.setMethodCallHandler((call) async {
+        if (!mounted || !_acceptChanges) return null;
+        if (call.method != 'change' || call.arguments is! Map) return null;
+        return widget.onChange(
+          Map<Object?, Object?>.from(call.arguments as Map),
+        );
+      });
+    },
+  );
 }

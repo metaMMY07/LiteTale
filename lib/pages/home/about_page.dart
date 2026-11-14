@@ -1,8 +1,8 @@
 import 'package:wild/widgets/platform_controls.dart';
-import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:wild/settings/settings_widgets.dart';
 import 'package:wild/utils/app_info.dart';
 import 'package:wild/pages/update_cubit.dart';
 import 'package:wild/widgets/left_aligned_scrollable.dart';
@@ -23,7 +23,7 @@ class AboutPage extends StatelessWidget {
     return BlocBuilder<UpdateCubit, UpdateState>(
       builder: (context, state) {
         return Scaffold(
-          appBar: AppBar(title: const Text('关于')),
+          appBar: settingsAppBar(context, '关于'),
           body: LeftAlignedScrollView(
             topInset: 16,
             bottomInset: 16,
@@ -93,7 +93,7 @@ class AboutPage extends StatelessWidget {
                   ),
                 const SizedBox(height: 32),
                 // 其他信息
-                AppleGlassCard(
+                SettingsCard(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Column(

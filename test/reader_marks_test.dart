@@ -2,21 +2,44 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wild/cubits/font_settings_cubit.dart';
 import 'package:wild/models/reader_mark.dart';
 import 'package:wild/models/reader_page.dart';
 import 'package:wild/pages/novel/reader_cubit.dart';
+import 'package:wild/pages/novel/reader_page.dart' as reader;
 import 'package:wild/services/reader_mark_store.dart';
 import 'package:wild/services/reading_progress.dart';
 import 'package:wild/sources/book_source.dart';
+import 'package:wild/sources/source_api.dart' as api;
+import 'package:wild/src/rust/wenku8/models.dart';
+import 'package:wild/theme/ios_glass_theme.dart';
+import 'package:wild/widgets/reader_cover_view.dart';
 import 'package:wild/widgets/reader_mark_selection.dart';
 import 'package:wild/widgets/reader_marks_panel.dart';
 import 'package:wild/widgets/reader_css_marks.dart';
 
 import 'paginated_reader_requests_test.dart' as fixture;
+import 'reader_controls_test.dart' show providers;
 
 const _chapter = (aid: 'lns:1', cid: 'a');
 const _location = ReaderMarkLocation(_chapter, '甲', ReaderMarkAxis.text, 6);
+
+class _MarkSource implements BookSource {
+  const _MarkSource(this.firstChapter, this.secondChapter);
+  final String firstChapter, secondChapter;
+
+  @override
+  SourceId get id => SourceId.lnovel;
+
+  @override
+  Future<SourceChapter> chapter(String bookId, String chapterId) async =>
+      SourceChapter(chapterId == 'a' ? firstChapter : secondChapter);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -33,12 +56,13 @@ void main() {
     );
     final first = open();
     await Future.wait([
-      first.addBookmark('lns:1', _location),
+      first.addBookmark('lns:1', _location, pageNumber: 3),
       first.saveHighlight(
         'lns:1',
         _location,
         quote: 'beta',
         color: ReaderMarkColor.green,
+        pageNumber: 4,
       ),
       first.saveHighlight(
         'lns:1',
@@ -54,7 +78,11 @@ void main() {
     final mark = second.marks('lns:1').singleWhere((m) => !m.isBookmark);
     expect(mark.color, ReaderMarkColor.pink);
     expect(mark.note, '笔记');
-    expect(second.marks('lns:1').where((m) => m.isBookmark), hasLength(1));
+    expect(mark.pageNumber, 4);
+    expect(
+      second.marks('lns:1').singleWhere((m) => m.isBookmark).pageNumber,
+      3,
+    );
     expect(second.marks('lns:2'), isEmpty);
     failWrite = true;
     await expectLater(second.remove('lns:1', mark.id), throwsStateError);
@@ -114,8 +142,134 @@ void main() {
     expect(page.markStart, lessThanOrEqualTo(text.indexOf(quote)));
     expect(page.markEnd, greaterThan(text.indexOf(quote)));
     expect(after.pages.length, isNot(before.pages.length));
+    expect(cubit.savedMarkPageNumber(marked), after.currentPageIndex + 1);
     await cubit.close();
   });
+
+  testWidgets(
+    'iOS reader lists saved marks with their chapter and page and opens them',
+    (tester) async {
+      tester.view.physicalSize = const Size(402, 874);
+      tester.view.devicePixelRatio = 1;
+      tester.view.padding = const FakeViewPadding(top: 60, bottom: 34);
+      addTearDown(tester.view.reset);
+
+      const aid = 'lnv:marks-panel-fixture';
+      const quote = 'A unique passage to highlight.';
+      final text = '${'Lines before the marked passage.\n' * 60}$quote';
+      final secondText = 'Second chapter opening.\n' * 35;
+      final oldSource = api.bookSources[SourceId.lnovel]!;
+      api.bookSources[SourceId.lnovel] = _MarkSource(text, secondText);
+      addTearDown(() => api.bookSources[SourceId.lnovel] = oldSource);
+
+      final memory = <String, String>{};
+      ReaderMarkStore openStore() => ReaderMarkStore(
+        read: (key) async => memory[key] ?? '',
+        write: (key, value) async => memory[key] = value,
+      );
+      final seed = openStore();
+      await seed.saveHighlight(
+        aid,
+        ReaderMarkLocation(
+          (aid: aid, cid: 'a'),
+          '甲章',
+          ReaderMarkAxis.text,
+          text.indexOf(quote),
+        ),
+        quote: quote,
+        note: '原有高亮笔记',
+        color: ReaderMarkColor.green,
+      );
+      await seed.addBookmark(
+        aid,
+        const ReaderMarkLocation(
+          (aid: aid, cid: 'b'),
+          '乙章',
+          ReaderMarkAxis.text,
+          0,
+        ),
+        quote: 'Second chapter opening.',
+        pageNumber: 1,
+      );
+      seed.dispose();
+      final store = openStore();
+      addTearDown(store.dispose);
+      await tester.pumpWidget(
+        providers(
+          BlocProvider(
+            create: (_) => FontSettingsCubit(),
+            child: MaterialApp(
+              theme: iosGlassTheme(Brightness.light),
+              home: reader.ReaderPage(
+                aid: aid,
+                cid: 'a',
+                initialTitle: '甲章',
+                novelInfo: fixture.info,
+                markStore: store,
+                volumes: const [
+                  Volume(
+                    id: 'v',
+                    title: '卷',
+                    chapters: [
+                      Chapter(aid: aid, cid: 'a', title: '甲章', url: ''),
+                      Chapter(aid: aid, cid: 'b', title: '乙章', url: ''),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final cubit =
+          tester.element(find.byType(ReaderCoverView)).read<ReaderCubit>();
+      final highlight = store
+          .marks(aid)
+          .singleWhere((mark) => !mark.isBookmark);
+      final targetPage = cubit.savedMarkPageNumber(highlight)!;
+      expect(targetPage, greaterThan(1));
+      if (!cubit.state.showControls) cubit.toggleControls();
+      await tester.pumpAndSettle();
+
+      Future<void> openPanel() async {
+        await tester.tap(find.byKey(const ValueKey('reader-settings')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('reader-settings-marks')));
+        await tester.pumpAndSettle();
+      }
+
+      await openPanel();
+      expect(find.text('乙章').hitTestable(), findsOneWidget);
+      expect(find.text('保存时第 1 页').hitTestable(), findsOneWidget);
+      await tester.tap(find.text('添加当前位置书签'));
+      await tester.pumpAndSettle();
+      expect(find.text('移除当前位置书签').hitTestable(), findsOneWidget);
+      expect(find.text('第 1 页').hitTestable(), findsOneWidget);
+      expect(store.marks(aid).first.pageNumber, 1);
+
+      await tester.tap(find.text('高亮'));
+      await tester.pumpAndSettle();
+      final highlightRow = find.byKey(ValueKey(highlight.id));
+      expect(
+        find.descendant(of: highlightRow, matching: find.text('甲章')),
+        findsOneWidget,
+      );
+      expect(find.text('原有高亮笔记').hitTestable(), findsOneWidget);
+      expect(find.text('第 $targetPage 页').hitTestable(), findsOneWidget);
+      await tester.tap(find.text(quote));
+      await tester.pumpAndSettle();
+      expect((cubit.state as ReaderLoaded).currentPageIndex, targetPage - 1);
+
+      await openPanel();
+      await tester.tap(find.text('乙章'));
+      await tester.pumpAndSettle();
+      expect((cubit.state as ReaderLoaded).cid, 'b');
+      expect((cubit.state as ReaderLoaded).currentPageIndex, 0);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
 
   testWidgets(
     'a saved highlight reopens its full range and can be removed in place',
@@ -178,7 +332,10 @@ void main() {
                         ),
                       ),
                       Positioned.fill(
-                        child: ReaderMarkLayer(selection: selection),
+                        child: ReaderMarkLayer(
+                          selection: selection,
+                          pageNumberAt: (_) => 4,
+                        ),
                       ),
                     ],
                   ),
@@ -231,6 +388,7 @@ void main() {
       await tester.tap(find.byTooltip('粉色'));
       await tester.pumpAndSettle();
       expect(store.marks('lns:1').single.color, ReaderMarkColor.pink);
+      expect(store.marks('lns:1').single.pageNumber, 4);
       expect(find.text('移除'), findsOneWidget);
       selection.clear();
       await tester.pumpAndSettle();

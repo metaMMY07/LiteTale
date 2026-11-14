@@ -166,6 +166,7 @@ void main() {
           RegExp(r'本章 (\d+)/(\d+)').firstMatch(cubit.footerPageLabel)!;
       expect(numbers.group(1), '41');
       expect(int.parse(numbers.group(2)!), greaterThan(state.pages.length));
+      expect(cubit.markPageNumber(cubit.markLocation(state)), 41);
       cubit.onPageChanged(state.currentPageIndex + 1);
       expect(cubit.footerPageLabel, startsWith('本章 42/'));
       await cubit.close();

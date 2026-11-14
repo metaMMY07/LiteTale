@@ -54,7 +54,7 @@ class _ThemePaperPageState extends State<ThemePaperPage> {
             ? background.getDarkBackgroundPath()
             : background.getLightBackgroundPath();
     return Scaffold(
-      appBar: AppBar(title: const Text('主题与纸张')),
+      appBar: settingsAppBar(context, '主题与纸张'),
       body: LeftAlignedScrollView(
         bottomInset: 28,
         child: Column(

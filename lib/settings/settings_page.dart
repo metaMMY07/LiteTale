@@ -37,7 +37,7 @@ class SettingsPage extends StatelessWidget {
 
     if (appearanceOnly) {
       return Scaffold(
-        appBar: AppBar(title: const Text('外观')),
+        appBar: settingsAppBar(context, '外观'),
         body: LeftAlignedScrollView(
           bottomInset: 28,
           child: IosSettingsSection(

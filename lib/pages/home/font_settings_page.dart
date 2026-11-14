@@ -1,9 +1,9 @@
 import 'package:wild/widgets/platform_controls.dart';
-import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
 import 'package:wild/services/imported_fonts.dart';
+import 'package:wild/settings/settings_widgets.dart';
 import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/widgets/left_aligned_scrollable.dart';
 
@@ -39,7 +39,7 @@ class FontSettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('字体设置')),
+    appBar: settingsAppBar(context, '字体设置'),
     body: BlocBuilder<FontSettingsCubit, FontSettingsState>(
       builder: (context, state) {
         final colors = Theme.of(context).colorScheme;
@@ -67,7 +67,8 @@ class FontSettingsPage extends StatelessWidget {
               ],
               for (final scope in FontScope.values) ...[
                 const SizedBox(height: 20),
-                AppleGlassCard.filled(
+                SettingsCard(
+                  filled: true,
                   margin: EdgeInsets.zero,
                   child: Padding(
                     padding: const EdgeInsets.all(20),

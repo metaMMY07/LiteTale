@@ -135,14 +135,14 @@ void main() {
   });
   test('real next search link is associated with its query', () async {
     final p =
-        _Port()..next = 'https://www.linovelib.com/S6/?page=2&searchkey=sea';
+        _Port()..next = 'https://www.bilinovel.net/S6/?page=2&searchkey=sea';
     final s = session(p);
     expect((await s.search('sea', 1)).maxPage, 2);
     p.next = null;
     expect((await s.search('sea', 2)).currentPage, 2);
     expect(
       p.urls,
-      contains('https://www.linovelib.com/S6/?page=2&searchkey=sea'),
+      contains('https://www.bilinovel.net/S6/?page=2&searchkey=sea'),
     );
     await expectLater(
       s.search('different', 2),
@@ -589,7 +589,7 @@ class _Port implements BiliBrowserPort {
       };
     }
     submitted = true;
-    current = 'https://www.linovelib.com/novel/2844.html';
+    current = '${Uri.parse(current).origin}/novel/2844.html';
     return true;
   }
 }

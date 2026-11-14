@@ -108,7 +108,7 @@ class _SearchPageState extends State<SearchPage> {
 
   void _releaseSearchChallenge() {
     final error = _error;
-    if (error is BiliSiteVerificationRequired && error.searchChallenge) {
+    if (error is BiliSiteVerificationRequired && error.isSearchVerification) {
       BiliBrowserSession.instance.releaseHeldSearch(error, unclaimedOnly: true);
     }
   }
@@ -182,7 +182,7 @@ class _SearchPageState extends State<SearchPage> {
       _loadHistories();
     } catch (e) {
       if (!mounted || request != _request) {
-        if (e is BiliSiteVerificationRequired && e.searchChallenge) {
+        if (e is BiliSiteVerificationRequired && e.isSearchVerification) {
           BiliBrowserSession.instance.releaseHeldSearch(e, unclaimedOnly: true);
         }
         return;
@@ -193,7 +193,8 @@ class _SearchPageState extends State<SearchPage> {
       });
       if (openSearchVerification &&
           e is BiliSiteVerificationRequired &&
-          e.searchChallenge &&
+          e.isSearchVerification &&
+          e.searchKeyword == key &&
           ModalRoute.of(context)?.isCurrent == true) {
         final verified = await openBiliVerification(
           context,

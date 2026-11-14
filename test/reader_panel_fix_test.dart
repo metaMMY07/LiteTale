@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
 import 'package:wild/widgets/apple_reader_panel.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/book_details_view.dart';
 import 'package:wild/widgets/reader_chapter_sheet.dart';
 import 'package:wild/widgets/reader_settings_binding.dart';
@@ -191,6 +193,8 @@ void main() {
     );
     await tester.pump();
     final frame = tester.getRect(find.byKey(const ValueKey('detail-bookmark')));
+    final readButton = find.byKey(const ValueKey('detail-read'));
+    final read = tester.getRect(readButton);
     final icon = tester.getRect(
       find.descendant(
         of: find.byKey(const ValueKey('detail-bookmark')),
@@ -199,6 +203,25 @@ void main() {
     );
     expect((frame.center - icon.center).distance, lessThan(.01));
     expect(frame.size, const Size(56, 56));
+    expect(read.top, frame.top);
+    expect(read.bottom, frame.bottom);
+    final glass = tester.widget<AppleGlassSurface>(
+      find.descendant(of: readButton, matching: find.byType(AppleGlassSurface)),
+    );
+    expect(glass.tint, isNull);
+    final play = tester.getRect(
+      find.descendant(
+        of: readButton,
+        matching: find.byIcon(CupertinoIcons.play_fill),
+      ),
+    );
+    expect(play.center.dy, closeTo(read.center.dy, .01));
+    expect(
+      tester.getRect(
+        find.descendant(of: readButton, matching: find.byType(CupertinoButton)),
+      ),
+      read,
+    );
     expect(find.text('书评'), findsNothing);
     expect(tester.takeException(), null);
     debugDefaultTargetPlatformOverride = null;

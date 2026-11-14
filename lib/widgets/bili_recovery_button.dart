@@ -7,6 +7,7 @@ import 'package:wild/sources/book_source.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'bili_browser_host.dart';
 import 'bili_verification_page.dart';
+import 'wenku_webview.dart';
 
 Future<bool> openBiliVerification(
   BuildContext context,
@@ -19,21 +20,32 @@ Future<bool> openBiliVerification(
     return false;
   }
   final session = BiliBrowserSession.instance;
+  final search = request.isSearchVerification;
+  ({WenkuWebView web, VoidCallback restoreHandlers})? searchView;
+  var verified = false;
   try {
-    final searchView =
-        request.searchChallenge
-            ? BiliBrowserHost.takeSearchView(context, request)
-            : null;
+    if (search) {
+      searchView = BiliBrowserHost.takeSearchView(context, request);
+    }
     final page = HorizontalCoverPageRoute<bool>(
       fullscreenDialog: true,
       builder:
-          (_) => BiliVerificationPage(request: request, searchView: searchView),
+          (_) => BiliVerificationPage(
+            request: request,
+            searchView: searchView?.web,
+          ),
     );
     final result = await Navigator.of(context).push(page);
     await page.completed;
-    return result == true;
+    verified = result == true;
+    return verified;
   } finally {
-    if (request.searchChallenge) session.releaseHeldSearch(request);
+    if (search) {
+      if (verified) searchView?.restoreHandlers();
+      final returningView = verified && searchView != null;
+      session.releaseHeldSearch(request, verified: returningView);
+      if (returningView) await WidgetsBinding.instance.endOfFrame;
+    }
   }
 }
 

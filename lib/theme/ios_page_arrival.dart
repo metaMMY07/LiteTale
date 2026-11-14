@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/theme/ios_dock_insets.dart';
 
@@ -7,7 +8,13 @@ import 'package:wild/theme/ios_dock_insets.dart';
 /// settled frame to work that should not compete with the entrance.
 class LiteTaleCupertinoTransitionsBuilder
     extends CupertinoPageTransitionsBuilder {
-  const LiteTaleCupertinoTransitionsBuilder();
+  const LiteTaleCupertinoTransitionsBuilder({
+    this.useLinearProgress = false,
+    this.cachePageDuringTransition = false,
+  });
+
+  final bool useLinearProgress;
+  final bool cachePageDuringTransition;
 
   @override
   Widget buildTransitions<T>(
@@ -16,19 +23,112 @@ class LiteTaleCupertinoTransitionsBuilder
     Animation<double> animation,
     Animation<double> secondaryAnimation,
     Widget child,
-  ) => super.buildTransitions(
-    route,
-    context,
-    animation,
-    secondaryAnimation,
-    _IosPageArrival(
+  ) {
+    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) == true;
+    // Delegated transitions can pass an idle animation while the page above
+    // is moving. Observe the actual route to track visibility.
+    final secondary = route.secondaryAnimation ?? secondaryAnimation;
+    final content = _IosPageArrival(
       route: route,
       animation: animation,
-      // A delegated Cupertino transition may supply an idle animation to
-      // buildTransitions even while the page above is moving.
-      secondary: route.secondaryAnimation ?? secondaryAnimation,
-      child: IosDockInsets.applyToPage(context, route, child),
-    ),
+      secondary: secondary,
+      child: IosDockInsets.applyToPage(
+        context,
+        route,
+        cachePageDuringTransition && route.allowSnapshotting && !reduceMotion
+            ? _IosPageSnapshot(
+              primary: animation,
+              secondary: secondary,
+              child: child,
+            )
+            : child,
+      ),
+    );
+    if (reduceMotion && !useLinearProgress) return content;
+
+    final transition = super.buildTransitions(
+      route,
+      context,
+      animation,
+      secondaryAnimation,
+      content,
+    );
+    if (!useLinearProgress || transition is! CupertinoPageTransition) {
+      return transition;
+    }
+    // Reuse Flutter's edge recognizer and hand the two pages the same progress
+    // from the route spring, including while a back swipe is tracking a finger.
+    return CupertinoPageTransition(
+      primaryRouteAnimation: animation,
+      secondaryRouteAnimation: secondaryAnimation,
+      linearTransition: true,
+      child: transition.child,
+    );
+  }
+}
+
+/// Cache the departing Flutter page. Incoming content and native controls
+/// continue to draw live, so the transition cannot show stale glass or forms.
+class _IosPageSnapshot extends StatefulWidget {
+  const _IosPageSnapshot({
+    required this.primary,
+    required this.secondary,
+    required this.child,
+  });
+
+  final Animation<double> primary, secondary;
+  final Widget child;
+
+  @override
+  State<_IosPageSnapshot> createState() => _IosPageSnapshotState();
+}
+
+class _IosPageSnapshotState extends State<_IosPageSnapshot> {
+  final _snapshot = SnapshotController();
+
+  void _update(AnimationStatus _) {
+    _snapshot.allowSnapshotting =
+        widget.primary.status == AnimationStatus.reverse ||
+        (widget.primary.isCompleted &&
+            widget.secondary.status == AnimationStatus.forward);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.primary.addStatusListener(_update);
+    widget.secondary.addStatusListener(_update);
+    _update(widget.primary.status);
+  }
+
+  @override
+  void didUpdateWidget(covariant _IosPageSnapshot oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.primary != widget.primary) {
+      oldWidget.primary.removeStatusListener(_update);
+      widget.primary.addStatusListener(_update);
+    }
+    if (oldWidget.secondary != widget.secondary) {
+      oldWidget.secondary.removeStatusListener(_update);
+      widget.secondary.addStatusListener(_update);
+    }
+    _update(widget.primary.status);
+  }
+
+  @override
+  void dispose() {
+    widget.primary.removeStatusListener(_update);
+    widget.secondary.removeStatusListener(_update);
+    _snapshot.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SnapshotWidget(
+    controller: _snapshot,
+    mode: SnapshotMode.permissive,
+    autoresize: true,
+    child: widget.child,
   );
 }
 

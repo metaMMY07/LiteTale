@@ -7,7 +7,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/settings/reading_statistics.dart';
 import 'package:wild/settings/settings_widgets.dart';
 import 'package:wild/sources/book_source.dart';
-import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/widgets/left_aligned_scrollable.dart';
 
@@ -37,8 +36,9 @@ class _ReadingStatisticsPageState extends State<ReadingStatisticsPage> {
         final cubit = context.read<ReadingStatisticsCubit>();
         final snapshot = cubit.snapshot(source: _source);
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('阅读统计'),
+          appBar: settingsAppBar(
+            context,
+            '阅读统计',
             actions: [
               AppPopupMenuButton<SourceId>(
                 tooltip: '选择统计书源',
@@ -65,13 +65,11 @@ class _ReadingStatisticsPageState extends State<ReadingStatisticsPage> {
                     onSelectDate:
                         (date) => setState(() => _selectedDate = date),
                     onOpenDetails:
-                        () => Navigator.of(context).push<void>(
-                          HorizontalCoverPageRoute<void>(
-                            builder:
-                                (_) => ReadingStatisticsDetailPage(
-                                  date: _selectedDate,
-                                  source: _source,
-                                ),
+                        () => openSettingsPage(
+                          context,
+                          ReadingStatisticsDetailPage(
+                            date: _selectedDate,
+                            source: _source,
                           ),
                         ),
                     warning: state.warning,
@@ -290,7 +288,7 @@ class _ReadingStatisticsDetailPageState
           _StatisticsPeriod.months => '本年各月',
         };
         return Scaffold(
-          appBar: AppBar(title: const Text('阅读趋势')),
+          appBar: settingsAppBar(context, '阅读趋势'),
           body: LeftAlignedScrollView(
             topInset: 8,
             bottomInset: 24,
@@ -378,8 +376,8 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final empty = snapshot.isEmpty;
-    return AppleGlassCard(
-      color: colors.secondaryContainer,
+    return SettingsCard(
+      color: usesAppleGlass ? null : colors.secondaryContainer,
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: LayoutBuilder(
@@ -476,8 +474,11 @@ class _SectionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final colors = Theme.of(context).colorScheme;
-    return AppleGlassCard(
-      color: settingsSurfaceLayer(colors, colors.surfaceContainerLow, .04),
+    return SettingsCard(
+      color:
+          usesAppleGlass
+              ? null
+              : settingsSurfaceLayer(colors, colors.surfaceContainerLow, .04),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -512,7 +513,7 @@ class _NoticeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return AppleGlassCard(
+    return SettingsCard(
       color: colors.errorContainer,
       child: Padding(
         padding: const EdgeInsets.all(14),

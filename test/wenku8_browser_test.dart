@@ -1145,9 +1145,38 @@ void main() {
         harness.port.redirects[rankUrl] = '$_host/book/101.htm';
         await expectLater(
           harness.session.read<PageStatsNovelCover>('list', Uri.parse(rankUrl)),
-          throwsFormatException,
+          throwsA(isA<Wenku8BrowserException>()),
         );
         harness.session.dispose();
+      },
+    );
+
+    test(
+      'catalog waits for the real first page after canonical redirect',
+      () async {
+        final harness = _Harness(autoFinish: false);
+        addTearDown(harness.session.dispose);
+        const request =
+            '$_host/modules/article/toplist.php?sort=lastupdate&page=1&charset=gbk';
+        const canonical = '$_host/modules/article/toplist.php?sort=lastupdate';
+        harness.port.redirects[request] = canonical;
+        harness.port.states[request] = {
+          ..._page(canonical, ready: false),
+          'domReady': true,
+        };
+        harness.port.readResults[canonical] = listing(canonical, 1);
+        final result = harness.session.read<PageStatsNovelCover>(
+          'list',
+          Uri.parse(request),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 12));
+        expect(harness.port.readExtractions, 0);
+        harness.port.finish(
+          pageState: {..._page(canonical, ready: false), 'catalogReady': true},
+        );
+        expect((await result).currentPage, 1);
+        expect(harness.port.targetLoads, [request]);
+        expect(harness.port.readExtractions, 1);
       },
     );
 
@@ -1538,6 +1567,94 @@ void main() {
         );
         expect(harness.port.readExtractions, 0);
         expect(harness.properties['litetale.wenku8.browser_host'], isNull);
+      },
+    );
+
+    test(
+      'catalog challenges retain the requested page and hard blocks do not',
+      () async {
+        final harness = _Harness();
+        addTearDown(harness.session.dispose);
+        const url =
+            '$_host/modules/article/toplist.php?sort=lastupdate&page=2&charset=gbk';
+        final target = Uri.parse(url);
+        harness.port.states[url] = {..._page(url), 'challenge': true};
+        await expectLater(
+          harness.session.read<PageStatsNovelCover>('list', target),
+          throwsA(
+            isA<Wenku8SiteVerificationRequired>().having(
+              (error) => error.target,
+              'target',
+              target,
+            ),
+          ),
+        );
+
+        harness.port.states[url] = {..._page(url), 'accessDenied': true};
+        await expectLater(
+          harness.session.read<PageStatsNovelCover>('list', target),
+          throwsA(isA<Wenku8SiteAccessDenied>()),
+        );
+        expect(harness.properties['litetale.wenku8.browser_host'], isNull);
+      },
+    );
+
+    test(
+      'guest can return from the verified catalog page they requested',
+      () async {
+        final harness = _Harness();
+        addTearDown(harness.session.dispose);
+        final target = Uri.parse(
+          '$_host/modules/article/tags.php?t=%B6%AF%BB%AD&v=0&page=2&charset=gbk',
+        );
+        final page =
+            '$_host/modules/article/tags.php?page=2&v=0&t=%B6%AF%BB%AD';
+        var persisted = 0;
+        await expectLater(
+          harness.session.adoptVisiblePage(_host, {
+            ..._page(page.replaceFirst('page=2', 'page=3')),
+            'catalogReady': true,
+          }, target: target),
+          throwsA(isA<Wenku8BrowserException>()),
+        );
+        final signedIn = await harness.session.adoptVisiblePage(
+          _host,
+          {..._page(page), 'catalogReady': true},
+          target: target,
+          persistSession: () async {
+            persisted++;
+          },
+        );
+        expect(signedIn, isFalse);
+        expect(persisted, 1);
+        expect(await harness.session.enabled(), isTrue);
+      },
+    );
+
+    test(
+      'catalog reports a marked challenge without a second background load',
+      () async {
+        final harness = _Harness(
+          supportDocuments: true,
+          supportColdDocuments: true,
+        );
+        addTearDown(harness.session.dispose);
+        final target = Uri.parse(
+          '$_host/modules/article/toplist.php?sort=lastupdate&page=1&charset=gbk',
+        );
+        harness.port.documentState = {'status': 403, 'challenge': true};
+        await expectLater(
+          harness.session.read<PageStatsNovelCover>('list', target),
+          throwsA(
+            isA<Wenku8SiteVerificationRequired>().having(
+              (error) => error.target,
+              'target',
+              target,
+            ),
+          ),
+        );
+        expect(harness.port.documentReads, ['$target']);
+        expect(harness.port.targetLoads, isEmpty);
       },
     );
 

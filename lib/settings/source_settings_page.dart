@@ -13,7 +13,7 @@ class SourceSettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('书源与账号')),
+    appBar: settingsAppBar(context, '书源与账号'),
     body: LeftAlignedCustomScrollView(
       bottomInset: 28,
       slivers: [
@@ -44,7 +44,7 @@ class CacheSettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('缓存')),
+    appBar: settingsAppBar(context, '缓存'),
     body: LeftAlignedScrollView(
       bottomInset: 24,
       child: IosSettingsSection(

@@ -8,6 +8,47 @@ import 'package:wild/sources/rule_source_registry.dart';
 import 'support/huanmeng_source.dart';
 
 void main() {
+  testWidgets('opening source management only mounts nearby rules', (
+    tester,
+  ) async {
+    final raw =
+        jsonDecode(File('assets/book_sources/bundled.json').readAsStringSync())
+            as List;
+    final template = Map<String, dynamic>.from(raw.first as Map);
+    final source = Map<String, dynamic>.from(template['source'] as Map);
+    final registry = RuleSourceRegistry(read: () async => '');
+    addTearDown(registry.dispose);
+    await registry.load(
+      builtIns: List.generate(
+        100,
+        (index) => {
+          ...template,
+          'source': {...source, 'id': 'fixture_$index', 'name': '导入书源 $index'},
+        },
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomScrollView(
+            slivers: [RuleSourceManager(registry: registry)],
+          ),
+        ),
+      ),
+    );
+
+    final first = find.text('导入书源 0');
+    final last = find.text('导入书源 99');
+    expect(first, findsOneWidget);
+    expect(last, findsNothing);
+    expect(find.textContaining('导入书源 ').evaluate().length, lessThan(20));
+
+    await tester.scrollUntilVisible(last, 800);
+    await tester.pumpAndSettle();
+    expect(last.hitTestable(), findsOneWidget);
+    expect(first, findsNothing);
+  });
+
   testWidgets('Android paste imports the rule once and skips a repeat', (
     tester,
   ) async {
@@ -21,8 +62,8 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: SingleChildScrollView(
-            child: RuleSourceManager(registry: registry),
+          body: CustomScrollView(
+            slivers: [RuleSourceManager(registry: registry)],
           ),
         ),
       ),

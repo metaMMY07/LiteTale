@@ -5,11 +5,100 @@ import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/widgets/novel_cover_card.dart';
+import 'package:wild/widgets/book_card_ink.dart';
+import 'package:wild/widgets/material_control_motion.dart';
 
 void main() {
   testWidgets(
+    'Android reader motion keeps the tap target and does not delay actions',
+    (tester) async {
+      var actions = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: materialYouTheme(Brightness.dark),
+          home: Scaffold(
+            body: Center(
+              child: SizedBox.square(
+                dimension: 48,
+                child: MaterialReaderMotionButton(
+                  motion: MaterialReaderMotion.settings,
+                  label: '阅读设置',
+                  onPressed: () => actions++,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      final button = find.byTooltip('阅读设置');
+      final bounds = tester.getRect(button);
+      final gesture = await tester.startGesture(bounds.center);
+      await tester.pump(const Duration(milliseconds: 120));
+      await tester.pump(const Duration(milliseconds: 40));
+      expect(tester.getRect(button), bounds);
+      await gesture.cancel();
+      await tester.pumpAndSettle();
+      expect(actions, 0);
+      await tester.tap(button);
+      expect(actions, 1);
+      await tester.pump(const Duration(milliseconds: 25));
+      await tester.tap(button);
+      expect(actions, 2);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(button), bounds);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'book cover press is visible in place and cancel does not open it',
+    (tester) async {
+      var opens = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(platform: TargetPlatform.android),
+          home: Scaffold(
+            body: Center(
+              child: BookCardInk(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () => opens++,
+                child: const SizedBox(
+                  width: 120,
+                  height: 180,
+                  child: ColoredBox(color: Colors.black),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      final card = find.byType(BookCardInk);
+      final rect = tester.getRect(card);
+      final overlay = find.descendant(
+        of: card,
+        matching: find.byType(AnimatedContainer),
+      );
+      double alpha() =>
+          (tester.widget<AnimatedContainer>(overlay).decoration!
+                  as BoxDecoration)
+              .color!
+              .a;
+      final gesture = await tester.startGesture(rect.center);
+      await tester.pump(const Duration(milliseconds: 110));
+      expect(alpha(), greaterThan(0));
+      expect(tester.getRect(card), rect);
+      await gesture.cancel();
+      await tester.pumpAndSettle();
+      expect(alpha(), 0);
+      expect(opens, 0);
+      await tester.tap(card);
+      expect(opens, 1);
+    },
+  );
+
+  testWidgets(
     'explicit full-screen route slides even under a zoom host theme',
     (tester) async {
+      var exitFinished = false;
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData(
@@ -21,13 +110,15 @@ void main() {
             builder:
                 (context) => Scaffold(
                   body: FilledButton(
-                    onPressed:
-                        () => Navigator.push<void>(
-                          context,
-                          HorizontalCoverPageRoute<void>(
-                            builder: (_) => const Scaffold(body: Text('目标页')),
-                          ),
+                    onPressed: () async {
+                      await pushAndWaitForPageExit(
+                        context,
+                        HorizontalCoverPageRoute<void>(
+                          builder: (_) => const Scaffold(body: Text('目标页')),
                         ),
+                      );
+                      exitFinished = true;
+                    },
                     child: const Text('打开'),
                   ),
                 ),
@@ -62,8 +153,10 @@ void main() {
         tester.widget<SlideTransition>(slide).position.value.dx,
         inExclusiveRange(0.6, 0.9),
       );
+      expect(exitFinished, isFalse);
       await tester.pumpAndSettle();
       expect(find.text('目标页'), findsNothing);
+      expect(exitFinished, isTrue);
     },
   );
 

@@ -168,26 +168,33 @@ class ReaderSettingsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (usesAppleGlass) {
-      return FutureBuilder<bool>(
-        future: includeMarks ? null : AppleReaderPanel.available,
-        builder: (context, available) {
-          if (available.data == true) {
-            final binding = ReaderSettingsBinding(
-              context,
-              onLayoutChanged: onLayoutChanged,
-              autoScroll: autoScroll,
-            );
-            return AppleReaderSettingsView(
-              configuration: binding.snapshot,
-              onChange: binding.change,
-            );
-          }
-          return _buildFlutter(context);
-        },
-      );
+    if (usesAppleGlass && !includeMarks) {
+      final supported = AppleReaderPanel.knownSupport;
+      if (supported == true) return _nativeForm(context);
+      if (supported == null) {
+        return FutureBuilder<bool>(
+          future: AppleReaderPanel.available,
+          builder:
+              (context, available) =>
+                  available.data == true
+                      ? _nativeForm(context)
+                      : _buildFlutter(context),
+        );
+      }
     }
     return _buildFlutter(context);
+  }
+
+  Widget _nativeForm(BuildContext context) {
+    final binding = ReaderSettingsBinding(
+      context,
+      onLayoutChanged: onLayoutChanged,
+      autoScroll: autoScroll,
+    );
+    return AppleReaderSettingsView(
+      configuration: binding.snapshot,
+      onChange: binding.change,
+    );
   }
 
   Widget _buildFlutter(BuildContext context) {

@@ -43,6 +43,8 @@ ReaderCubit reader(
   ReadingProgressQueue queue, {
   int Function(String)? session,
   Future<ReaderPosition?> Function(String, String)? loadPosition,
+  Future<bool>? initialRouteArrival,
+  Future<void>? layoutReady,
   String bookId = 'lns:1',
   List<Volume> chapterVolumes = volumes,
 }) => ReaderCubit(
@@ -62,10 +64,40 @@ ReaderCubit reader(
   progress: queue,
   sessionGeneration: session ?? (_) => 0,
   loadPosition: loadPosition,
+  initialRouteArrival: initialRouteArrival,
+  layoutReady: layoutReady,
 );
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'iOS reads immediately and lays out after the slide and insets',
+    () async {
+      final arrival = Completer<bool>();
+      final insets = Completer<void>();
+      final started = Completer<void>();
+      final cubit = reader(
+        ({required aid, required cid}) async {
+          started.complete();
+          return const SourceChapter('正文');
+        },
+        ReadingProgressQueue(write: (_) async {}),
+        initialRouteArrival: arrival.future,
+        layoutReady: insets.future,
+      );
+      final load = cubit.loadChapter();
+      await started.future;
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state, isA<ReaderLoading>());
+      arrival.complete(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state, isA<ReaderLoading>());
+      insets.complete();
+      await load;
+      expect(cubit.state, isA<ReaderLoaded>());
+      await cubit.close();
+    },
+  );
   test('paginated body appears without waiting for progress storage', () async {
     final gate = Completer<void>();
     final queue = ReadingProgressQueue(write: (_) => gate.future);

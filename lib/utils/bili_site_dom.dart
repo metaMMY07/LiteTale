@@ -56,6 +56,10 @@ const _biliSearchVerificationGuard = r'''
     });
     if (!form) return false;
     out.ready=false;out.verificationRequired=true;out.searchChallenge=true;
+    const keyword = form.querySelector('input[name="searchkey"]');
+    if (keyword && keyword.value.trim() && keyword.value.length <= 200) {
+      out.searchKeyword = keyword.value.trim();
+    }
     out.error='原站搜索需要验证码，请打开原站填写后继续';
     return true;
   }
@@ -169,6 +173,9 @@ const biliSearchProbeScript =
   }
   if (!['/S6/','/search.html'].includes(location.pathname)) return JSON.stringify(result);
   const body = document.body.innerText;
+  if (/搜索间隔|搜索频繁|请.*秒后.*搜索/.test(body)) {
+    result.error='原站暂时限制搜索频率，请稍后重试';return JSON.stringify(result);
+  }
   // The mobile search form and its suggestions are also at /search.html.
   if (location.pathname === '/search.html' &&
       document.querySelector('#searchkey[name="searchkey"]') &&
@@ -191,7 +198,6 @@ const biliSearchProbeScript =
   const next = [...document.querySelectorAll('a[href]')].find(a =>
     a.rel === 'next' || /^(下一页|下页|下一頁|›|»)$/.test(a.innerText.trim()));
   if (next) result.next = new URL(next.getAttribute('href'),location.href).href;
-  if (/搜索间隔|搜索频繁|请.*秒后.*搜索/.test(body)) result.error='原站暂时限制搜索频率，请稍后重试';
   result.ready = result.books.length > 0 || /没有找到|未找到|无搜索结果|没有相关|查无|未搜索到|没有搜到/.test(body);
   return JSON.stringify(result);
 })()''';

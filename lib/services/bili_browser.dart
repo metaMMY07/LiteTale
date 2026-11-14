@@ -58,6 +58,8 @@ class BiliSiteVerificationRequired extends BiliBrowserException {
   final String? searchKeyword;
   final Uri? searchEntry;
   final int? searchPage;
+
+  bool get isSearchVerification => searchKeyword != null && searchEntry != null;
 }
 
 class _VerifiedBiliPage {
@@ -92,6 +94,7 @@ class BiliBrowserSession extends ChangeNotifier {
   BiliBrowserException? _navigationError;
   BiliSiteVerificationRequired? _heldSearch;
   Timer? _unclaimedSearch;
+  bool _hasRetainedSearchPage = false;
   bool get showingSearchChallenge => _showingSearchChallenge;
   bool _showingSearchChallenge = false;
   Future<void> _queue = Future.value();
@@ -130,11 +133,9 @@ class BiliBrowserSession extends ChangeNotifier {
 
   static bool isVerificationTarget(BiliSiteVerificationRequired request) {
     if (allowsNavigation('${request.target}')) return true;
-    final entry = request.searchEntry;
-    return request.searchChallenge &&
-        entry != null &&
-        allowsNavigation('$entry') &&
-        _sameOrigin(request.target, entry);
+    if (!request.isSearchVerification) return false;
+    final entry = request.searchEntry!;
+    return allowsNavigation('$entry') && _sameOrigin(request.target, entry);
   }
 
   static Map<String, dynamic> _decodeProbe(dynamic raw) {
@@ -179,6 +180,22 @@ class BiliBrowserSession extends ChangeNotifier {
     return !uri.hasFragment &&
         (keywords == null || listEquals(keywords, [keyword])) &&
         (pages == null || listEquals(pages, ['$page']));
+  }
+
+  static bool _matchesSearchChallenge(
+    Uri uri,
+    Map<String, dynamic> probe,
+    Uri origin,
+    String keyword,
+    int page,
+  ) {
+    if (probe['searchChallenge'] != true ||
+        !_sameOrigin(uri, origin) ||
+        !_matchesSearch(uri, keyword, page)) {
+      return false;
+    }
+    final formKeyword = probe['searchKeyword'];
+    return formKeyword == null || formKeyword == keyword;
   }
 
   static String _probeKey(Uri uri, BiliProbeKind kind) {
@@ -234,9 +251,9 @@ class BiliBrowserSession extends ChangeNotifier {
     if (!isVerificationTarget(request) ||
         uri == null ||
         !allowsVerificationNavigation('$uri', request) ||
-        (request.searchChallenge
+        (request.isSearchVerification
             ? !loadedSearch
-            : (!_samePage(uri, request.target) && !loadedSearch)) ||
+            : !_samePage(uri, request.target)) ||
         value['verificationRequired'] == true ||
         value['contentIncomplete'] == true ||
         value['error'] != null ||
@@ -406,9 +423,26 @@ class BiliBrowserSession extends ChangeNotifier {
   void releaseHeldSearch(
     BiliSiteVerificationRequired request, {
     bool unclaimedOnly = false,
+    bool verified = false,
   }) {
     if (!identical(_heldSearch, request) ||
         (unclaimedOnly && _showingSearchChallenge)) {
+      return;
+    }
+    if (verified &&
+        _showingSearchChallenge &&
+        _port != null &&
+        activeSource.value == SourceId.bili &&
+        sourceRevision.value == request.revision) {
+      // Keep the same browser and its site session after a confirmed search.
+      // Only the matching query can consume the just-loaded result.
+      _unclaimedSearch?.cancel();
+      _unclaimedSearch = null;
+      _heldSearch = null;
+      _showingSearchChallenge = false;
+      _hasRetainedSearchPage = true;
+      _navigationError = null;
+      notifyListeners();
       return;
     }
     requested = false;
@@ -421,6 +455,7 @@ class BiliBrowserSession extends ChangeNotifier {
     if (_attachment case final pending? when !pending.isCompleted) {
       pending.complete(port);
     }
+    _attachment = null;
   }
 
   void detach(BiliBrowserPort port) {
@@ -433,6 +468,7 @@ class BiliBrowserSession extends ChangeNotifier {
     _unclaimedSearch = null;
     _heldSearch = null;
     _showingSearchChallenge = false;
+    _hasRetainedSearchPage = false;
     _searchOrigin = null;
     _navigationError = null;
     _port = null;
@@ -452,12 +488,12 @@ class BiliBrowserSession extends ChangeNotifier {
 
   Future<BiliBrowserPort> _renderer() async {
     if (_port != null) return _port!;
-    _attachment ??= Completer<BiliBrowserPort>();
+    final attaching = _attachment ??= Completer<BiliBrowserPort>();
     if (!requested) {
       requested = true;
       notifyListeners();
     }
-    return _attachment!.future;
+    return attaching.future;
   }
 
   Future<T> _operation<T>(
@@ -535,6 +571,16 @@ class BiliBrowserSession extends ChangeNotifier {
       _navigationError = null;
       try {
         await command(() => port.setDesktopSite(false));
+        if (_hasRetainedSearchPage) {
+          // The current query uses its verified result. Clear only its document
+          // before the next request so it cannot be mistaken for a new page.
+          await command(() => port.loadUrl('about:blank'));
+          while (await command(() => port.executeScript('location.href')) !=
+              'about:blank') {
+            await Future<void>.delayed(pollInterval);
+          }
+          _hasRetainedSearchPage = false;
+        }
         return await run(
           port,
           (script) {
@@ -557,8 +603,7 @@ class BiliBrowserSession extends ChangeNotifier {
         );
       } on BiliSiteVerificationRequired catch (error) {
         check();
-        if (error.searchChallenge &&
-            error.searchKeyword != null &&
+        if (error.isSearchVerification &&
             activeSource.value == SourceId.bili &&
             error.revision == sourceRevision.value) {
           _heldSearch = error;
@@ -661,12 +706,12 @@ class BiliBrowserSession extends ChangeNotifier {
         throw const BiliBrowserException('哔哩页面跳转地址无效');
       }
       final searchTarget = searchEntry ?? verificationTarget;
-      final searchChallenge =
+      final searchVerification =
           searchKeyword != null &&
-          value['searchChallenge'] == true &&
           searchTarget != null &&
+          value['verificationRequired'] == true &&
           _sameOrigin(loaded, searchTarget);
-      if (!allowsNavigation('${value['url']}') && !searchChallenge) {
+      if (!allowsNavigation('${value['url']}') && !searchVerification) {
         final origin = _searchOrigin;
         if (origin != null &&
             _sameOrigin(loaded, origin) &&
@@ -710,19 +755,19 @@ class BiliBrowserSession extends ChangeNotifier {
             }
           }
           final page = loaded;
-          final entry = searchChallenge ? searchTarget : searchEntry;
           throw BiliSiteVerificationRequired(
             target:
-                searchChallenge
+                searchVerification
                     ? page.removeFragment()
                     : verificationTarget ??
                         page.replace(queryParameters: {}).removeFragment(),
             kind: _kind(script),
             desktopSite: desktopSite,
-            searchChallenge: searchChallenge,
+            searchChallenge:
+                searchVerification && value['searchChallenge'] == true,
             revision: sourceRevision.value,
             searchKeyword: searchKeyword,
-            searchEntry: entry?.origin == page.origin ? entry : null,
+            searchEntry: searchVerification ? searchTarget : null,
             searchPage: searchPage,
           );
         }
@@ -842,10 +887,20 @@ class BiliBrowserSession extends ChangeNotifier {
           accepts: (value) {
             final actual = Uri.parse('${value['url']}');
             final target = searchEntry!;
-            return _samePage(actual, target) ||
-                (value['searchChallenge'] == true &&
-                    _sameOrigin(actual, target) &&
-                    _matchesSearch(actual, query, page));
+            if (value['searchChallenge'] == true) {
+              return _matchesSearchChallenge(
+                actual,
+                value,
+                target,
+                query,
+                page,
+              );
+            }
+            if (value['verificationRequired'] == true) {
+              return _sameOrigin(actual, target) &&
+                  _matchesSearch(actual, query, page);
+            }
+            return _samePage(actual, target);
           },
         );
         // The ordinary site's asynchronous resource initialization must finish
@@ -877,23 +932,27 @@ class BiliBrowserSession extends ChangeNotifier {
           final expected = requestedPage;
           final actual = Uri.parse('${value['url']}');
           if (value['searchChallenge'] == true) {
-            final origin = expected ?? searchEntry!;
-            return _sameOrigin(actual, origin) &&
+            return _matchesSearchChallenge(
+              actual,
+              value,
+              expected ?? searchEntry!,
+              query,
+              page,
+            );
+          }
+          if (value['verificationRequired'] == true && expected != null) {
+            return _sameOrigin(actual, expected) &&
                 _matchesSearch(actual, query, page);
           }
           if (expected == null) {
-            if (value['ready'] == true && actual.path == '/') return false;
-            return _matchesSearch(actual, query, page);
+            return _sameOrigin(actual, searchEntry!) &&
+                _matchesSearch(actual, query, page) &&
+                (value['ready'] != true ||
+                    _isVerifiedSearchResult(actual, value, page));
           }
           // loadRequest may return before the previous document is replaced.
           // Match the real next link, regardless of query parameter order.
-          final actualQuery = actual.queryParametersAll;
-          final expectedQuery = expected.queryParametersAll;
-          return actual.path == expected.path &&
-              actualQuery.length == expectedQuery.length &&
-              expectedQuery.entries.every(
-                (entry) => listEquals(actualQuery[entry.key], entry.value),
-              );
+          return _samePage(actual, expected);
         },
       );
       return _acceptSearchPage(value, page, query);
@@ -939,9 +998,9 @@ class BiliBrowserSession extends ChangeNotifier {
       next = Uri.tryParse(raw);
       if (next == null ||
           !allowsNavigation(raw) ||
+          !_sameOrigin(next, resultPage) ||
           !const ['/S6/', '/search.html'].contains(next.path) ||
-          (next.queryParameters.containsKey('searchkey') &&
-              next.queryParameters['searchkey'] != query) ||
+          !_matchesSearch(next, query, page + 1) ||
           raw == value['url']) {
         throw const BiliBrowserException('原站搜索分页地址无效');
       }

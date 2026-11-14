@@ -13,7 +13,7 @@ void main() {
   tearDown(() => debugDefaultTargetPlatformOverride = null);
 
   testWidgets(
-    'Android directory is a complete page with current chapter and return value',
+    'Android directory slides vertically and returns the chapter after closing',
     (tester) async {
       Chapter? selection;
       final volumes = [
@@ -48,8 +48,19 @@ void main() {
         ),
       );
       await tester.tap(find.text('open'));
+      await tester.pump();
+      // Navigator prepares a new route offstage for its first frame.
+      await tester.pump(const Duration(milliseconds: 16));
+      final directory = find.byKey(const ValueKey('reader-chapter-page'));
+      final start = tester.getTopLeft(directory);
+      expect(start.dx, 0);
+      expect(start.dy, greaterThan(0));
+      await tester.pump(const Duration(milliseconds: 50));
+      final entering = tester.getTopLeft(directory);
+      expect(entering.dx, 0);
+      expect(entering.dy, allOf(greaterThan(0), lessThan(start.dy)));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('reader-chapter-page')), findsOneWidget);
+      expect(tester.getTopLeft(directory), Offset.zero);
       expect(find.byType(BottomSheet), findsNothing);
       expect(find.byType(ReaderDraggableSheet), findsNothing);
       expect(
@@ -64,9 +75,15 @@ void main() {
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('章节 80'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      final exiting = tester.getTopLeft(directory);
+      expect(exiting.dx, 0);
+      expect(exiting.dy, greaterThan(0));
+      expect(selection, isNull);
       await tester.pumpAndSettle();
       expect(selection?.cid, '80');
-      expect(find.byKey(const ValueKey('reader-chapter-page')), findsNothing);
+      expect(directory, findsNothing);
       expect(tester.takeException(), null);
       await tester.pumpWidget(const SizedBox());
       debugDefaultTargetPlatformOverride = null;

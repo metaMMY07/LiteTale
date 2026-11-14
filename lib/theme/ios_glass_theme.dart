@@ -3,6 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:wild/theme/ios_system_colors.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 
+// The inset-grouped corners in the Novella recording reach the straight
+// edges about 28 points from each corner on iPhone.
+const iosGroupedCardShape = ContinuousRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(28)),
+);
+
 ThemeData iosGlassTheme(Brightness brightness, {Color? accent}) {
   final dark = brightness == Brightness.dark;
   Color system(String token) => IosSystemColors.color(token, brightness);
@@ -71,7 +77,7 @@ ThemeData iosGlassTheme(Brightness brightness, {Color? accent}) {
     cardTheme: CardTheme(
       elevation: 0,
       color: colors.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      shape: iosGroupedCardShape,
     ),
     dividerColor: system('separator'),
     snackBarTheme: SnackBarThemeData(

@@ -167,7 +167,7 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
           _error = BiliSiteAccessDenied(widget.request.target).message;
         }
       });
-      if (widget.request.searchChallenge && !blocked && !_checking) {
+      if (widget.request.isSearchVerification && !blocked && !_checking) {
         final search = await _web
             .executeScript(
               BiliBrowserSession.verificationScript(widget.request),
@@ -268,7 +268,7 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
         title: Text(
           widget.request.contentRequired
               ? '哔哩原站阅读'
-              : widget.request.searchChallenge
+              : widget.request.isSearchVerification
               ? '搜索验证'
               : '哔哩原站验证',
         ),
@@ -324,7 +324,8 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
                         ? '原站拒绝访问，当前页面没有可完成的验证。请返回并稍后重试。'
                         : widget.request.contentRequired
                         ? '请按原站提示完成阅读要求，正文完整显示后再继续。'
-                        : widget.searchView != null
+                        : widget.searchView != null &&
+                            widget.request.searchChallenge
                         ? '请在原站表单填写验证码，完成后继续搜索「${widget.request.searchKeyword}」。'
                         : widget.request.searchEntry != null
                         ? '请在原站搜索「${widget.request.searchKeyword}」，按网页提示填写验证码，结果显示后再返回。'

@@ -150,16 +150,22 @@ void main() {
     expect(find.text('阅读显示'), findsOneWidget);
     for (final title in [
       '字号',
-      '行距',
+      '行高',
       '段间距',
+      '左侧留白',
+      '右侧留白',
+      '上边距',
+      '下边距',
       '阅读模式',
       '仿真翻页',
       '音量键翻页',
-      '上边距',
-      '下边距',
-      '左边距',
-      '右边距',
     ]) {
+      final row = find.text(title);
+      await tester.scrollUntilVisible(
+        row,
+        180,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text(title), findsOneWidget);
     }
     for (final title in ['点击翻页', '边界切换章节', '避免误触返回', '屏幕']) {

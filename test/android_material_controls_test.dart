@@ -135,6 +135,10 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('source-option-esj')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(find.text('选择书源'), findsOneWidget);
+      expect(changes, isEmpty);
       await tester.pumpAndSettle();
       expect(changes, [SourceId.esj]);
       expect(find.text('选择书源'), findsNothing);

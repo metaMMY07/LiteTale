@@ -10,6 +10,7 @@ import 'package:wild/sources/source_api.dart' show loadSourceSelection;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/app_launch_screen.dart';
+import 'package:wild/widgets/apple_reader_panel.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/auth_cubit.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
@@ -69,7 +70,9 @@ class _InitPageState extends State<InitPage> {
 
     // 等待所有 Cubit 初始化完成
     await IosSystemColors.initialize();
+    if (!mounted) return;
     await Future.wait([
+      if (Platform.isIOS) AppleReaderPanel.available.then<void>((_) {}),
       LocalEpubLibrary.instance.initialize(root).catchError((Object _) {
         // Local library exposes a retryable error; online reading still starts.
       }),

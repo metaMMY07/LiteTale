@@ -280,15 +280,17 @@ void main() {
         MaterialApp(
           theme: iosGlassTheme(Brightness.light),
           home: Scaffold(
-            body: SingleChildScrollView(
-              child: RuleSourceManager(
-                registry: registry,
-                pickFile:
-                    () async => XFile.fromData(
-                      Uint8List.fromList(utf8.encode(huanmengSourceJson)),
-                      name: '幻梦轻小说.json',
-                    ),
-              ),
+            body: CustomScrollView(
+              slivers: [
+                RuleSourceManager(
+                  registry: registry,
+                  pickFile:
+                      () async => XFile.fromData(
+                        Uint8List.fromList(utf8.encode(huanmengSourceJson)),
+                        name: '幻梦轻小说.json',
+                      ),
+                ),
+              ],
             ),
           ),
         ),

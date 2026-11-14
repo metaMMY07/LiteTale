@@ -44,6 +44,12 @@ jobs:
           test -d "$DEVELOPER_DIR"
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
+      - name: Verify reader volume event policy
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios-preview
+          xcrun swiftc ios/Runner/ReaderVolumeState.swift tools/qa_ios_volume_policy.swift -o build/ios-preview/volume-policy-check
+          build/ios-preview/volume-policy-check
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -71,6 +77,8 @@ jobs:
           flutter config --no-analytics
           flutter precache --ios
           flutter pub get --enforce-lockfile
+      - name: Check Dart dependencies before native compilation
+        run: dart analyze --no-fatal-warnings lib
       - name: Resolve native plugins
         working-directory: ios
         run: pod install
@@ -78,7 +86,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/ios-preview
-          flutter build ios --release --no-codesign --build-number "$GITHUB_RUN_NUMBER" 2>&1 | tee build/ios-preview/build.log
+          flutter build ios --release --no-codesign --build-name 1.2.4 --build-number 110 2>&1 | tee build/ios-preview/build.log
       - name: Validate and package the device IPA
         run: |
           set -euo pipefail

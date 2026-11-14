@@ -323,6 +323,10 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                         return HorizontalCoverPageRoute<void>(
                           builder: builder,
                           settings: settings,
+                          animateEntrance:
+                              !usesAppleGlass ||
+                              settings.name != IosDockController.homeRouteName,
+                          cachePageDuringTransition: settings.name == '/about',
                         );
                       },
                     ),

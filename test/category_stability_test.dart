@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/pages/home/category_page.dart';
+import 'package:wild/services/wenku8_browser.dart';
 import 'package:wild/src/rust/api/wenku8.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 
@@ -118,11 +119,11 @@ void main() {
       page: ({required tag, required v, required pageNumber}) => page.future,
     );
     await tester.pump();
-    page.completeError(StateError('book list failed'));
+    page.completeError(const Wenku8SiteVerificationRequired());
     await tester.pump();
     tags.complete(groups);
     await tester.pump();
-    expect(find.textContaining('book list failed'), findsOneWidget);
+    expect(find.text('打开文库8验证 / 登录'), findsOneWidget);
     expect(find.text('重新加载分类书目'), findsOneWidget);
   });
 
@@ -147,11 +148,12 @@ void main() {
       await tester.pump();
       expect(modes, ['0', '1']);
       expect(saved, ['1']);
-      next.completeError(StateError('new request failed'));
+      next.completeError(const Wenku8SiteAccessDenied());
       await tester.pump();
       old.complete(emptyPage());
       await tester.pump();
-      expect(find.textContaining('new request failed'), findsOneWidget);
+      expect(find.textContaining('HTTP 403'), findsOneWidget);
+      expect(find.text('打开文库8验证 / 登录'), findsNothing);
     },
   );
 
