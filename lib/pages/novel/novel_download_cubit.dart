@@ -28,13 +28,22 @@ class NovelDownloadState {
 class NovelDownloadCubit extends Cubit<NovelDownloadState> {
   NovelDownloadCubit() : super(NovelDownloadState());
 
-  Future<void> loadDownloads() async {
-    emit(state.copyWith(isLoading: true, error: null));
+  int _request = 0;
+
+  Future<void> loadDownloads({bool keepVisible = false}) async {
+    if (isClosed) return;
+    final request = ++_request;
+    final refreshing = keepVisible && state.downloads.isNotEmpty;
+    if (!refreshing || state.isLoading || state.error != null) {
+      emit(state.copyWith(isLoading: !refreshing));
+    }
     try {
       final downloads = await allDownloads();
+      if (isClosed || request != _request) return;
       emit(state.copyWith(downloads: downloads, isLoading: false));
     } catch (e) {
+      if (isClosed || request != _request || refreshing) return;
       emit(state.copyWith(error: e.toString(), isLoading: false));
     }
   }
-} 
+}

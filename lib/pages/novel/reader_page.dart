@@ -508,6 +508,8 @@ class _ReaderViewState extends State<_ReaderView> {
       selection: _marks,
       current: current,
       bookmarkExcerpt: quote,
+      bookmarkPageNumber: cubit.chapterProgress.index + 1,
+      pageNumberForMark: cubit.savedMarkPageNumber,
       onCurrentPage: (location) => cubit.markOnPage(loaded, location),
     );
     if (mark == null || !panelContext.mounted || cubit.isClosed) return;
@@ -843,7 +845,12 @@ class _ReaderViewState extends State<_ReaderView> {
                         onTap: _marks.clear,
                       ),
                     ),
-                  Positioned.fill(child: ReaderMarkLayer(selection: _marks)),
+                  Positioned.fill(
+                    child: ReaderMarkLayer(
+                      selection: _marks,
+                      pageNumberAt: context.read<ReaderCubit>().markPageNumber,
+                    ),
+                  ),
                 ],
               ),
             );

@@ -809,8 +809,7 @@ impl Wenku8Client {
             return Err(anyhow!("Failed to get tags: HTTP {}", resp.status()));
         }
 
-        let text = resp.bytes().await?;
-        let text = decode_gbk(text)?;
+        let text = decode_catalog_response(resp).await?;
         Self::parse_tags(text.as_str())
     }
 
@@ -829,7 +828,11 @@ impl Wenku8Client {
             let li = ul.select(&li_selector);
             for li in li {
                 let label = li.text().collect::<String>();
-                if let Some(label) = label.trim().strip_suffix("Tags：") {
+                if let Some(label) = label
+                    .trim()
+                    .strip_suffix("Tags：")
+                    .or_else(|| label.trim().strip_suffix("Tags:"))
+                {
                     if !group_name.is_empty() && !tags.is_empty() {
                         tag_groups.push(TagGroup {
                             title: group_name.clone(),
@@ -892,50 +895,59 @@ impl Wenku8Client {
             return Err(anyhow!("Failed to get tag page: {}", response.status()));
         }
 
-        let text = response.bytes().await?;
-        let text = decode_gbk(text)?;
-        Self::parse_catalog_page(text.as_str())
+        let text = decode_catalog_response(response).await?;
+        Self::check_catalog_page(Self::parse_catalog_page(text.as_str())?, page_number)
     }
 
     pub(crate) fn parse_books(novels: &mut Vec<NovelCover>, html: &Html) -> Result<()> {
-        let gird_selector = Selector::parse("table.grid tr td>div").unwrap();
+        let grid_selector = Selector::parse("table.grid tr td>div").unwrap();
         let img_selector = Selector::parse("div>a>img").unwrap();
-        for block in html.select(&gird_selector) {
+        let title_selector = Selector::parse("b a[href], strong a[href]").unwrap();
+        let mut seen = HashSet::new();
+        for block in html.select(&grid_selector) {
             for img in block.select(&img_selector) {
-                let parent = img
-                    .parent()
-                    .ok_or_else(|| anyhow!("Failed to find block title"))?;
-                if let Element(e) = &parent.value() {
-                    if e.name.local.to_string().eq("a") {
-                        let parent = ElementRef::wrap(parent).unwrap();
-                        let title = parent
-                            .value()
-                            .attr("title")
-                            .ok_or_else(|| anyhow!("wenku8_catalog_layout: missing cover title"))?
-                            .to_string();
-                        let mut img = img
-                            .value()
-                            .attr("src")
-                            .ok_or_else(|| anyhow!("wenku8_catalog_layout: missing cover image"))?
-                            .to_string();
-                        let detail_url = parent
-                            .value()
-                            .attr("href")
-                            .ok_or_else(|| anyhow!("wenku8_catalog_layout: missing book URL"))?
-                            .to_string();
-                        let aid = detail_url
-                            .split('/')
-                            .last()
-                            .ok_or_else(|| anyhow!("Failed to find aid"))?
-                            .replace(".htm", "");
-                        novels.push(NovelCover {
-                            title: title.clone(),
-                            img: img.clone(),
-                            detail_url: detail_url.clone(),
-                            aid: aid.clone(),
-                        });
-                    }
+                let Some(anchor) = img.parent().and_then(ElementRef::wrap) else {
+                    continue;
+                };
+                let Some(detail_url) = anchor.value().attr("href") else {
+                    continue;
+                };
+                let Some(aid) = catalog_book_id(detail_url) else {
+                    continue;
+                };
+                let Some(cover) = ["data-original", "data-src", "src"]
+                    .iter()
+                    .filter_map(|attr| img.value().attr(attr))
+                    .map(str::trim)
+                    .find(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                let title = anchor
+                    .value()
+                    .attr("title")
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        block.select(&title_selector)
+                            .filter(|link| {
+                                link.value().attr("href").and_then(catalog_book_id) == Some(aid)
+                            })
+                            .map(|link| link.text().collect::<String>().trim().to_owned())
+                            .find(|value| !value.is_empty())
+                    })
+                    .or_else(|| img.value().attr("alt").map(str::trim).map(str::to_owned))
+                    .unwrap_or_default();
+                if title.is_empty() || !seen.insert(aid) {
+                    continue;
                 }
+                novels.push(NovelCover {
+                    title,
+                    img: cover.to_owned(),
+                    detail_url: detail_url.to_owned(),
+                    aid: aid.to_owned(),
+                });
             }
         }
         Ok(())
@@ -963,10 +975,14 @@ impl Wenku8Client {
     }
 
     pub(crate) fn parse_tag_page(text: &str) -> Result<PageStats<NovelCover>> {
-        let mut novels = Vec::new();
         let html = Html::parse_document(text);
-        Self::parse_books(&mut novels, &html)?;
-        let (current_page, max_page) = Self::parse_page_stats(&html)?;
+        Self::parse_book_grid(&html)
+    }
+
+    fn parse_book_grid(html: &Html) -> Result<PageStats<NovelCover>> {
+        let mut novels = Vec::new();
+        Self::parse_books(&mut novels, html)?;
+        let (current_page, max_page) = Self::parse_page_stats(html)?;
         Ok(PageStats {
             current_page,
             max_page,
@@ -1255,9 +1271,8 @@ impl Wenku8Client {
             return Err(anyhow!("Failed to get toplist: {}", response.status()));
         }
 
-        let text = response.bytes().await?;
-        let text = decode_gbk(text)?;
-        Self::parse_toplist(text.as_str())
+        let text = decode_catalog_response(response).await?;
+        Self::check_catalog_page(Self::parse_toplist(text.as_str())?, page)
     }
 
     pub(crate) fn parse_toplist(text: &str) -> Result<PageStats<NovelCover>> {
@@ -1279,9 +1294,8 @@ impl Wenku8Client {
             return Err(anyhow!("Failed to get article list: {}", response.status()));
         }
 
-        let text = response.bytes().await?;
-        let text = decode_gbk(text)?;
-        Self::parse_articlelist(text.as_str())
+        let text = decode_catalog_response(response).await?;
+        Self::check_catalog_page(Self::parse_articlelist(text.as_str())?, page)
     }
 
     pub(crate) fn parse_articlelist(text: &str) -> Result<PageStats<NovelCover>> {
@@ -1289,12 +1303,26 @@ impl Wenku8Client {
     }
 
     fn parse_catalog_page(text: &str) -> Result<PageStats<NovelCover>> {
-        let page = Self::parse_tag_page(text)?;
+        let html = Html::parse_document(text);
+        let page = Self::parse_book_grid(&html)?;
         if page.current_page < 1
             || page.max_page < page.current_page
-            || (page.records.is_empty() && (page.current_page != 1 || page.max_page != 1))
+            || (page.records.is_empty()
+                && (page.current_page != 1
+                    || page.max_page != 1
+                    || !is_empty_catalog(&html)))
         {
             return Err(anyhow!("wenku8_catalog_layout: invalid page statistics"));
+        }
+        Ok(page)
+    }
+
+    fn check_catalog_page(
+        page: PageStats<NovelCover>,
+        expected: i32,
+    ) -> Result<PageStats<NovelCover>> {
+        if page.current_page != expected {
+            return Err(anyhow!("wenku8_catalog_layout: unexpected page number"));
         }
         Ok(page)
     }
@@ -2300,6 +2328,66 @@ fn home_image_url(image: ElementRef<'_>, base: &reqwest::Url) -> Option<String> 
     url.set_scheme("https").ok()?;
     url.set_fragment(None);
     Some(url.to_string())
+}
+
+fn catalog_book_id(href: &str) -> Option<&str> {
+    let href = href.trim();
+    let path = if href.starts_with('/') && !href.starts_with("//") {
+        href
+    } else if href.starts_with("book/") {
+        href
+    } else {
+        let (origin, path) = href.split_once("/book/")?;
+        let url = reqwest::Url::parse(origin).ok()?;
+        let host = url.host_str()?;
+        if !matches!(url.scheme(), "http" | "https")
+            || (host != "wenku8.net" && !host.ends_with(".wenku8.net"))
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.port().is_some()
+            || url.path() != "/"
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return None;
+        }
+        let id = path.strip_suffix(".htm")?;
+        return valid_catalog_book_id(id).then_some(id);
+    };
+    let id = path
+        .trim_start_matches('/')
+        .strip_prefix("book/")?
+        .strip_suffix(".htm")?;
+    valid_catalog_book_id(id).then_some(id)
+}
+
+fn valid_catalog_book_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 12
+        && !id.starts_with('0')
+        && id.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+async fn decode_catalog_response(response: Response) -> Result<String> {
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    decode_home(response.bytes().await?, &content_type)
+}
+
+fn is_empty_catalog(html: &Html) -> bool {
+    let grid = Selector::parse("table.grid").unwrap();
+    let image = Selector::parse("img").unwrap();
+    let links = Selector::parse("a[href]").unwrap();
+    html.select(&grid).any(|table| {
+        table.select(&image).next().is_none()
+            && !table
+                .select(&links)
+                .any(|link| link.value().attr("href").and_then(catalog_book_id).is_some())
+    })
 }
 
 fn decode_home(bytes: bytes::Bytes, content_type: &str) -> Result<String> {

@@ -1,8 +1,10 @@
 import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/theme/material_you.dart';
-import 'package:wild/settings/settings_widgets.dart' show SettingsTileGroup;
+import 'package:wild/settings/settings_widgets.dart';
+import 'package:wild/settings/reader_settings_page.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/theme/ios_dock_insets.dart';
 import 'package:wild/pages/auth_cubit.dart';
@@ -15,6 +17,7 @@ import 'package:wild/pages/novel/novel_download_page.dart';
 import 'package:wild/settings/source_settings_page.dart';
 import 'package:wild/settings/reading_statistics_page.dart';
 import 'package:wild/widgets/left_aligned_scrollable.dart';
+import 'package:wild/widgets/platform_controls.dart';
 
 class MorePage extends StatelessWidget {
   const MorePage({super.key});
@@ -23,10 +26,8 @@ class MorePage extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocBuilder<UpdateCubit, UpdateState>(
       builder: (context, state) {
-        if (usesMaterialYou ||
-            Theme.of(context).platform == TargetPlatform.iOS) {
-          return _mobilePage(context, state);
-        }
+        if (usesAppleGlass) return _iosPage(context, state);
+        if (usesMaterialYou) return _mobilePage(context, state);
         return Scaffold(
           appBar: AppBar(title: const Text('更多')),
           body: LeftAlignedScrollView(
@@ -122,6 +123,120 @@ class MorePage extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  Widget _iosPage(BuildContext context, UpdateState state) {
+    final theme = Theme.of(context);
+    final canPop = ModalRoute.of(context)?.canPop ?? false;
+    void open(Widget page) => openSettingsPage(context, page);
+
+    return Scaffold(
+      appBar:
+          canPop
+              ? AppBar(
+                leading: AppIconButton(
+                  tooltip: '返回',
+                  icon: const Icon(CupertinoIcons.chevron_back),
+                  onPressed: () => Navigator.maybePop(context),
+                ),
+              )
+              : null,
+      body: SafeArea(
+        top: !canPop,
+        bottom: false,
+        child: LeftAlignedScrollView(
+          key: const PageStorageKey('ios-more-scroll'),
+          phoneInset: 16,
+          topInset: 16,
+          bottomInset:
+              20 +
+              MediaQuery.paddingOf(context).bottom -
+              IosDockInsets.bottomOf(context),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Semantics(
+                header: true,
+                child: Text(
+                  '我的',
+                  style: theme.textTheme.headlineLarge?.copyWith(
+                    fontSize: 34,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              IosSettingsSection(
+                key: const ValueKey('more-navigation-card'),
+                title: '账号',
+                rows: [
+                  IosSettingsRow(
+                    key: const ValueKey('more-entry-source'),
+                    icon: CupertinoIcons.person_crop_circle,
+                    title: '书源与账号',
+                    description: '切换书源、导入规则和管理登录',
+                    onTap: () => open(const SourceSettingsPage()),
+                  ),
+                ],
+              ),
+              IosSettingsSection(
+                title: '通用',
+                rows: [
+                  IosSettingsRow(
+                    icon: CupertinoIcons.book,
+                    title: '阅读',
+                    description: '排版、翻页和阅读方式',
+                    onTap: () => open(const ReaderSettingsPage()),
+                  ),
+                  IosSettingsRow(
+                    key: const ValueKey('more-entry-display'),
+                    icon: CupertinoIcons.paintbrush,
+                    title: '外观',
+                    description: '主题、颜色和字体',
+                    onTap: () => open(const SettingsPage(appearanceOnly: true)),
+                  ),
+                ],
+              ),
+              IosSettingsSection(
+                title: '数据',
+                rows: [
+                  IosSettingsRow(
+                    icon: CupertinoIcons.arrow_down_to_line,
+                    title: '离线下载',
+                    description: '管理已下载的书籍',
+                    onTap: () => open(const NovelDownloadPage()),
+                  ),
+                  IosSettingsRow(
+                    icon: CupertinoIcons.chart_bar,
+                    title: '阅读统计',
+                    description: '查看阅读活动与时长',
+                    onTap: () => open(const ReadingStatisticsPage()),
+                  ),
+                  IosSettingsRow(
+                    icon: CupertinoIcons.archivebox,
+                    title: '缓存',
+                    description: '管理接口缓存',
+                    onTap: () => open(const CacheSettingsPage()),
+                  ),
+                ],
+              ),
+              IosSettingsSection(
+                title: '关于',
+                rows: [
+                  IosSettingsRow(
+                    key: const ValueKey('more-entry-about'),
+                    icon: CupertinoIcons.info_circle,
+                    title: '应用相关',
+                    description:
+                        state.updateInfo == null ? '版本、更新和开源信息' : '发现新版本',
+                    onTap: () => Navigator.pushNamed(context, '/about'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

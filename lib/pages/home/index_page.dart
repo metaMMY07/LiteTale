@@ -374,21 +374,26 @@ class _ToplistPageState extends State<ToplistPage> {
   }
 
   Future<void> _loadSavedState() async {
+    final revision = sourceRevision.value;
+    final request = _request;
     try {
-      final savedSort = await loadProperty(key: _keySort);
-      if (!mounted) return;
-      if (savedSort.isNotEmpty) {
-        setState(() {
-          _selectedSort = savedSort;
-        });
-        _loadToplist(refresh: true);
-      } else {
-        _loadToplist(refresh: true);
+      final savedSort = await loadProperty(
+        key: _keySort,
+      ).timeout(const Duration(seconds: 2));
+      if (!mounted || revision != sourceRevision.value || request != _request) {
+        return;
       }
-    } catch (e) {
-      // 如果加载失败，使用默认值
-      if (!mounted) return;
-      _loadToplist(refresh: true);
+      if (_sortOptions.any((option) => option.$2 == savedSort)) {
+        _selectedSort = savedSort;
+      }
+    } catch (_) {
+      // A missing preference must not prevent the first list from loading.
+    }
+    if (mounted &&
+        revision == sourceRevision.value &&
+        request == _request &&
+        activeSource.value == SourceId.wenku8) {
+      await _loadToplist(refresh: true);
     }
   }
 

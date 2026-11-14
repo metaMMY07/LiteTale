@@ -111,7 +111,8 @@ String wenku8HomeErrorMessage(Object? error) {
 String wenku8ReadErrorMessage(Object? error) {
   if (error is Wenku8SiteAccessDenied ||
       error is Wenku8SiteVerificationRequired ||
-      error is Wenku8SiteLoginRequired) {
+      error is Wenku8SiteLoginRequired ||
+      error is Wenku8CatalogFormatException) {
     return error.toString();
   }
   if (error is Wenku8RateLimited) return error.toString();

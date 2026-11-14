@@ -298,11 +298,11 @@ String wenku8ReadDomExtractionScript(
       var tags = [];
       Array.from(document.querySelectorAll('ul.ultops')).forEach(function(list) {
         Array.from(list.querySelectorAll('li')).forEach(function(item) {
-          var html = (item.innerHTML || '').trim();
-          if (html.endsWith('Tags：') || html.endsWith('Tags:')) {
-            if (groupTitle) groups.push({title: groupTitle, tags: tags.slice()});
-            groupTitle = cleanText(item.textContent)
-              .replace(/Tags[:：]\s*$/, '')
+          var label = cleanText(item.textContent);
+          if (/Tags[:：]$/i.test(label)) {
+            if (groupTitle && tags.length) groups.push({title: groupTitle, tags: tags.slice()});
+            groupTitle = label
+              .replace(/Tags[:：]\s*$/i, '')
               .replace(/系|属性|类/g, '').trim();
             tags = [];
           } else {
@@ -313,26 +313,27 @@ String wenku8ReadDomExtractionScript(
           }
         });
       });
-      if (groupTitle) groups.push({title: groupTitle, tags: tags.slice()});
+      if (groupTitle && tags.length) groups.push({title: groupTitle, tags: tags.slice()});
       return {groups: groups.slice(0, maxTagGroups)};
     }
     function listUrlPage() {
       var parameters = page.searchParams;
       var keys = Array.from(parameters.keys());
+      var validPage = parameters.getAll('page').length <= 1 &&
+        (!parameters.has('page') || /^[1-9][0-9]{0,5}$/.test(parameters.get('page')));
       if (parameters.getAll('charset').length > 1 ||
           (parameters.has('charset') && parameters.get('charset').toLowerCase() !== 'gbk')) return null;
       if (page.pathname === '/modules/article/tags.php') {
         var allowedTags = ['t', 'v', 'page', 'charset'];
         if (keys.some(function(key) { return allowedTags.indexOf(key) < 0; }) ||
             parameters.getAll('t').length !== 1 || parameters.getAll('v').length !== 1 ||
-            parameters.getAll('page').length !== 1 || !parameters.get('t') ||
-            !/^[0-3]$/.test(parameters.get('v')) || !/^[1-9][0-9]{0,5}$/.test(parameters.get('page'))) return null;
+            !validPage || !parameters.get('t') ||
+            !/^[0-3]$/.test(parameters.get('v'))) return null;
       } else if (page.pathname === '/modules/article/toplist.php') {
         var allowedTop = ['sort', 'page', 'charset'];
         if (keys.some(function(key) { return allowedTop.indexOf(key) < 0; }) ||
-            parameters.getAll('sort').length !== 1 || parameters.getAll('page').length !== 1 ||
-            !/^[a-zA-Z0-9_-]{1,32}$/.test(parameters.get('sort')) ||
-            !/^[1-9][0-9]{0,5}$/.test(parameters.get('page'))) return null;
+            parameters.getAll('sort').length !== 1 || !validPage ||
+            !/^[a-zA-Z0-9_-]{1,32}$/.test(parameters.get('sort'))) return null;
       } else if (page.pathname === '/modules/article/search.php') {
         var allowedSearch = ['searchtype', 'searchkey', 'page', 'charset'];
         if (keys.some(function(key) { return allowedSearch.indexOf(key) < 0; }) ||
@@ -345,9 +346,8 @@ String wenku8ReadDomExtractionScript(
       } else if (page.pathname === '/modules/article/articlelist.php') {
         var allowedArticle = ['fullflag', 'page', 'charset'];
         if (keys.some(function(key) { return allowedArticle.indexOf(key) < 0; }) ||
-            parameters.getAll('fullflag').length !== 1 || parameters.getAll('page').length !== 1 ||
-            !/^[0-9]{1,2}$/.test(parameters.get('fullflag')) ||
-            !/^[1-9][0-9]{0,5}$/.test(parameters.get('page'))) return null;
+            parameters.getAll('fullflag').length !== 1 || !validPage ||
+            !/^[0-9]{1,2}$/.test(parameters.get('fullflag'))) return null;
       } else return null;
       return true;
     }
@@ -695,6 +695,10 @@ Object parseWenku8ReadWebViewResult(
         records: List.unmodifiable(reviews),
       );
     case 'list':
+      final catalog = page!.path != '/modules/article/search.php';
+      final urlPage = int.parse(
+        _rawQueryParameters(page)['page']?.single ?? '1',
+      );
       if (fields.containsKey('emptyReason')) {
         _requireKeys(fields, const {
           'currentPage',
@@ -704,10 +708,11 @@ Object parseWenku8ReadWebViewResult(
         });
         final emptyReason = fields['emptyReason'];
         final validReason =
-            page!.path == '/modules/article/search.php'
-                ? emptyReason == 'no_results'
-                : emptyReason == 'empty_catalog';
+            catalog
+                ? emptyReason == 'empty_catalog'
+                : emptyReason == 'no_results';
         if (!validReason ||
+            (catalog && urlPage != 1) ||
             fields['currentPage'] != 1 ||
             fields['maxPage'] != 1 ||
             fields['records'] is! List ||
@@ -723,6 +728,9 @@ Object parseWenku8ReadWebViewResult(
       _requireKeys(fields, const {'currentPage', 'maxPage', 'records'});
       final currentPage = _boundedInt(fields, 'currentPage', 0, 1000000);
       final maxPage = _boundedInt(fields, 'maxPage', 0, 1000000);
+      if (catalog && (currentPage != urlPage || maxPage < currentPage)) {
+        throw const FormatException('文库8返回的书目页码与请求不符。');
+      }
       final rawRecords = fields['records'];
       if (rawRecords is! List ||
           rawRecords.isEmpty ||
@@ -869,22 +877,22 @@ bool _isValidPage(Uri? page, Uri expected, String kind, String? aid) {
       if (page.path == '/modules/article/tags.php') {
         return exactQuery(
               const {'t', 'v', 'page', 'charset'},
-              optional: const {'charset'},
+              optional: const {'charset', 'page'},
             ) &&
             charsetAllowed() &&
             query['t']!.single.isNotEmpty &&
             query['t']!.single.length <= 80 &&
             RegExp(r'^[0-3]$').hasMatch(query['v']!.single) &&
-            _positivePage(query['page']!.single);
+            _positivePage(query['page']?.single ?? '1');
       }
       if (page.path == '/modules/article/toplist.php') {
         return exactQuery(
               const {'sort', 'page', 'charset'},
-              optional: const {'charset'},
+              optional: const {'charset', 'page'},
             ) &&
             charsetAllowed() &&
             RegExp(r'^[a-zA-Z0-9_-]{1,32}$').hasMatch(query['sort']!.single) &&
-            _positivePage(query['page']!.single);
+            _positivePage(query['page']?.single ?? '1');
       }
       if (page.path == '/modules/article/search.php') {
         // /so.php redirects the first results to search.php without page=1.
@@ -906,11 +914,11 @@ bool _isValidPage(Uri? page, Uri expected, String kind, String? aid) {
       if (page.path == '/modules/article/articlelist.php') {
         return exactQuery(
               const {'fullflag', 'page', 'charset'},
-              optional: const {'charset'},
+              optional: const {'charset', 'page'},
             ) &&
             charsetAllowed() &&
             RegExp(r'^[0-9]{1,2}$').hasMatch(query['fullflag']!.single) &&
-            _positivePage(query['page']!.single);
+            _positivePage(query['page']?.single ?? '1');
       }
       return false;
   }

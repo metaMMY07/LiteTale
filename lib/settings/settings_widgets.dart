@@ -1,9 +1,93 @@
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/settings/app_logs.dart';
 import 'package:wild/theme/material_you.dart';
+
+class IosSettingsSection extends StatelessWidget {
+  const IosSettingsSection({
+    super.key,
+    required this.title,
+    required this.rows,
+  });
+
+  final String title;
+  final List<Widget> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: CupertinoListSection.insetGrouped(
+        header: Semantics(
+          header: true,
+          child: Text(
+            title,
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        margin: EdgeInsets.zero,
+        backgroundColor: theme.scaffoldBackgroundColor,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(26),
+        ),
+        clipBehavior: Clip.none,
+        dividerMargin: 16,
+        additionalDividerMargin: 40,
+        separatorColor: theme.dividerColor,
+        children: rows,
+      ),
+    );
+  }
+}
+
+class IosSettingsRow extends StatelessWidget {
+  const IosSettingsRow({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title, description;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return CupertinoListTile.notched(
+      padding: const EdgeInsetsDirectional.fromSTEB(16, 14, 16, 14),
+      leadingSize: 24,
+      leadingToTitle: 16,
+      leading: Icon(icon, size: 24, color: theme.colorScheme.primary),
+      title: Text(
+        title,
+        maxLines: 2,
+        style: theme.textTheme.titleMedium?.copyWith(
+          fontSize: 17,
+          fontWeight: FontWeight.w400,
+        ),
+      ),
+      subtitle: Text(
+        description,
+        maxLines: 4,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+      trailing: const CupertinoListTileChevron(),
+      onTap: onTap,
+    );
+  }
+}
 
 /// Connected, opaque Android tiles. iOS keeps its existing glass grouping.
 class SettingsTileGroup extends StatelessWidget {

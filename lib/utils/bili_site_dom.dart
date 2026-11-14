@@ -3,12 +3,14 @@ import 'dart:convert';
 String biliSubmitSearchScript(String keyword) => '''(() => {
   const field = document.querySelector('#searchkey[name="searchkey"]');
   const form = field && field.form;
-  if (!form || form.method.toLowerCase() !== 'post' ||
-      new URL(form.action, location.href).origin !== location.origin ||
-      !['/S6/','/search.html'].includes(new URL(form.action, location.href).pathname)) return false;
+  if (!form || !['post','get'].includes(form.method.toLowerCase()) ||
+      form.querySelector('input[type="password"]')) return false;
+  const action = new URL(form.action, location.href);
+  if (action.origin !== location.origin || action.username || action.password ||
+      action.hash || !['/S6/','/search.html'].includes(action.pathname)) return false;
   field.value = ${jsonEncode(keyword)};
   field.dispatchEvent(new Event('input', {bubbles:true}));
-  // A POST may stay on /search.html. Ignore the previous document's suggested
+  // A form submission may stay on /search.html. Ignore the previous document's suggested
   // books until real navigation replaces this window and its pending marker.
   window.__liteTaleBiliSearchPending = true;
   if (form.requestSubmit) form.requestSubmit();
@@ -30,18 +32,30 @@ String biliFillSearchFieldScript(String keyword) => '''(() => {
 
 const _biliSearchVerificationGuard = r'''
   function biliCheckSearchVerification(out) {
-    if (!['/S6/','/search.html','/'].includes(location.pathname)) return false;
-    const field = [...document.querySelectorAll('input[name]')].find(input =>
-      /^(?:captcha|captcha_code|checkcode|verifycode|verify_code|seccode)$/i.test(input.name) &&
-      !['hidden','password'].includes(input.type) && input.getClientRects().length > 0 &&
-      !(input.form && input.form.querySelector('input[type="password"]')));
-    const form = field && (field.form || field.closest('form'));
-    const hasCode = form && [...form.querySelectorAll('img')].some(img =>
-      /captcha|checkcode|verifycode|seccode|验证码|驗證碼/i.test(
+    const searchPath = ['/S6/','/search.html','/'].includes(location.pathname);
+    const visible = node => node.getClientRects().length > 0 &&
+      getComputedStyle(node).visibility === 'visible';
+    const form = [...document.forms].find(form => {
+      const action = new URL(form.action, location.href);
+      if (action.origin !== location.origin || form.querySelector('input[type="password"]')) return false;
+      const fields = [...form.querySelectorAll('input')].filter(input =>
+        !input.disabled && ['text','number','tel','search'].includes(input.type) && visible(input));
+      if (!fields.length) return false;
+      const images = [...form.querySelectorAll('img')].filter(visible);
+      if (!images.length) return false;
+      const namedCode = fields.some(input =>
+        /^(?:captcha|captcha_code|checkcode|verifycode|verify_code|seccode)$/i.test(input.name));
+      const codeImage = images.some(img => /captcha|checkcode|verifycode|seccode|验证码|驗證碼/i.test(
         [img.getAttribute('src'), img.alt, img.id].join(' ')));
-    const hasSearch = form && !!form.querySelector('[name="searchkey"]');
-    if (!field || !form || !(hasCode || hasSearch)) return false;
-    out.ready=false;out.verificationRequired=true;
+      const verifySubmit = [...form.querySelectorAll('button,input[type="submit"]')].some(button =>
+        visible(button) &&
+        /^(?:验证并搜索|驗證並搜索|驗證並搜尋)$/.test(
+          (button.tagName === 'INPUT' ? button.value : button.textContent).trim()));
+      return verifySubmit ||
+        (searchPath && namedCode && (codeImage || !!form.querySelector('[name="searchkey"]')));
+    });
+    if (!form) return false;
+    out.ready=false;out.verificationRequired=true;out.searchChallenge=true;
     out.error='原站搜索需要验证码，请打开原站填写后继续';
     return true;
   }
@@ -81,7 +95,7 @@ const biliHomeReadyScript =
     _biliAccessGuard +
     _biliSearchVerificationGuard +
     r'''
-  const out={url:location.href,ready:!!document.querySelector('#searchkey[name="searchkey"]')};
+  const out={url:location.href,documentLoading:document.readyState==='loading',ready:!!document.querySelector('#searchkey[name="searchkey"]')};
   if (biliCheckAccess(out) || biliCheckSearchVerification(out)) return JSON.stringify(out);
   return JSON.stringify(out);
 })()''';
@@ -135,7 +149,7 @@ const biliSearchProbeScript =
     _biliAccessGuard +
     _biliSearchVerificationGuard +
     r'''
-  const result = {url:location.href, ready:false, books:[], next:null};
+  const result = {url:location.href, documentLoading:document.readyState==='loading', ready:false, books:[], next:null};
   if (biliCheckAccess(result) || biliCheckSearchVerification(result)) return JSON.stringify(result);
   if (window.__liteTaleBiliSearchPending) return JSON.stringify(result);
   if (document.readyState === 'loading' || location.pathname === '/' || !document.body) return JSON.stringify(result);

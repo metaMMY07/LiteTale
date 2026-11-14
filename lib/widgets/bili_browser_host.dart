@@ -6,12 +6,28 @@ import 'package:wild/widgets/wenku_webview.dart';
 class BiliBrowserHost extends StatefulWidget {
   const BiliBrowserHost({super.key, required this.child});
   final Widget child;
+
+  static WenkuWebView? takeSearchView(
+    BuildContext context,
+    BiliSiteVerificationRequired request,
+  ) {
+    final host = context.findAncestorStateOfType<_BiliBrowserHostState>();
+    final renderer = host?._renderer.currentState;
+    if (renderer == null ||
+        !renderer.session.showHeldSearch(request, renderer)) {
+      return null;
+    }
+    return renderer.web;
+  }
+
   @override
   State<BiliBrowserHost> createState() => _BiliBrowserHostState();
 }
 
 class _BiliBrowserHostState extends State<BiliBrowserHost> {
   final session = BiliBrowserSession.instance;
+  GlobalKey<_RendererState> _renderer = GlobalKey<_RendererState>();
+  late int _generation = session.rendererGeneration;
   @override
   void initState() {
     super.initState();
@@ -19,7 +35,13 @@ class _BiliBrowserHostState extends State<BiliBrowserHost> {
   }
 
   void _changed() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {
+      if (_generation != session.rendererGeneration) {
+        _generation = session.rendererGeneration;
+        _renderer = GlobalKey<_RendererState>();
+      }
+    });
   }
 
   @override
@@ -40,7 +62,10 @@ class _BiliBrowserHostState extends State<BiliBrowserHost> {
               child: SizedBox(
                 width: 1024,
                 height: 768,
-                child: _Renderer(key: ValueKey(session.rendererGeneration)),
+                child: _Renderer(
+                  key: _renderer,
+                  showWebView: !session.showingSearchChallenge,
+                ),
               ),
             ),
           ),
@@ -50,7 +75,8 @@ class _BiliBrowserHostState extends State<BiliBrowserHost> {
 }
 
 class _Renderer extends StatefulWidget {
-  const _Renderer({super.key});
+  const _Renderer({super.key, required this.showWebView});
+  final bool showWebView;
   @override
   State<_Renderer> createState() => _RendererState();
 }
@@ -70,8 +96,10 @@ class _RendererState extends State<_Renderer> implements BiliBrowserPort {
     try {
       await web.initialize(
         onLoaded: () {},
-        onError: (_) {},
-        allowMainFrameNavigation: BiliBrowserSession.allowsNavigation,
+        onError: (_) => session.navigationFailed(this),
+        allowMainFrameNavigation: session.allowsRendererNavigation,
+        onNavigationBlocked:
+            () => session.navigationFailed(this, blocked: true),
         normalBrowserUserAgent: true,
         enableVerificationCookies: true,
       );
@@ -97,11 +125,13 @@ class _RendererState extends State<_Renderer> implements BiliBrowserPort {
   @override
   void dispose() {
     session.detach(this);
-    unawaited(web.dispose());
+    unawaited(web.dispose().catchError((Object _) {}));
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) =>
-      initialized ? web.build() : const SizedBox.shrink();
+      initialized && widget.showWebView
+          ? web.buildTransferable()
+          : const SizedBox.shrink();
 }

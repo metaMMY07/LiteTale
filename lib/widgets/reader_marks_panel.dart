@@ -100,8 +100,13 @@ void showReaderMarkError(BuildContext context, String message) {
 /// Draws selection and draggable grips above the paper. Saved marks themselves
 /// are drawn in the text layer so they are also included in a curled page.
 class ReaderMarkLayer extends StatefulWidget {
-  const ReaderMarkLayer({super.key, required this.selection});
+  const ReaderMarkLayer({
+    super.key,
+    required this.selection,
+    this.pageNumberAt,
+  });
   final ReaderMarkSelection selection;
+  final int? Function(ReaderMarkLocation)? pageNumberAt;
   @override
   State<ReaderMarkLayer> createState() => _ReaderMarkLayerState();
 }
@@ -149,6 +154,7 @@ class _ReaderMarkLayerState extends State<ReaderMarkLayer> {
     note: note,
     encodedQuote: target.encoded,
     matchId: _selection.matching(target)?.id,
+    pageNumber: widget.pageNumberAt?.call(target.location),
   );
 
   Future<void> _note(ReaderTextSelection target) async {
@@ -495,6 +501,8 @@ Future<ReaderMark?> showReaderMarks(
   required ReaderMarkSelection selection,
   required ReaderMarkLocation current,
   String bookmarkExcerpt = '',
+  int? bookmarkPageNumber,
+  int? Function(ReaderMark)? pageNumberForMark,
   bool Function(ReaderMarkLocation)? onCurrentPage,
 }) {
   final sheet = _ReaderMarksPanel(
@@ -502,6 +510,8 @@ Future<ReaderMark?> showReaderMarks(
     book: selection.book,
     current: current,
     bookmarkExcerpt: bookmarkExcerpt,
+    bookmarkPageNumber: bookmarkPageNumber,
+    pageNumberForMark: pageNumberForMark,
     onCurrentPage: onCurrentPage,
   );
   if (usesAppleGlass) {
@@ -527,11 +537,15 @@ class _ReaderMarksPanel extends StatefulWidget {
     required this.book,
     required this.current,
     required this.bookmarkExcerpt,
+    this.bookmarkPageNumber,
+    this.pageNumberForMark,
     this.onCurrentPage,
   });
   final ReaderMarkStore store;
   final String book, bookmarkExcerpt;
   final ReaderMarkLocation current;
+  final int? bookmarkPageNumber;
+  final int? Function(ReaderMark)? pageNumberForMark;
   final bool Function(ReaderMarkLocation)? onCurrentPage;
   @override
   State<_ReaderMarksPanel> createState() => _ReaderMarksPanelState();
@@ -625,15 +639,41 @@ class _ReaderMarksPanelState extends State<_ReaderMarksPanel> {
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: AppSegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(value: true, label: Text('书签')),
-                      ButtonSegment(value: false, label: Text('高亮')),
-                    ],
-                    selected: {_bookmarks},
-                    onSelectionChanged:
-                        (value) => setState(() => _bookmarks = value.single),
-                  ),
+                  // Keep the segmented control and list on the same Flutter
+                  // canvas in this clipped, scrolling modal on iOS.
+                  child:
+                      usesAppleGlass
+                          ? SizedBox(
+                            width: double.infinity,
+                            child: CupertinoSlidingSegmentedControl<bool>(
+                              groupValue: _bookmarks,
+                              onValueChanged: (value) {
+                                if (value != null) {
+                                  setState(() => _bookmarks = value);
+                                }
+                              },
+                              children: const {
+                                true: Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 10),
+                                  child: Text('书签'),
+                                ),
+                                false: Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 10),
+                                  child: Text('高亮'),
+                                ),
+                              },
+                            ),
+                          )
+                          : AppSegmentedButton<bool>(
+                            segments: const [
+                              ButtonSegment(value: true, label: Text('书签')),
+                              ButtonSegment(value: false, label: Text('高亮')),
+                            ],
+                            selected: {_bookmarks},
+                            onSelectionChanged:
+                                (value) =>
+                                    setState(() => _bookmarks = value.single),
+                          ),
                 ),
                 Expanded(
                   child: FutureBuilder<void>(
@@ -685,77 +725,118 @@ class _ReaderMarksPanelState extends State<_ReaderMarksPanel> {
         }
       }
     }
-    final existing = here;
-    return ListView(
+    final headerCount = _bookmarks ? 1 : 0;
+    return ListView.builder(
       key: ValueKey(_bookmarks),
+      primary: false,
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-      children: [
-        if (_bookmarks)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: AppButton.tonal(
-              onPressed:
-                  _busy
-                      ? null
-                      : () => _change(
-                        () =>
-                            existing == null
-                                ? widget.store.addBookmark(
-                                  widget.book,
-                                  widget.current,
-                                  quote: widget.bookmarkExcerpt,
-                                )
-                                : widget.store.remove(widget.book, existing.id),
-                      ),
-              child: Text(existing == null ? '添加当前位置书签' : '移除当前位置书签'),
-            ),
-          ),
-        if (items.isEmpty)
-          Padding(
+      itemCount: headerCount + math.max(1, items.length),
+      itemBuilder: (context, index) {
+        if (_bookmarks && index == 0) return _bookmarkButton(here);
+        if (items.isEmpty) {
+          return Padding(
             padding: const EdgeInsets.symmetric(vertical: 48),
             child: Text(
               _bookmarks ? '还没有书签' : '长按正文，可添加高亮或笔记',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
-          ),
-        for (final mark in items)
-          ListTile(
-            key: ValueKey(mark.id),
-            leading:
-                mark.color == null
-                    ? const Icon(Icons.bookmark_border_rounded)
-                    : Icon(
-                      Icons.circle,
-                      color: Color(mark.color!.argb),
-                      size: 16,
-                    ),
-            title: Text(
-              mark.isBookmark
-                  ? mark.location.title
-                  : readerMarkExcerpt(mark.quote, encoded: mark.encodedQuote),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-            subtitle: Text(
-              [
-                if (!mark.isBookmark)
-                  mark.location.title
-                else if (mark.quote.isNotEmpty)
-                  mark.quote,
-                if (mark.note.isNotEmpty) mark.note,
-              ].join('\n'),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-            trailing: AppIconButton(
-              tooltip: '管理标记',
-              onPressed: _busy ? null : () => _actions(mark),
-              icon: const Icon(Icons.more_horiz),
-            ),
-            onTap: _busy ? null : () => Navigator.pop(context, mark),
-          ),
-      ],
+          );
+        }
+        return _markRow(items[index - headerCount]);
+      },
+    );
+  }
+
+  Widget _bookmarkButton(ReaderMark? existing) {
+    final label = existing == null ? '添加当前位置书签' : '移除当前位置书签';
+    final onPressed =
+        _busy
+            ? null
+            : () => _change(
+              () =>
+                  existing == null
+                      ? widget.store.addBookmark(
+                        widget.book,
+                        widget.current,
+                        quote: widget.bookmarkExcerpt,
+                        pageNumber: widget.bookmarkPageNumber,
+                      )
+                      : widget.store.remove(widget.book, existing.id),
+            );
+    final colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child:
+          usesAppleGlass
+              ? CupertinoButton(
+                color: colors.primaryContainer,
+                borderRadius: BorderRadius.circular(20),
+                alignment: AlignmentDirectional.centerStart,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                onPressed: onPressed,
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: _busy ? colors.onSurfaceVariant : colors.primary,
+                  ),
+                ),
+              )
+              : AppButton.tonal(onPressed: onPressed, child: Text(label)),
+    );
+  }
+
+  Widget _markRow(ReaderMark mark) {
+    final location = mark.location;
+    final chapter = location.title.isEmpty ? '未命名章节' : location.title;
+    final pageNumber = widget.pageNumberForMark?.call(mark);
+    final savedPage =
+        mark.pageNumber ??
+        (location.axis == ReaderMarkAxis.page ? location.offset + 1 : null);
+    final excerpt = readerMarkExcerpt(mark.quote, encoded: mark.encodedQuote);
+    final details = [
+      if (!mark.isBookmark)
+        Text(chapter, maxLines: 2, overflow: TextOverflow.ellipsis),
+      if (pageNumber != null)
+        Text('第 $pageNumber 页')
+      else if (savedPage != null)
+        Text('保存时第 $savedPage 页'),
+      if (mark.isBookmark && excerpt.isNotEmpty)
+        Text(excerpt, maxLines: 2, overflow: TextOverflow.ellipsis),
+      if (mark.note.isNotEmpty)
+        Text(mark.note, maxLines: 2, overflow: TextOverflow.ellipsis),
+    ];
+    return ListTile(
+      key: ValueKey(mark.id),
+      leading:
+          mark.isBookmark
+              ? const Icon(Icons.bookmark_border_rounded)
+              : Icon(Icons.circle, color: Color(mark.color!.argb), size: 16),
+      title: Text(
+        mark.isBookmark ? chapter : excerpt,
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle:
+          details.isEmpty
+              ? null
+              : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: details,
+              ),
+      trailing: SizedBox.square(
+        dimension: 44,
+        child: AppIconButton(
+          tooltip: '管理标记',
+          onPressed: _busy ? null : () => _actions(mark),
+          icon: const Icon(Icons.more_horiz),
+        ),
+      ),
+      onTap: _busy ? null : () => Navigator.pop(context, mark),
     );
   }
 }

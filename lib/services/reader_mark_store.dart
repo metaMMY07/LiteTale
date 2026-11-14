@@ -116,6 +116,7 @@ class ReaderMarkStore extends ChangeNotifier {
     String book,
     ReaderMarkLocation location, {
     String quote = '',
+    int? pageNumber,
   }) => _edit(book, (next) {
     if (next.any(
       (mark) => mark.isBookmark && mark.location.samePosition(location),
@@ -129,6 +130,7 @@ class ReaderMarkStore extends ChangeNotifier {
         location: location,
         createdAt: DateTime.now(),
         quote: quote,
+        pageNumber: pageNumber,
       ),
     );
     return true;
@@ -142,6 +144,7 @@ class ReaderMarkStore extends ChangeNotifier {
     String? note,
     bool encodedQuote = false,
     String? matchId,
+    int? pageNumber,
   }) => _edit(book, (next) {
     if (quote.trim().isEmpty ||
         quote.length > ReaderMark.maxQuoteLength ||
@@ -163,6 +166,7 @@ class ReaderMarkStore extends ChangeNotifier {
       color: color,
       note: note ?? existing?.note ?? '',
       encodedQuote: encodedQuote,
+      pageNumber: pageNumber ?? existing?.pageNumber,
     );
     if (index < 0) {
       next.insert(0, mark);

@@ -255,6 +255,10 @@ class Wenku8BrowserSession extends ChangeNotifier {
     _navigationError = const Wenku8BrowserException('文库8网页连接中断，请重试。');
   }
 
+  void navigationBlocked() {
+    _navigationError = const Wenku8BrowserException('文库8网页离开了当前站点，已停止读取。');
+  }
+
   void attachmentFailed() {
     final waiting = _attachment;
     if (waiting != null && !waiting.isCompleted) {
@@ -488,8 +492,9 @@ class Wenku8BrowserSession extends ChangeNotifier {
   Future<void> _navigate(
     Wenku8BrowserPort port,
     String host,
-    Uri target,
-  ) async {
+    Uri target, {
+    bool catalog = false,
+  }) async {
     if (!sameOrigin(target.toString(), host)) {
       throw const Wenku8BrowserException('文库8请求地址不属于当前站点。');
     }
@@ -502,7 +507,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
     _captchaEpoch = null;
     _navigationError = null;
     await port.loadUrl(target.toString());
-    await _waitForPage(port, host, target);
+    await _waitForPage(port, host, target, catalog: catalog);
   }
 
   Future<void> _waitForPage(
@@ -510,9 +515,11 @@ class Wenku8BrowserSession extends ChangeNotifier {
     String host,
     Uri target, {
     bool searchResult = false,
+    bool catalog = false,
   }) async {
     final deadline = DateTime.now().add(pageTimeout);
     DateTime? verificationSince;
+    var sawCatalog = false;
     while (DateTime.now().isBefore(deadline)) {
       if (_navigationError case final error?) throw error;
       {
@@ -546,7 +553,9 @@ class Wenku8BrowserSession extends ChangeNotifier {
           }
         } else if (state['domReady'] == true ||
             state['ready'] == true ||
+            (catalog && state['catalogReady'] == true) ||
             (searchResult && state['searchReady'] == true)) {
+          verificationSince = null;
           final loaded = Uri.parse(url);
           if (loaded.path == '/login.php' && target.path != '/login.php') {
             if (host == await apiHost()) {
@@ -560,6 +569,20 @@ class Wenku8BrowserSession extends ChangeNotifier {
             }
             throw Wenku8SiteLoginRequired(loaded);
           }
+          if (catalog) {
+            if (!_matchesCatalogTarget(loaded, target)) {
+              if (state['ready'] == true) {
+                throw const Wenku8CatalogFormatException('文库8跳转到了其他页面，请重试。');
+              }
+              await Future<void>.delayed(pollInterval);
+              continue;
+            }
+            sawCatalog = true;
+            if (state['catalogReady'] != true && state['ready'] != true) {
+              await Future<void>.delayed(pollInterval);
+              continue;
+            }
+          }
           return;
         }
       }
@@ -567,6 +590,9 @@ class Wenku8BrowserSession extends ChangeNotifier {
     }
     if (verificationSince != null) {
       throw Wenku8SiteVerificationRequired(target: target);
+    }
+    if (sawCatalog) {
+      throw const Wenku8CatalogFormatException('原站页面没有返回可读取的分类或书目。');
     }
     throw const Wenku8BrowserException('文库8网页加载超时，请重试。');
   }
@@ -719,6 +745,9 @@ class Wenku8BrowserSession extends ChangeNotifier {
   }) => _serial(() async {
     final host = await apiHost();
     final port = await _commands();
+    final catalog =
+        kind == 'tags' ||
+        (kind == 'list' && _catalogPaths.contains(target.path));
     String? searchIdentity;
     var succeeded = false;
     try {
@@ -728,6 +757,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
           host,
           target,
           wenku8ReadDomExtractionScript(host, kind: kind, aid: aid),
+          catalog: catalog,
         );
         if (snapshot != null) {
           try {
@@ -788,19 +818,8 @@ class Wenku8BrowserSession extends ChangeNotifier {
             await _waitForSearchPage(port, host, target);
           }
         }
-      } else if (target.path == '/modules/article/tags.php') {
-        // Categories also expect ordinary same-origin navigation from home.
-        await _navigate(port, host, Uri.parse('$host/'));
-        if (!sameOrigin(target.toString(), host)) {
-          throw const Wenku8BrowserException('文库8请求地址不属于当前站点。');
-        }
-        await _admitRequest(host);
-        await port.executeScript(
-          'window.__liteTaleNavigating = true; location.assign(${jsonEncode(target.toString())}); true;',
-        );
-        await _waitForPage(port, host, target);
       } else {
-        await _navigate(port, host, target);
+        await _navigate(port, host, target, catalog: catalog);
       }
       final loaded = await port.currentUrl();
       // Wenku8 redirects an exact, single search hit to its detail page.
@@ -844,26 +863,25 @@ class Wenku8BrowserSession extends ChangeNotifier {
             )
             as T;
       }
-      if ((kind == 'tags' ||
-              (kind == 'list' &&
-                  const {
-                    '/modules/article/tags.php',
-                    '/modules/article/toplist.php',
-                    '/modules/article/articlelist.php',
-                  }.contains(target.path))) &&
-          !_matchesCatalogTarget(Uri.parse(loaded), target)) {
-        throw const Wenku8BrowserException('文库8跳转到了其他页面，请返回重试。');
+      if (catalog && !_matchesCatalogTarget(Uri.parse(loaded), target)) {
+        throw const Wenku8CatalogFormatException('文库8跳转到了其他页面，请重试。');
       }
       final raw = await port.executeScript(
         wenku8ReadDomExtractionScript(host, kind: kind, aid: aid),
       );
-      final value = parseWenku8ReadWebViewResult(
-        raw,
-        apiHost: host,
-        loadedUrl: loaded,
-        kind: kind,
-        aid: aid,
-      );
+      final Object value;
+      try {
+        value = parseWenku8ReadWebViewResult(
+          raw,
+          apiHost: host,
+          loadedUrl: loaded,
+          kind: kind,
+          aid: aid,
+        );
+      } on FormatException catch (error) {
+        if (!catalog) rethrow;
+        throw Wenku8CatalogFormatException(error.message);
+      }
       await enable(host);
       if (searchIdentity != null) _nextSearchPage = null;
       if (searchIdentity != null &&
@@ -889,6 +907,12 @@ class Wenku8BrowserSession extends ChangeNotifier {
     }
   });
 
+  static const _catalogPaths = {
+    '/modules/article/tags.php',
+    '/modules/article/toplist.php',
+    '/modules/article/articlelist.php',
+  };
+
   static bool _matchesCatalogTarget(Uri loaded, Uri target) {
     if (loaded.origin != target.origin ||
         loaded.path != target.path ||
@@ -900,10 +924,24 @@ class Wenku8BrowserSession extends ChangeNotifier {
     List<String> query(Uri uri) =>
         uri.query
             .split('&')
-            .where((part) => part.isNotEmpty && part != 'charset=gbk')
+            .where(
+              (part) => part.isNotEmpty && part.toLowerCase() != 'charset=gbk',
+            )
+            .map(
+              (part) => part.replaceAllMapped(
+                RegExp(r'%[a-fA-F0-9]{2}'),
+                (match) => match[0]!.toUpperCase(),
+              ),
+            )
             .toList()
           ..sort();
-    return listEquals(query(loaded), query(target));
+    final expected = query(target);
+    final actual = query(loaded);
+    if (listEquals(actual, expected)) return true;
+    return _catalogPaths.contains(target.path) &&
+        expected.remove('page=1') &&
+        !actual.any((part) => part.startsWith('page=')) &&
+        listEquals(actual, expected);
   }
 
   Future<Uint8List> captcha() => _serial(() async {
@@ -1030,6 +1068,11 @@ class Wenku8BrowserSession extends ChangeNotifier {
                 RegExp(
                   r'^/novel/\d+/[1-9]\d*/\d+\.htm$',
                 ).hasMatch(loaded.path)));
+    final catalogTarget = target != null && _catalogPaths.contains(target.path);
+    final login = loaded.path == '/login.php' && data['loginForm'] == true;
+    if (catalogTarget && !targetReady && !login) {
+      throw const Wenku8BrowserException('请在原站打开本次请求的分类或排行，再返回重试。');
+    }
     if (!targetReady &&
         (data['loginForm'] != true || loaded.path != '/login.php') &&
         data['authenticated'] != true &&
@@ -1045,7 +1088,9 @@ class Wenku8BrowserSession extends ChangeNotifier {
     _captchaEpoch = null;
     ++_captchaRequest;
     final authenticated = data['authenticated'] == true;
-    await _writeProperty(_loginKey, authenticated ? host : '');
+    if (authenticated || login) {
+      await _writeProperty(_loginKey, authenticated ? host : '');
+    }
     return authenticated;
   }
 
@@ -1075,6 +1120,7 @@ class Wenku8BrowserSession extends ChangeNotifier {
     String extraction, {
     Duration maxDuration = const Duration(seconds: 8),
     bool Function()? isCancelled,
+    bool catalog = false,
   }) async {
     rateLimits.check(host);
     if (isCancelled?.call() == true) return null;
@@ -1119,12 +1165,16 @@ class Wenku8BrowserSession extends ChangeNotifier {
           retryAfterSeconds: (value['retryAfterSeconds'] as num?)?.toInt(),
         );
       }
+      if (catalog && status is int && value['challenge'] == true) {
+        throw Wenku8SiteVerificationRequired(target: target);
+      }
       if (status is int && status != 403) {
         throw Wenku8BrowserException('文库8请求失败（HTTP $status），请稍后重试。');
       }
       if (value['url'] != target.toString()) return null;
       return value['payload'];
     }
+    if (catalog) return null;
     throw const Wenku8BrowserException('文库8网页加载超时，请重试。');
   }
 
@@ -1235,10 +1285,14 @@ class Wenku8BrowserSession extends ChangeNotifier {
   var searchReady=location.pathname==='/modules/article/search.php' &&
     !!document.querySelector('table.grid') && !!pages &&
     (Number(pages[2])===1 || !!document.querySelector('#pagelink a.last'));
-  var catalogReady = (location.pathname === '/modules/article/tags.php' &&
-    !!document.querySelector('ul.ultops a')) ||
-    (/^\/modules\/article\/(?:tags|toplist|articlelist)\.php$/.test(location.pathname) &&
-    !!document.querySelector('table.grid') && (!!document.querySelector('table.grid a[href*="/book/"]') || !!pages));
+  var tagIndex = location.pathname === '/modules/article/tags.php' &&
+    !new URLSearchParams(location.search).has('t');
+  var listReady = /^\/modules\/article\/(?:tags|toplist|articlelist)\.php$/.test(location.pathname) &&
+    !!document.querySelector('table.grid') && !!pages &&
+    (!!document.querySelector('table.grid a[href*="/book/"]') ||
+      (Number(pages[1]) === 1 && Number(pages[2]) === 1));
+  var catalogReady = document.readyState !== 'loading' &&
+    (tagIndex ? !!document.querySelector('ul.ultops a') : listReady);
   var chapterReady = /^\/novel\/\d+\/[1-9]\d*\/\d+\.htm$/.test(location.pathname) &&
     !!document.querySelector('#content') && !!document.querySelector('#content').textContent.trim();
   return JSON.stringify({url:location.href,ready:document.readyState === 'complete',

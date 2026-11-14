@@ -5,7 +5,37 @@ import 'package:flutter/material.dart';
 import 'package:wild/services/bili_browser.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
+import 'bili_browser_host.dart';
 import 'bili_verification_page.dart';
+
+Future<bool> openBiliVerification(
+  BuildContext context,
+  BiliSiteVerificationRequired request,
+) async {
+  if (!context.mounted ||
+      ModalRoute.of(context)?.isCurrent == false ||
+      activeSource.value != SourceId.bili ||
+      sourceRevision.value != request.revision) {
+    return false;
+  }
+  final session = BiliBrowserSession.instance;
+  try {
+    final searchView =
+        request.searchChallenge
+            ? BiliBrowserHost.takeSearchView(context, request)
+            : null;
+    final page = HorizontalCoverPageRoute<bool>(
+      fullscreenDialog: true,
+      builder:
+          (_) => BiliVerificationPage(request: request, searchView: searchView),
+    );
+    final result = await Navigator.of(context).push(page);
+    await page.completed;
+    return result == true;
+  } finally {
+    if (request.searchChallenge) session.releaseHeldSearch(request);
+  }
+}
 
 /// Offers a same-site verification flow for the exact Bili request that failed.
 /// A stale verification must never replay a different book or source request.
@@ -30,20 +60,6 @@ class BiliRecoveryButton extends StatefulWidget {
 class _BiliRecoveryButtonState extends State<BiliRecoveryButton> {
   bool _opening = false;
 
-  Future<bool> _verify(
-    BuildContext context,
-    BiliSiteVerificationRequired request,
-  ) async {
-    if (!context.mounted) return false;
-    final page = HorizontalCoverPageRoute<bool>(
-      fullscreenDialog: true,
-      builder: (_) => BiliVerificationPage(request: request),
-    );
-    final result = await Navigator.of(context).push(page);
-    await page.completed;
-    return result == true;
-  }
-
   Future<void> _recover() async {
     if (_opening || widget.source != SourceId.bili) return;
     final error = widget.error;
@@ -55,7 +71,7 @@ class _BiliRecoveryButtonState extends State<BiliRecoveryButton> {
     setState(() => _opening = true);
     try {
       final verified = await (widget.verify ??
-          (context) => _verify(context, error))(context);
+          (context) => openBiliVerification(context, error))(context);
       if (!mounted ||
           verified != true ||
           source != SourceId.bili ||

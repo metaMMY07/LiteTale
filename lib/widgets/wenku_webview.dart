@@ -13,16 +13,40 @@ import 'package:webview_windows/webview_windows.dart' as windows;
 class WenkuWebView {
   windows.WebviewController? _windows;
   mobile.WebViewController? _mobile;
+  final _transferKey = GlobalKey();
   String? _normalMobileAgent;
   final _subscriptions = <StreamSubscription<dynamic>>[];
+  late VoidCallback _onLoaded;
+  late void Function(String) _onError;
+  bool Function(String)? _allowNavigation;
+  VoidCallback? _onNavigationBlocked;
+
+  void setPageHandlers({
+    required VoidCallback onLoaded,
+    required void Function(String) onError,
+    bool Function(String)? allowMainFrameNavigation,
+    VoidCallback? onNavigationBlocked,
+  }) {
+    _onLoaded = onLoaded;
+    _onError = onError;
+    _allowNavigation = allowMainFrameNavigation;
+    _onNavigationBlocked = onNavigationBlocked;
+  }
 
   Future<void> initialize({
     required VoidCallback onLoaded,
     required void Function(String) onError,
     bool Function(String)? allowMainFrameNavigation,
+    VoidCallback? onNavigationBlocked,
     bool normalBrowserUserAgent = false,
     bool enableVerificationCookies = false,
   }) async {
+    setPageHandlers(
+      onLoaded: onLoaded,
+      onError: onError,
+      allowMainFrameNavigation: allowMainFrameNavigation,
+      onNavigationBlocked: onNavigationBlocked,
+    );
     if (Platform.isWindows) {
       final version = await windows.WebviewController.getWebViewVersion();
       if (version == null) {
@@ -42,7 +66,7 @@ class WenkuWebView {
       }
       _subscriptions.add(
         controller.loadingState.listen((state) {
-          if (state == windows.LoadingState.navigationCompleted) onLoaded();
+          if (state == windows.LoadingState.navigationCompleted) _onLoaded();
         }),
       );
       _subscriptions.add(
@@ -50,7 +74,7 @@ class WenkuWebView {
           if (error != windows.WebErrorStatus.WebErrorStatusUnknown &&
               error != windows.WebErrorStatus.WebErrorStatusConnectionAborted &&
               error != windows.WebErrorStatus.WebErrorStatusOperationCanceled) {
-            onError('WebView2 加载失败: $error');
+            _onError('WebView2 加载失败: $error');
           }
         }),
       );
@@ -85,17 +109,19 @@ class WenkuWebView {
       await controller.setJavaScriptMode(mobile.JavaScriptMode.unrestricted);
       await controller.setNavigationDelegate(
         mobile.NavigationDelegate(
-          onNavigationRequest:
-              (request) =>
-                  !request.isMainFrame ||
-                          allowMainFrameNavigation == null ||
-                          allowMainFrameNavigation(request.url)
-                      ? mobile.NavigationDecision.navigate
-                      : mobile.NavigationDecision.prevent,
-          onPageFinished: (_) => onLoaded(),
+          onNavigationRequest: (request) {
+            if (request.isMainFrame &&
+                _allowNavigation?.call(request.url) == false) {
+              _onNavigationBlocked?.call();
+              return mobile.NavigationDecision.prevent;
+            }
+            return mobile.NavigationDecision.navigate;
+          },
+          onPageFinished: (_) => _onLoaded(),
           onWebResourceError: (error) {
-            if (error.isForMainFrame == true) {
-              onError('网页加载失败: ${error.description}');
+            if (error.isForMainFrame == true &&
+                !(Platform.isIOS && error.errorCode == -999)) {
+              _onError('网页加载失败: ${error.description}');
             }
           },
         ),
@@ -170,6 +196,9 @@ class WenkuWebView {
       _windows != null
           ? windows.Webview(_windows!, width: 1024, height: 768)
           : mobile.WebViewWidget(controller: _mobile!);
+
+  /// The platform view retains its native identity when it changes parents.
+  Widget buildTransferable() => KeyedSubtree(key: _transferKey, child: build());
 
   Future<void> dispose() async {
     // Android's platform view owns the controller lifetime. Stop an abandoned

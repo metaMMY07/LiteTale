@@ -670,13 +670,54 @@ class ReaderCubit extends Cubit<ReaderState> {
     return selected;
   }
 
+  /// Maps a content anchor to the complete owning chapter's pagination.
+  int? markPageNumber(ReaderMarkLocation location) {
+    final loaded = state;
+    if (loaded is! ReaderLoaded) return null;
+    final chapter = location.chapter;
+    final window = _bookWindow;
+    final List<ReaderPage> pages;
+    if (window == null) {
+      if (loaded.aid != chapter.aid || loaded.cid != chapter.cid) return null;
+      pages = loaded.pages;
+    } else {
+      final ref =
+          window.refs.where((ref) {
+            final owner = ref.owner.chapter;
+            return owner.aid == chapter.aid && owner.cid == chapter.cid;
+          }).firstOrNull;
+      if (ref == null) return null;
+      pages = ref.owner.pages;
+    }
+    final index = _pageIndexForMark(location, pages, location.offset);
+    return index == null ? null : index + 1;
+  }
+
+  int? savedMarkPageNumber(ReaderMark mark) {
+    final location = mark.location;
+    if (mark.isBookmark) return markPageNumber(location);
+    final text = markText(location.chapter, location.axis)?.text;
+    final offset = text == null ? null : mark.offsetIn(text);
+    return offset == null ? null : markPageNumber(location.at(offset));
+  }
+
   int? _markPageIndex(ReaderMark mark, List<ReaderPage> pages, String text) {
     final location = mark.location;
+    final offset =
+        location.axis == ReaderMarkAxis.page
+            ? location.offset
+            : mark.offsetIn(text);
+    return offset == null ? null : _pageIndexForMark(location, pages, offset);
+  }
+
+  int? _pageIndexForMark(
+    ReaderMarkLocation location,
+    List<ReaderPage> pages,
+    int offset,
+  ) {
     if (location.axis == ReaderMarkAxis.page) {
-      return location.offset < pages.length ? location.offset : null;
+      return offset < pages.length ? offset : null;
     }
-    final offset = mark.offsetIn(text);
-    if (offset == null) return null;
     for (var i = 0; i < pages.length; i++) {
       final page = pages[i];
       if (location.axis == ReaderMarkAxis.epubDom) {
@@ -686,6 +727,8 @@ class ReaderCubit extends Cubit<ReaderState> {
                 css.domStart < offset && offset < css.domEnd)) {
           return i;
         }
+      } else if (page.cssPage != null) {
+        continue;
       } else if (location.imageIndex != null) {
         if (page.isImage && page.markStart == offset) return i;
       } else if (!page.isImage &&

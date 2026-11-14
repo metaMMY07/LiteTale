@@ -35,6 +35,7 @@ String wenku8DocumentReadScript({
       if (response.url !== target) { state.error='navigation'; return; }
       if (!response.ok) {
         state.status=response.status;
+        if (response.headers.get('cf-mitigated') === 'challenge') state.challenge=true;
         if(response.status===429) {
           var retry=response.headers.get('retry-after') || '';
           var seconds=/^\\d+\$/.test(retry.trim()) ? Number(retry) :
@@ -99,7 +100,7 @@ const wenku8DocumentReadStateScript = '''
   if (!state) return JSON.stringify({error:'navigation'});
   return JSON.stringify({pending:state.pending,error:state.error,
     status:state.status,retryAfterSeconds:state.retryAfterSeconds,
-    url:state.url,payload:state.payload});
+    challenge:state.challenge,url:state.url,payload:state.payload});
 })()
 ''';
 

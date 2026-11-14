@@ -49,6 +49,7 @@ class _CategoryPageState extends State<CategoryPage> {
   int _tagRequest = 0;
   int _pageRequest = 0;
   int _choiceRevision = 0;
+  bool _preferencesLoaded = false;
   Future<void> _preferenceWrites = Future.value();
   static const _keyTag = 'category_page_selected_tag';
   static const _keyViewMode = 'category_page_view_mode';
@@ -84,8 +85,10 @@ class _CategoryPageState extends State<CategoryPage> {
       /* Preferences must not prevent a supplied tag loading. */
     }
     if (!mounted || choice != _choiceRevision) return;
+    _preferencesLoaded = true;
     setState(() {
       _selectedTag ??= savedTag.isEmpty ? null : savedTag;
+      _selectedTag ??= _tagGroups?.expand((group) => group.tags).firstOrNull;
       if (const {'0', '1', '2', '3'}.contains(savedMode)) _viewMode = savedMode;
     });
     if (_selectedTag case final tag?) await _loadTagPage(tag, refresh: true);
@@ -116,7 +119,20 @@ class _CategoryPageState extends State<CategoryPage> {
       );
       if (!mounted || request != _tagRequest) return;
       if (groups.isEmpty) throw const FormatException('文库8分类列表为空，请重试。');
-      setState(() => _tagGroups = groups);
+      setState(() {
+        _tagGroups = groups;
+        if (_preferencesLoaded) {
+          _selectedTag ??= groups.expand((group) => group.tags).firstOrNull;
+        }
+      });
+      if (_preferencesLoaded &&
+          _currentPage == null &&
+          !_isLoading &&
+          _pageError == null) {
+        if (_selectedTag case final tag?) {
+          await _loadTagPage(tag, refresh: true);
+        }
+      }
     } catch (error) {
       if (mounted && request == _tagRequest) setState(() => _tagError = error);
     }
@@ -169,6 +185,7 @@ class _CategoryPageState extends State<CategoryPage> {
 
   void _changeSelection({String? tag, String? mode}) {
     _choiceRevision++;
+    _preferencesLoaded = true;
     setState(() {
       _selectedTag = tag ?? _selectedTag;
       _viewMode = mode ?? _viewMode;

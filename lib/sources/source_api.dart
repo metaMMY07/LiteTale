@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:wild/services/wenku8_browser.dart';
@@ -699,28 +700,32 @@ Future<w8.PageStatsNovelCover> search({
   required int page,
 }) async {
   final source = activeSource.value;
+  ReadRequest.current?.check();
   if (page == 1) {
-    await ReadDiagnostics.measure(
-      source.name,
-      'search_history',
-      () => _serial(() async {
-        final history = await _jsonList(_searchKey(source));
-        history.removeWhere(
-          (h) => h['key'] == searchKey && h['type'] == searchType,
-        );
-        history.insert(0, {
-          'key': searchKey,
-          'type': searchType,
-          'time': DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        });
-        await db.saveProperty(
-          key: _searchKey(source),
-          value: jsonEncode(history.take(100).toList()),
-        );
+    unawaited(
+      ReadDiagnostics.measure(
+        source.name,
+        'search_history',
+        () => _serial(() async {
+          final history = await _jsonList(_searchKey(source));
+          history.removeWhere(
+            (h) => h['key'] == searchKey && h['type'] == searchType,
+          );
+          history.insert(0, {
+            'key': searchKey,
+            'type': searchType,
+            'time': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+          });
+          await db.saveProperty(
+            key: _searchKey(source),
+            value: jsonEncode(history.take(100).toList()),
+          );
+        }),
+      ).catchError((Object _) {
+        // A failed history write does not prevent the website search.
       }),
     );
   }
-  ReadRequest.current?.check();
   return ReadDiagnostics.measure(
     source.name,
     'search',

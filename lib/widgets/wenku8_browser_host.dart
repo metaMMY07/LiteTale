@@ -83,6 +83,11 @@ class _RendererState extends State<_Renderer>
             session.pageError();
           }
         },
+        onNavigationBlocked: () {
+          if (mounted && generation == session.rendererGeneration) {
+            session.navigationBlocked();
+          }
+        },
         allowMainFrameNavigation: session.allowsNavigation,
       );
       if (!mounted || generation != session.rendererGeneration) return;

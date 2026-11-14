@@ -212,7 +212,7 @@ class _RuleSourceManagerState extends State<RuleSourceManager> {
             itemCount: entries.length,
             itemBuilder: (context, index) {
               final entry = entries[index];
-              return AppleGlassCard(
+              return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: ListTile(
                   leading: Icon(

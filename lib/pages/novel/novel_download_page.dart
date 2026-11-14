@@ -49,7 +49,7 @@ class _NovelDownloadContent extends StatelessWidget {
                   context.read<NovelDownloadCubit>().loadDownloads();
                 }
               } catch (e, s) {
-                print("reset fail downloads error: $e, $s");
+                debugPrint('reset fail downloads error: $e, $s');
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -64,7 +64,7 @@ class _NovelDownloadContent extends StatelessWidget {
         ],
       ),
       body: BlocBuilder<NovelDownloadCubit, NovelDownloadState>(
-        builder: (context, state) {
+        builder: (pageContext, state) {
           if (state.isLoading) {
             return const CenteredLoadingIndicator();
           }
@@ -78,7 +78,7 @@ class _NovelDownloadContent extends StatelessWidget {
                   const SizedBox(height: 16),
                   AppButton.elevated(
                     onPressed: () {
-                      context.read<NovelDownloadCubit>().loadDownloads();
+                      pageContext.read<NovelDownloadCubit>().loadDownloads();
                     },
                     child: const Text('重试'),
                   ),
@@ -97,110 +97,116 @@ class _NovelDownloadContent extends StatelessWidget {
             itemCount: state.downloads.length,
             itemBuilder: (context, index) {
               final download = state.downloads[index];
-              return AppleGlassCard(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: InkWell(
-                  onTap: () async {
-                    await Navigator.push(
-                      context,
-                      HorizontalCoverPageRoute(
-                        builder:
-                            (context) => NovelDownloadInfoPage(
-                              novelId: download.novelId,
-                            ),
-                      ),
+              final row = InkWell(
+                onTap: () async {
+                  await pushAndWaitForPageExit(
+                    pageContext,
+                    HorizontalCoverPageRoute<void>(
+                      builder:
+                          (context) =>
+                              NovelDownloadInfoPage(novelId: download.novelId),
+                    ),
+                  );
+                  if (pageContext.mounted) {
+                    await pageContext.read<NovelDownloadCubit>().loadDownloads(
+                      keepVisible: true,
                     );
-                    if (context.mounted) {
-                      context.read<NovelDownloadCubit>().loadDownloads();
-                    }
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Row(
-                      children: [
-                        ClipRRect(
+                  }
+                },
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: BookCoverImage(
+                          url: download.coverUrl,
+                          source: sourceOf(download.novelId),
+                          width: 80,
+                          height: 120,
+                          fit: BoxFit.cover,
                           borderRadius: BorderRadius.circular(8),
-                          child: BookCoverImage(
-                            url: download.coverUrl,
-                            source: sourceOf(download.novelId),
-                            width: 80,
-                            height: 120,
-                            fit: BoxFit.cover,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
                         ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                download.novelName,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              download.novelName,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                download.author,
-                                style: TextStyle(
-                                  fontSize: 14,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              download.author,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[600],
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.book_outlined,
+                                  size: 16,
                                   color: Colors.grey[600],
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.book_outlined,
-                                    size: 16,
+                                const SizedBox(width: 4),
+                                Text(
+                                  '${download.downloadChapterCount}/${download.chooseChapterCount} 章节',
+                                  style: TextStyle(
+                                    fontSize: 14,
                                     color: Colors.grey[600],
                                   ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '${download.downloadChapterCount}/${download.chooseChapterCount} 章节',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.grey[600],
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.download_outlined,
+                                  size: 16,
+                                  color: Colors.grey[600],
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  _getStatusText(download.downloadStatus),
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: _getStatusColor(
+                                      download.downloadStatus,
                                     ),
                                   ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.download_outlined,
-                                    size: 16,
-                                    color: Colors.grey[600],
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    _getStatusText(download.downloadStatus),
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: _getStatusColor(
-                                        download.downloadStatus,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        _buildStatusIcon(download.downloadStatus),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 8),
+                      _buildStatusIcon(download.downloadStatus),
+                    ],
                   ),
                 ),
               );
+              const margin = EdgeInsets.symmetric(horizontal: 16, vertical: 8);
+              return usesAppleGlass
+                  ? Card(
+                    margin: margin,
+                    clipBehavior: Clip.hardEdge,
+                    child: row,
+                  )
+                  : AppleGlassCard(margin: margin, child: row);
             },
           );
         },

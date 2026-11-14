@@ -19,6 +19,13 @@ import 'package:wild/widgets/source_website.dart';
 class SourceSettings extends StatelessWidget {
   const SourceSettings({super.key});
 
+  Widget _sourceCard(Widget child) {
+    const margin = EdgeInsets.symmetric(horizontal: 16, vertical: 8);
+    return usesAppleGlass
+        ? Card(margin: margin, child: child)
+        : AppleGlassCard(margin: margin, child: child);
+  }
+
   Future<void> _selectSource(BuildContext context, SourceId? value) async {
     if (value == null || value == activeSource.value) return;
     try {
@@ -39,9 +46,8 @@ class SourceSettings extends StatelessWidget {
         (context, revision, __) => ValueListenableBuilder<SourceId>(
           valueListenable: activeSource,
           builder:
-              (context, source, _) => AppleGlassCard(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Padding(
+              (context, source, _) => _sourceCard(
+                Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

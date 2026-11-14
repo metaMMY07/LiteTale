@@ -75,6 +75,7 @@ class ReaderMark {
     this.note = '',
     this.color,
     this.encodedQuote = false,
+    this.pageNumber,
   });
   static const maxQuoteLength = 4096;
   static const maxNoteLength = 2000;
@@ -84,6 +85,9 @@ class ReaderMark {
   final DateTime createdAt;
   final ReaderMarkColor? color;
   final bool encodedQuote;
+
+  /// Chapter-local page at the last save in paginated mode, for display only.
+  final int? pageNumber;
   bool get isBookmark => color == null;
 
   /// If a source edits the chapter, only relocate an unambiguous quotation.
@@ -106,6 +110,7 @@ class ReaderMark {
     color: color,
     note: value,
     encodedQuote: encodedQuote,
+    pageNumber: pageNumber,
   );
 
   Map<String, Object> toJson() => {
@@ -116,12 +121,14 @@ class ReaderMark {
     if (quote.isNotEmpty) 'quote': quote,
     if (note.isNotEmpty) 'note': note,
     if (encodedQuote) 'encodedQuote': true,
+    if (pageNumber != null) 'pageNumber': pageNumber!,
   };
 
   factory ReaderMark.fromJson(Map value) {
     final quote = value['quote'] as String? ?? '';
     final note = value['note'] as String? ?? '';
     final color = value['color'] as String?;
+    final pageNumber = value['pageNumber'];
     if (quote.length > maxQuoteLength ||
         note.length > maxNoteLength ||
         (color != null && quote.trim().isEmpty)) {
@@ -135,6 +142,7 @@ class ReaderMark {
       quote: quote,
       note: note,
       encodedQuote: value['encodedQuote'] == true,
+      pageNumber: pageNumber is int && pageNumber > 0 ? pageNumber : null,
     );
   }
 }

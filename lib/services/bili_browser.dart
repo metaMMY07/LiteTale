@@ -37,12 +37,15 @@ class BiliSiteVerificationRequired extends BiliBrowserException {
     required this.revision,
     this.desktopSite = false,
     this.contentRequired = false,
+    this.searchChallenge = false,
     this.searchKeyword,
     this.searchEntry,
     this.searchPage,
   }) : super(
          contentRequired
              ? '原站正文尚未完整加载，请打开原站完成阅读要求后继续。'
+             : searchChallenge
+             ? '原站要求填写搜索验证码，验证后可继续本次搜索。'
              : '哔哩轻小说要求浏览器验证，请打开原站完成验证后继续。',
        );
 
@@ -51,6 +54,7 @@ class BiliSiteVerificationRequired extends BiliBrowserException {
   final int revision;
   final bool desktopSite;
   final bool contentRequired;
+  final bool searchChallenge;
   final String? searchKeyword;
   final Uri? searchEntry;
   final int? searchPage;
@@ -84,6 +88,12 @@ class BiliBrowserSession extends ChangeNotifier {
   int rendererGeneration = 0;
   BiliBrowserPort? _port;
   Completer<BiliBrowserPort>? _attachment;
+  Uri? _searchOrigin;
+  BiliBrowserException? _navigationError;
+  BiliSiteVerificationRequired? _heldSearch;
+  Timer? _unclaimedSearch;
+  bool get showingSearchChallenge => _showingSearchChallenge;
+  bool _showingSearchChallenge = false;
   Future<void> _queue = Future.value();
   final _searchPages = <String, Map<int, Uri>>{};
   final _verifiedSearches = <(String, int), _VerifiedBiliPage>{};
@@ -113,13 +123,18 @@ class BiliBrowserSession extends ChangeNotifier {
     BiliSiteVerificationRequired request,
   ) {
     if (raw == 'about:blank') return true;
-    if (!allowsNavigation('${request.target}')) return false;
+    if (!isVerificationTarget(request)) return false;
     final uri = Uri.tryParse(raw);
-    return uri != null &&
-        uri.scheme == 'https' &&
-        uri.userInfo.isEmpty &&
-        uri.host == request.target.host &&
-        uri.port == request.target.port;
+    return uri != null && _sameOrigin(uri, request.target);
+  }
+
+  static bool isVerificationTarget(BiliSiteVerificationRequired request) {
+    if (allowsNavigation('${request.target}')) return true;
+    final entry = request.searchEntry;
+    return request.searchChallenge &&
+        entry != null &&
+        allowsNavigation('$entry') &&
+        _sameOrigin(request.target, entry);
   }
 
   static Map<String, dynamic> _decodeProbe(dynamic raw) {
@@ -135,15 +150,36 @@ class BiliBrowserSession extends ChangeNotifier {
   static bool isAccessDeniedProbe(dynamic raw) =>
       _decodeProbe(raw)['accessDenied'] == true;
 
-  static bool _samePage(Uri actual, Uri expected) =>
+  static bool isReadySearchProbe(dynamic raw) {
+    final probe = _decodeProbe(raw);
+    return probe['ready'] == true &&
+        probe['verificationRequired'] != true &&
+        probe['accessDenied'] != true &&
+        probe['error'] == null;
+  }
+
+  static bool _sameOrigin(Uri actual, Uri expected) =>
       actual.scheme == 'https' &&
-      actual.origin == expected.origin &&
+      actual.userInfo.isEmpty &&
+      actual.origin == expected.origin;
+
+  static bool _samePage(Uri actual, Uri expected) =>
+      _sameOrigin(actual, expected) &&
       actual.path == expected.path &&
       actual.queryParametersAll.length == expected.queryParametersAll.length &&
       expected.queryParametersAll.entries.every(
         (entry) =>
             listEquals(actual.queryParametersAll[entry.key], entry.value),
       );
+
+  static bool _matchesSearch(Uri uri, String keyword, int page) {
+    final query = uri.queryParametersAll;
+    final keywords = query['searchkey'];
+    final pages = query['page'];
+    return !uri.hasFragment &&
+        (keywords == null || listEquals(keywords, [keyword])) &&
+        (pages == null || listEquals(pages, ['$page']));
+  }
 
   static String _probeKey(Uri uri, BiliProbeKind kind) {
     // The verified desktop catalogue is the same public document as the
@@ -192,16 +228,15 @@ class BiliBrowserSession extends ChangeNotifier {
         uri != null &&
         keyword != null &&
         request.searchEntry != null &&
-        const {'/search.html', '/S6/'}.contains(uri.path) &&
-        !uri.hasFragment &&
-        (uri.queryParametersAll['page'] == null ||
-            listEquals(uri.queryParametersAll['page'], ['${page ?? 1}'])) &&
-        (uri.queryParametersAll['searchkey'] == null ||
-            listEquals(uri.queryParametersAll['searchkey'], [keyword]));
-    if (!allowsNavigation('${request.target}') ||
+        _sameOrigin(uri, request.searchEntry!) &&
+        _isVerifiedSearchResult(uri, value, page ?? 1) &&
+        _matchesSearch(uri, keyword, page ?? 1);
+    if (!isVerificationTarget(request) ||
         uri == null ||
         !allowsVerificationNavigation('$uri', request) ||
-        (!_samePage(uri, request.target) && !loadedSearch) ||
+        (request.searchChallenge
+            ? !loadedSearch
+            : (!_samePage(uri, request.target) && !loadedSearch)) ||
         value['verificationRequired'] == true ||
         value['contentIncomplete'] == true ||
         value['error'] != null ||
@@ -287,6 +322,23 @@ class BiliBrowserSession extends ChangeNotifier {
     return true;
   }
 
+  static bool _isVerifiedSearchResult(
+    Uri uri,
+    Map<String, dynamic> value,
+    int page,
+  ) {
+    if (const {'/search.html', '/S6/'}.contains(uri.path)) return true;
+    final book = RegExp(r'^/novel/([1-9]\d*)\.html$').firstMatch(uri.path);
+    final books = value['books'];
+    return page == 1 &&
+        book != null &&
+        !uri.hasQuery &&
+        books is List &&
+        books.length == 1 &&
+        books.single is Map &&
+        '${(books.single as Map)['nid']}' == book[1];
+  }
+
   static bool allowsNavigation(String raw) {
     if (raw == 'about:blank') return true;
     final uri = Uri.tryParse(raw);
@@ -317,6 +369,52 @@ class BiliBrowserSession extends ChangeNotifier {
             ).hasMatch(uri.path));
   }
 
+  /// Inspect a site-issued redirect only during the submitted search. The
+  /// probe still accepts only supported results or a confirmed same-site form.
+  bool allowsRendererNavigation(String raw) {
+    final search = _searchOrigin;
+    if (search == null || raw == 'about:blank') return allowsNavigation(raw);
+    final uri = Uri.tryParse(raw);
+    return uri != null && _sameOrigin(uri, search);
+  }
+
+  void navigationFailed(BiliBrowserPort port, {bool blocked = false}) {
+    if (!identical(_port, port) || _heldSearch != null) return;
+    _navigationError ??= BiliBrowserException(
+      blocked ? '原站跳转到不支持的页面，请打开原网站确认。' : '哔哩原站连接中断，请重试。',
+    );
+  }
+
+  bool showHeldSearch(
+    BiliSiteVerificationRequired request,
+    BiliBrowserPort port,
+  ) {
+    if (_showingSearchChallenge ||
+        _disposed ||
+        !identical(_heldSearch, request) ||
+        !identical(_port, port) ||
+        activeSource.value != SourceId.bili ||
+        sourceRevision.value != request.revision) {
+      return false;
+    }
+    _unclaimedSearch?.cancel();
+    _showingSearchChallenge = true;
+    notifyListeners();
+    return true;
+  }
+
+  void releaseHeldSearch(
+    BiliSiteVerificationRequired request, {
+    bool unclaimedOnly = false,
+  }) {
+    if (!identical(_heldSearch, request) ||
+        (unclaimedOnly && _showingSearchChallenge)) {
+      return;
+    }
+    requested = false;
+    _invalidate();
+  }
+
   void attach(BiliBrowserPort port, int generation) {
     if (_disposed || generation != rendererGeneration) return;
     _port = port;
@@ -331,13 +429,25 @@ class BiliBrowserSession extends ChangeNotifier {
 
   void attachmentFailed() => _invalidate();
   void _invalidate() {
+    _unclaimedSearch?.cancel();
+    _unclaimedSearch = null;
+    _heldSearch = null;
+    _showingSearchChallenge = false;
+    _searchOrigin = null;
+    _navigationError = null;
     _port = null;
     if (_attachment case final pending? when !pending.isCompleted) {
       pending.completeError(const BiliBrowserException('哔哩网页组件未就绪，请重试'));
     }
     _attachment = null;
     rendererGeneration++;
-    if (!_disposed) notifyListeners();
+    // Cancellation may come from a page's dispose while Flutter is removing
+    // the route. The new generation is immediate, the host rebuild is queued.
+    if (!_disposed) {
+      scheduleMicrotask(() {
+        if (!_disposed) notifyListeners();
+      });
+    }
   }
 
   Future<BiliBrowserPort> _renderer() async {
@@ -376,6 +486,9 @@ class BiliBrowserSession extends ChangeNotifier {
 
     final work = predecessor.then<T>((_) async {
       request?.check();
+      if (_heldSearch != null) {
+        throw const BiliBrowserException('请先完成或关闭当前搜索验证。');
+      }
       ReadDiagnostics.record('bili', 'queue', clock.elapsed);
       final generation = rendererGeneration;
       activeGeneration = generation;
@@ -419,15 +532,20 @@ class BiliBrowserSession extends ChangeNotifier {
         },
       );
       check();
+      _navigationError = null;
       try {
         await command(() => port.setDesktopSite(false));
         return await run(
           port,
-          (script) => command(() => port.executeScript(script)),
+          (script) {
+            if (_navigationError case final error?) throw error;
+            return command(() => port.executeScript(script));
+          },
           (url) async {
             if (!allowsNavigation(url)) {
               throw const BiliBrowserException('哔哩页面跳转地址无效');
             }
+            _navigationError = null;
             await ReadDiagnostics.measure(
               'bili',
               'navigation',
@@ -437,8 +555,22 @@ class BiliBrowserSession extends ChangeNotifier {
           (enabled) => command(() => port.setDesktopSite(enabled)),
           clock,
         );
+      } on BiliSiteVerificationRequired catch (error) {
+        check();
+        if (error.searchChallenge &&
+            error.searchKeyword != null &&
+            activeSource.value == SourceId.bili &&
+            error.revision == sourceRevision.value) {
+          _heldSearch = error;
+          _unclaimedSearch = Timer(
+            const Duration(minutes: 2),
+            () => releaseHeldSearch(error),
+          );
+        }
+        rethrow;
       } finally {
-        if (generation == rendererGeneration) {
+        if (generation == rendererGeneration) _searchOrigin = null;
+        if (generation == rendererGeneration && _heldSearch == null) {
           try {
             await port
                 .loadUrl('about:blank')
@@ -524,7 +656,24 @@ class BiliBrowserSession extends ChangeNotifier {
         rethrow;
       }
       final value = _decodeProbe(raw);
-      if (!allowsNavigation('${value['url']}')) {
+      final loaded = Uri.tryParse('${value['url']}');
+      if (loaded == null) {
+        throw const BiliBrowserException('哔哩页面跳转地址无效');
+      }
+      final searchTarget = searchEntry ?? verificationTarget;
+      final searchChallenge =
+          searchKeyword != null &&
+          value['searchChallenge'] == true &&
+          searchTarget != null &&
+          _sameOrigin(loaded, searchTarget);
+      if (!allowsNavigation('${value['url']}') && !searchChallenge) {
+        final origin = _searchOrigin;
+        if (origin != null &&
+            _sameOrigin(loaded, origin) &&
+            value['documentLoading'] == true) {
+          await Future<void>.delayed(pollInterval);
+          continue;
+        }
         throw const BiliBrowserException('哔哩页面跳转地址无效');
       }
       if (accepts != null && !accepts(value)) {
@@ -560,17 +709,20 @@ class BiliBrowserSession extends ChangeNotifier {
               continue;
             }
           }
-          final loaded = Uri.parse('${value['url']}');
+          final page = loaded;
+          final entry = searchChallenge ? searchTarget : searchEntry;
           throw BiliSiteVerificationRequired(
             target:
-                verificationTarget ??
-                loaded.replace(queryParameters: {}).removeFragment(),
+                searchChallenge
+                    ? page.removeFragment()
+                    : verificationTarget ??
+                        page.replace(queryParameters: {}).removeFragment(),
             kind: _kind(script),
             desktopSite: desktopSite,
+            searchChallenge: searchChallenge,
             revision: sourceRevision.value,
             searchKeyword: searchKeyword,
-            searchEntry:
-                searchEntry?.origin == loaded.origin ? searchEntry : null,
+            searchEntry: entry?.origin == page.origin ? entry : null,
             searchPage: searchPage,
           );
         }
@@ -677,6 +829,7 @@ class BiliBrowserSession extends ChangeNotifier {
                 ? 'https://www.linovelib.com/'
                 : 'https://www.bilinovel.net/search.html';
         searchEntry = Uri.parse(entry);
+        _searchOrigin = searchEntry;
         await load(entry);
         await _poll(
           js,
@@ -686,8 +839,14 @@ class BiliBrowserSession extends ChangeNotifier {
           searchKeyword: query,
           searchEntry: searchEntry,
           searchPage: page,
-          accepts:
-              (value) => _samePage(Uri.parse('${value['url']}'), searchEntry!),
+          accepts: (value) {
+            final actual = Uri.parse('${value['url']}');
+            final target = searchEntry!;
+            return _samePage(actual, target) ||
+                (value['searchChallenge'] == true &&
+                    _sameOrigin(actual, target) &&
+                    _matchesSearch(actual, query, page));
+          },
         );
         // The ordinary site's asynchronous resource initialization must finish
         // before submitting its own form. No guard tokens are forged or read.
@@ -703,6 +862,7 @@ class BiliBrowserSession extends ChangeNotifier {
         final next = _searchPages[query]?[page];
         if (next == null) throw const BiliBrowserException('搜索分页已失效，请重新搜索');
         requestedPage = next;
+        _searchOrigin = next;
         await load('$next');
       }
       final value = await _poll(
@@ -715,15 +875,18 @@ class BiliBrowserSession extends ChangeNotifier {
         searchPage: page,
         accepts: (value) {
           final expected = requestedPage;
+          final actual = Uri.parse('${value['url']}');
+          if (value['searchChallenge'] == true) {
+            final origin = expected ?? searchEntry!;
+            return _sameOrigin(actual, origin) &&
+                _matchesSearch(actual, query, page);
+          }
           if (expected == null) {
-            final actual = Uri.parse('${value['url']}');
             if (value['ready'] == true && actual.path == '/') return false;
-            final keywords = actual.queryParametersAll['searchkey'];
-            return keywords == null || listEquals(keywords, [query]);
+            return _matchesSearch(actual, query, page);
           }
           // loadRequest may return before the previous document is replaced.
           // Match the real next link, regardless of query parameter order.
-          final actual = Uri.parse('${value['url']}');
           final actualQuery = actual.queryParametersAll;
           final expectedQuery = expected.queryParametersAll;
           return actual.path == expected.path &&

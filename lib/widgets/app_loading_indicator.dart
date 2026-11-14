@@ -29,7 +29,7 @@ class AppLoadingIndicator extends StatelessWidget {
                   color ??
                   theme.progressIndicatorTheme.color ??
                   theme.colorScheme.primary,
-              strokeWidth: extent <= 24 ? 2 : 2.5,
+              strokeWidth: extent <= 24 ? 2.5 : 3.5,
               // Keep the regular ring even if a parent opts into new shapes.
               // ignore: deprecated_member_use
               year2023: true,
