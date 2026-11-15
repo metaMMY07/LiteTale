@@ -218,8 +218,8 @@ void main() {
           theme: iosGlassTheme(Brightness.light),
           home: Scaffold(
             appBar: AppBar(title: const Text('书源与账号')),
-            body: SingleChildScrollView(
-              child: RuleSourceManager(registry: registry),
+            body: CustomScrollView(
+              slivers: [RuleSourceManager(registry: registry)],
             ),
           ),
         ),
@@ -426,7 +426,7 @@ void main() {
                 label: const Text('继续阅读'),
               ),
               AppSwitchListTile(
-                title: const Text('音量键翻页'),
+                title: const Text('使用纸张背景'),
                 value: true,
                 onChanged: (_) {},
               ),

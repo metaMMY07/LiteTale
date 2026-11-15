@@ -10,7 +10,7 @@ class VolumeControlCubit extends Cubit<bool> {
     bool? supported,
   }) : _read = read ?? (() => loadProperty(key: _key)),
        _write = write ?? ((value) => saveProperty(key: _key, value: value)),
-       isSupported = supported ?? (Platform.isAndroid || Platform.isIOS),
+       isSupported = supported ?? Platform.isAndroid,
        super(false);
 
   static const String _key = "_volumeControlProperty";

@@ -2,7 +2,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/cubits/reader_background_cubit.dart';
-import 'package:wild/cubits/volume_control_cubit.dart';
 import 'package:wild/pages/novel/auto_scroll_config_cubit.dart';
 import 'package:wild/pages/novel/bottom_bar_height_cubit.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
@@ -32,7 +31,6 @@ class ReaderSettingsBinding {
        bottom = context.read<BottomBarHeightCubit>(),
        theme = context.read<ThemeCubit>(),
        type = context.read<ReaderTypeCubit>(),
-       volume = context.read<VolumeControlCubit>(),
        paper = context.read<ReaderBackgroundCubit>();
 
   final BuildContext _context;
@@ -45,7 +43,6 @@ class ReaderSettingsBinding {
   final BottomBarHeightCubit bottom;
   final ThemeCubit theme;
   final ReaderTypeCubit type;
-  final VolumeControlCubit volume;
   final ReaderBackgroundCubit paper;
   final AutoScrollConfigCubit? autoScroll;
   final bool includeMarks;
@@ -185,17 +182,6 @@ class ReaderSettingsBinding {
               type.state == ReaderType.normal ? '分页' : '滚动',
               choices: ['分页', '滚动'],
             ),
-            {
-              ...row(
-                'volume',
-                'toggle',
-                'speaker.wave.2',
-                '音量键翻页',
-                '上键上一页，下键下一页',
-                volume.state,
-              ),
-              'enabled': volume.isSupported,
-            },
           ],
         },
         {
@@ -354,8 +340,6 @@ class ReaderSettingsBinding {
           await type.updateType(
             value == '分页' ? ReaderType.normal : ReaderType.html,
           );
-        case 'volume':
-          await volume.updateVolumeControl(value as bool);
         case 'theme':
           await theme.setThemeMode(
             value == '浅色'
@@ -385,7 +369,7 @@ class ReaderSettingsBinding {
         case 'interval':
           await autoScroll!.updateScrollInterval((value as double).round());
       }
-      if (id != 'mode' && id != 'volume' && _context.mounted) {
+      if (id != 'mode' && _context.mounted) {
         await onLayoutChanged?.call();
       }
     } catch (e) {

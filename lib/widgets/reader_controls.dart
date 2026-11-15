@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/material_control_motion.dart';
 import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/reader_speech_scope.dart';
 
 /// Moves the reader controls over the paper without resizing the viewport.
 class ReaderMenuMotion extends StatefulWidget {
@@ -142,6 +143,18 @@ class ReaderToolbar extends StatelessWidget {
                   usesAppleGlass
                       ? CupertinoIcons.play_fill
                       : Icons.play_arrow_rounded,
+            ),
+          ],
+          if (ReaderSpeechScope.openOf(context) case final onSpeech?) ...[
+            const SizedBox(width: 8),
+            ReaderRoundAction(
+              key: const ValueKey('reader-speech'),
+              label: '朗读',
+              onPressed: onSpeech,
+              icon:
+                  usesAppleGlass
+                      ? CupertinoIcons.headphones
+                      : Icons.headphones_outlined,
             ),
           ],
           const SizedBox(width: 8),

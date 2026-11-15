@@ -403,25 +403,26 @@ class ReaderSettingsPanel extends StatelessWidget {
                                   ),
                         ),
                       ),
-                    ReaderSettingRow(
-                      icon: Icons.volume_up_outlined,
-                      title: '音量键翻页',
-                      description:
-                          volume.isSupported
-                              ? '上键上一页，下键下一页'
-                              : '仅支持 Android 和 iOS',
-                      trailing: AppSwitch(
-                        key: const ValueKey('reader-volume-turn-setting'),
-                        value: volume.state,
-                        onChanged:
+                    if (!usesAppleGlass)
+                      ReaderSettingRow(
+                        icon: Icons.volume_up_outlined,
+                        title: '音量键翻页',
+                        description:
                             volume.isSupported
-                                ? (v) => settingsAction(
-                                  context,
-                                  () => volume.updateVolumeControl(v),
-                                )
-                                : null,
+                                ? '上键上一页，下键下一页'
+                                : '仅支持 Android',
+                        trailing: AppSwitch(
+                          key: const ValueKey('reader-volume-turn-setting'),
+                          value: volume.state,
+                          onChanged:
+                              volume.isSupported
+                                  ? (v) => settingsAction(
+                                    context,
+                                    () => volume.updateVolumeControl(v),
+                                  )
+                                  : null,
+                        ),
                       ),
-                    ),
                   ],
                 ),
                 const ReaderSettingLabel('阅读器外观'),

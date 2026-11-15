@@ -44,12 +44,6 @@ jobs:
           test -d "$DEVELOPER_DIR"
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
-      - name: Verify reader volume event policy
-        run: |
-          set -euo pipefail
-          mkdir -p build/ios-preview
-          xcrun swiftc ios/Runner/ReaderVolumeState.swift tools/qa_ios_volume_policy.swift -o build/ios-preview/volume-policy-check
-          build/ios-preview/volume-policy-check
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -86,7 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/ios-preview
-          flutter build ios --release --no-codesign --build-name 1.2.4 --build-number 113 2>&1 | tee build/ios-preview/build.log
+          flutter build ios --release --no-codesign --build-name 1.2.4 --build-number 114 2>&1 | tee build/ios-preview/build.log
       - name: Validate and package the device IPA
         run: |
           set -euo pipefail

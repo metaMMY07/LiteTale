@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/cubits/volume_control_cubit.dart';
+import 'package:wild/services/reader_speech.dart';
 import 'package:wild/utils/controller_event.dart';
 
 /// Hardware volume belongs to the current, foreground reading route only.
@@ -31,7 +31,6 @@ class _ReaderVolumeTurnScopeState extends State<ReaderVolumeTurnScope>
   VolumeControlCubit? _preferences;
   ModalRoute<dynamic>? _route;
   StreamSubscription<ReaderControllerEventArgs>? _subscription;
-  Timer? _audioSessionTimer;
   late AppLifecycleState _lifecycle;
 
   bool get _canListen =>
@@ -39,6 +38,7 @@ class _ReaderVolumeTurnScopeState extends State<ReaderVolumeTurnScope>
       widget.active &&
       _preferences?.isSupported == true &&
       _preferences?.isEnabled == true &&
+      !ReaderSpeechController.isAnyPlaying &&
       _route?.isCurrent == true &&
       _lifecycle == AppLifecycleState.resumed;
 
@@ -48,6 +48,7 @@ class _ReaderVolumeTurnScopeState extends State<ReaderVolumeTurnScope>
     _lifecycle =
         WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
+    ReaderSpeechController.playbackChanges.addListener(_syncListener);
   }
 
   @override
@@ -94,25 +95,9 @@ class _ReaderVolumeTurnScopeState extends State<ReaderVolumeTurnScope>
         // A missing/closed platform stream must not break the reading route.
       },
     );
-    if (Platform.isIOS) {
-      _audioSessionTimer = Timer(const Duration(milliseconds: 300), () async {
-        if (!_canListen) return;
-        try {
-          await const MethodChannel(
-            'methods',
-          ).invokeMethod<void>('reassertAudioSession');
-        } on PlatformException catch (_) {
-          // The observer remains usable if another audio session owns focus.
-        } on MissingPluginException catch (_) {
-          // No native observer exists on unsupported test/desktop platforms.
-        }
-      });
-    }
   }
 
   void _stopListener() {
-    _audioSessionTimer?.cancel();
-    _audioSessionTimer = null;
     final subscription = _subscription;
     _subscription = null;
     if (subscription != null) unawaited(subscription.cancel());
@@ -121,6 +106,7 @@ class _ReaderVolumeTurnScopeState extends State<ReaderVolumeTurnScope>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    ReaderSpeechController.playbackChanges.removeListener(_syncListener);
     _stopListener();
     super.dispose();
   }

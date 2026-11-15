@@ -29,6 +29,7 @@ class MainActivity : FlutterFragmentActivity() {
     private var epubArtwork: EpubArtworkChannel? = null
     private var epubPages: EpubPageChannel? = null
     private var readerImages: ReaderImageChannel? = null
+    private var readerSpeech: ReaderSpeechChannel? = null
     
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -48,6 +49,7 @@ class MainActivity : FlutterFragmentActivity() {
         epubArtwork = EpubArtworkChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         epubPages = EpubPageChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         readerImages = ReaderImageChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        readerSpeech = ReaderSpeechChannel(this, flutterEngine.dartExecutor.binaryMessenger)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "litetale/web_session")
             .setMethodCallHandler { call, result ->
@@ -89,6 +91,8 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        readerSpeech?.dispose()
+        readerSpeech = null
         readerImages?.dispose()
         readerImages = null
         epubArtwork?.dispose()
@@ -96,6 +100,16 @@ class MainActivity : FlutterFragmentActivity() {
         epubPages?.dispose()
         epubPages = null
         super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        readerSpeech?.setForeground(true)
+    }
+
+    override fun onPause() {
+        readerSpeech?.setForeground(false)
+        super.onPause()
     }
 
     private fun MethodChannel.Result.withCoroutine(exec: () -> Any?) {
@@ -170,7 +184,7 @@ class MainActivity : FlutterFragmentActivity() {
                 KeyEvent.ACTION_DOWN -> {
                     if (event.repeatCount == 0) {
                         capturedVolumeKeys.remove(keyCode)
-                        volumeEvents?.let { sink ->
+                        volumeEvents?.takeUnless { readerSpeech?.isSpeaking == true }?.let { sink ->
                             capturedVolumeKeys.add(keyCode)
                             sink.success(if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) "DOWN" else "UP")
                             return true

@@ -34,6 +34,7 @@ import 'package:wild/pages/novel/auto_scroll_cubit.dart';
 import 'package:wild/pages/novel/auto_scroll_config_cubit.dart';
 import 'package:wild/utils/controller_event.dart';
 import 'package:wild/widgets/reader_volume_turn_scope.dart';
+import 'package:wild/widgets/reader_speech_scope.dart';
 import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
 import 'dart:io';
@@ -492,7 +493,7 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
             }
           },
           builder: (context, state) {
-            return ReaderVolumeTurnScope(
+            final reader = ReaderVolumeTurnScope(
               active: state is HtmlReaderLoaded && !_selecting,
               onTurn: _onController,
               child: BlocBuilder<FullscreenCubit, bool>(
@@ -722,6 +723,21 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                   );
                 },
               ),
+            );
+            return ReaderSpeechScope(
+              chapter:
+                  state is HtmlReaderLoaded
+                      ? (aid: state.aid, cid: state.cid)
+                      : null,
+              readText:
+                  () =>
+                      state is HtmlReaderLoaded
+                          ? (
+                            text: state.markContent ?? state.rawContent,
+                            encoded: state.sourceFont != null,
+                          )
+                          : null,
+              child: reader,
             );
           },
         );

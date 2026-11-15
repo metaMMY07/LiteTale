@@ -105,8 +105,9 @@ void main() {
       });
       expect(
         data['titles'],
-        containsAll(['字号', '行高', '段间距', '左侧留白', '右侧留白', '上边距', '下边距', '音量键翻页']),
+        containsAll(['字号', '行高', '段间距', '左侧留白', '右侧留白', '上边距', '下边距']),
       );
+      expect(data['titles'], isNot(contains('音量键翻页')));
       expect(
         await panelBrightness(
           await binding.takeScreenshot('native-reader-settings-medium'),

@@ -4,6 +4,9 @@ import 'package:wild/widgets/reader_settings_panel.dart';
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/services/hardware_turn_buffer.dart';
+import 'package:wild/services/reader_speech.dart';
+import 'package:wild/models/reader_mark.dart' show ReaderMarkAxis;
+import 'package:wild/widgets/reader_speech_scope.dart';
 import 'package:wild/cubits/volume_control_cubit.dart';
 import 'package:wild/widgets/wenku8_recovery_button.dart';
 import 'package:wild/widgets/app_loading_indicator.dart';
@@ -169,17 +172,23 @@ class ReaderPage extends StatelessWidget {
               if (state is ReaderLoaded) {
                 // A new page list means new pagination. Recreate its controller at
                 // the latest clamped position, cancelling any old turn safely.
-                return ReadingSessionScope(
-                  bookId: state.aid,
-                  title: novelInfo.title,
-                  active: !state.showControls,
-                  child: _ReaderView(
-                    key: ObjectKey(state.presentationKey ?? state.pages),
-                    state: state,
-                    title: state.title,
-                    bookId: aid,
-                    markStore: markStore,
-                    panelContext: context,
+                final cubit = context.read<ReaderCubit>();
+                final chapter = (aid: state.aid, cid: state.cid);
+                return ReaderSpeechScope(
+                  chapter: chapter,
+                  readText: () => cubit.markText(chapter, ReaderMarkAxis.text),
+                  child: ReadingSessionScope(
+                    bookId: state.aid,
+                    title: novelInfo.title,
+                    active: !state.showControls,
+                    child: _ReaderView(
+                      key: ObjectKey(state.presentationKey ?? state.pages),
+                      state: state,
+                      title: state.title,
+                      bookId: aid,
+                      markStore: markStore,
+                      panelContext: context,
+                    ),
                   ),
                 );
               }
@@ -217,6 +226,7 @@ class _ReaderViewState extends State<_ReaderView> {
     active:
         () =>
             mounted &&
+            !ReaderSpeechController.isAnyPlaying &&
             ModalRoute.of(context)?.isCurrent != false &&
             (WidgetsBinding.instance.lifecycleState == null ||
                 WidgetsBinding.instance.lifecycleState ==
