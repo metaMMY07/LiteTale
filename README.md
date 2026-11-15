@@ -4,20 +4,21 @@
   <p>基于 Wild 的 Android 与 iOS 轻小说阅读器</p>
 
 [![license](https://img.shields.io/github/license/metaMMY07/LiteTale)](LICENSE)
-[![release](https://img.shields.io/badge/release-v1.2.3-blue)](https://github.com/metaMMY07/LiteTale/releases)
+[![release](https://img.shields.io/badge/release-v1.2.4-blue)](https://github.com/metaMMY07/LiteTale/releases)
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
-## 最新正式版 LiteTale 1.2.3
+## 最新正式版 LiteTale 1.2.4
 
-[Android 手机／平板 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.3/LiteTale-v1.2.3-android-arm64-v8a.apk) · [Android x86_64 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.3/LiteTale-v1.2.3-android-x86_64.apk) · [iPhone／iPad IPA（未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.3/LiteTale-v1.2.3-ios-unsigned.ipa) · [更新内容](https://github.com/metaMMY07/LiteTale/releases/tag/v1.2.3)
+[Android 手机／平板 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.4-build113/LiteTale-1.2.4-android-113-arm64-v8a.apk) · [iPhone／iPad IPA（未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.4-build113/LiteTale-1.2.4-ios-113-unsigned.ipa) · [更新内容](https://github.com/metaMMY07/LiteTale/releases/tag/v1.2.4-build113)
 
 iOS 安装包需要自行签名后安装。
 
 ### 更新内容
 
-- 改进图片预览，支持放大、拖动退出以及保存图片。
-- 改进书源导入，支持文件、链接及粘贴规则，导入前可预览并选择书源。
+- 修复了哔哩轻小说的搜索问题。
+- 更新界面UI。
+- 新增书签以及高亮功能。
 
 ### 界面预览
 
