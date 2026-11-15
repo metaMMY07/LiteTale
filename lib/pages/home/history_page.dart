@@ -150,11 +150,11 @@ class _HistoryItem extends StatelessWidget {
     );
     final colorScheme = Theme.of(context).colorScheme;
     final historyCubit = context.read<HistoryCubit>();
-    Future<void> open(PageRoute<void> page) async {
+    Future<void> open(Future<void> Function() navigate) async {
       if (ModalRoute.of(context)?.isCurrent == false) return;
       final scope = bookNavigationScope(history.novelId);
       final source = historyCubit.historySource;
-      await pushAndWaitForPageExit(context, page);
+      await navigate();
       if (context.mounted &&
           ModalRoute.of(context)?.isCurrent != false &&
           source == historyCubit.historySource &&
@@ -173,10 +173,13 @@ class _HistoryItem extends StatelessWidget {
             history.cover,
           );
           await open(
-            novelInfoRoute(
-              RouteSettings(
-                name: novelInfoRouteName,
-                arguments: history.novelId,
+            () => pushAndWaitForPageExit(
+              context,
+              novelInfoRoute(
+                RouteSettings(
+                  name: novelInfoRouteName,
+                  arguments: history.novelId,
+                ),
               ),
             ),
           );
@@ -288,7 +291,8 @@ class _HistoryItem extends StatelessWidget {
                           if (!context.mounted) return;
 
                           await open(
-                            novelReaderRoute(
+                            () => pushNovelReader(
+                              context,
                               RouteSettings(
                                 name: novelReaderRouteName,
                                 arguments: {
@@ -304,6 +308,7 @@ class _HistoryItem extends StatelessWidget {
                                     'initialTextOffset': history.progress,
                                 },
                               ),
+                              fromDetail: false,
                             ),
                           );
                         } catch (e) {

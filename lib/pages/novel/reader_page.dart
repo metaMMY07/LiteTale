@@ -7,6 +7,7 @@ import 'package:wild/services/hardware_turn_buffer.dart';
 import 'package:wild/services/reader_speech.dart';
 import 'package:wild/models/reader_mark.dart' show ReaderMarkAxis;
 import 'package:wild/widgets/reader_speech_scope.dart';
+import 'package:wild/services/reader_listening_chapter.dart';
 import 'package:wild/cubits/volume_control_cubit.dart';
 import 'package:wild/widgets/wenku8_recovery_button.dart';
 import 'package:wild/widgets/app_loading_indicator.dart';
@@ -174,9 +175,22 @@ class ReaderPage extends StatelessWidget {
                 // the latest clamped position, cancelling any old turn safely.
                 final cubit = context.read<ReaderCubit>();
                 final chapter = (aid: state.aid, cid: state.cid);
+                final text = cubit.markText(chapter, ReaderMarkAxis.text);
                 return ReaderSpeechScope(
-                  chapter: chapter,
-                  readText: () => cubit.markText(chapter, ReaderMarkAxis.text),
+                  chapter: ReaderListeningChapter(
+                    aid: chapter.aid,
+                    cid: chapter.cid,
+                    title: state.title,
+                    text: text?.text ?? '',
+                    encoded: text?.encoded ?? false,
+                  ),
+                  request:
+                      (chapter) => ReaderListeningRequest(
+                        chapter: chapter,
+                        volumes: state.volumes,
+                        info: novelInfo,
+                        offset: cubit.listeningOffset(state, chapter.text),
+                      ),
                   child: ReadingSessionScope(
                     bookId: state.aid,
                     title: novelInfo.title,

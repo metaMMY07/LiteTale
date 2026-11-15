@@ -4,12 +4,13 @@ import 'package:wild/theme/ios_page_arrival.dart';
 
 /// Wait until the pushed page's overlay is removed. A normal push Future
 /// resolves as soon as pop starts, while the previous page is still being drawn.
-Future<void> pushAndWaitForPageExit(
+Future<T?> pushAndWaitForPageExit<T>(
   BuildContext context,
-  PageRoute<void> page,
+  PageRoute<T> page,
 ) async {
-  await Navigator.of(context).push(page);
+  final result = await Navigator.of(context).push(page);
   await page.completed;
+  return result;
 }
 
 const horizontalPageTransitionsTheme = PageTransitionsTheme(

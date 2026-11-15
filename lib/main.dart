@@ -128,7 +128,12 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
   final _dynamicColorKey = GlobalKey<DynamicColorBuilderState>();
   final _iosDock =
       usesAppleGlass
-          ? IosDockController(fullscreenRoutes: const {novelReaderRouteName})
+          ? IosDockController(
+            fullscreenRoutes: const {
+              novelReaderRouteName,
+              novelListeningRouteName,
+            },
+          )
           : null;
 
   @override

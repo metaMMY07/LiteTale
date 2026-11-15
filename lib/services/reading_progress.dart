@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
+    show PlatformInt64Util;
 import 'package:wild/services/epub_reader_position.dart';
 import 'package:wild/services/reader_position.dart';
 import 'package:wild/src/rust/api/wenku8.dart' as storage;
@@ -27,6 +29,20 @@ class ReadingProgress {
   final int characters, page;
   final String cover, author;
   final ReaderPosition? position;
+
+  storage.ReadingHistory toHistory() => storage.ReadingHistory(
+    novelId: bookId,
+    novelName: title,
+    volumeId: volumeId,
+    volumeName: volumeTitle,
+    chapterId: chapterId,
+    chapterTitle: chapterTitle,
+    lastReadAt: PlatformInt64Util.from(DateTime.now().millisecondsSinceEpoch),
+    progress: characters,
+    progressPage: page,
+    cover: cover,
+    author: author,
+  );
 
   Future<void> persist({
     ProgressWriter? writeHistory,

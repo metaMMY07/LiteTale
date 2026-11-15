@@ -122,7 +122,8 @@ class ReaderSpeechChannel(context: Context, messenger: BinaryMessenger) : EventC
             "limit" to TextToSpeech.getMaxSpeechInputLength(),
             "voices" to voices.map {
                 mapOf("id" to it.name, "name" to it.name,
-                    "language" to it.locale.toLanguageTag(), "network" to it.isNetworkConnectionRequired)
+                    "language" to it.locale.toLanguageTag(), "network" to it.isNetworkConnectionRequired,
+                    "quality" to it.quality)
             },
         ))
     }
@@ -176,7 +177,7 @@ class ReaderSpeechChannel(context: Context, messenger: BinaryMessenger) : EventC
         if (id != null) return voices.firstOrNull { it.name == id }
         return voices.asSequence()
             .filter { (it.locale.language == "zh" || it.locale.language == "cmn") && !it.isNetworkConnectionRequired }
-            .minByOrNull { if (it.locale.country == "CN") 0 else 1 }
+            .maxWithOrNull(compareBy({ it.locale.country == "CN" }, { it.quality }))
     }
 
     @Suppress("DEPRECATION")
@@ -231,7 +232,7 @@ class ReaderSpeechChannel(context: Context, messenger: BinaryMessenger) : EventC
     }
 
     private val listener = object : UtteranceProgressListener() {
-        override fun onStart(utteranceId: String?) = Unit
+        override fun onStart(utteranceId: String?) = send(utteranceId, "started")
         override fun onDone(utteranceId: String?) = send(utteranceId, "done")
         override fun onStop(utteranceId: String?, interrupted: Boolean) = send(utteranceId, "interrupted")
         @Deprecated("Android calls this on older engines")

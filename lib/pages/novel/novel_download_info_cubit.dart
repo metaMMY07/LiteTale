@@ -1,6 +1,6 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/sources/source_api.dart' as w8;
-import 'package:wild/src/rust/api/database.dart' as database;
+import 'package:wild/services/reading_progress.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 
 abstract class NovelDownloadInfoState {}
@@ -29,7 +29,7 @@ class NovelDownloadInfoError extends NovelDownloadInfoState {
 
 class NovelDownloadInfoCubit extends Cubit<NovelDownloadInfoState> {
   final String novelId;
-  List<Volume> _volumes = [];
+  final List<Volume> _volumes = [];
 
   NovelDownloadInfoCubit(this.novelId) : super(NovelDownloadInfoInitial());
 
@@ -44,35 +44,41 @@ class NovelDownloadInfoCubit extends Cubit<NovelDownloadInfoState> {
       }
 
       // 从下载数据构建卷和章节列表
-      final volumes = download.novelDownloadVolume
-          .map((volume) {
-            final chapters = download.novelDownloadChapter
-                .where((chapter) => chapter.volumeId == volume.id)
-                .map((chapter) => Chapter(
-                      aid: chapter.aid,
-                      cid: chapter.id,
-                      title: chapter.title,
-                      url: chapter.url,
-                    ))
-                .toList();
-            // 只返回有章节的卷
-            if (chapters.isEmpty) return null;
-            return Volume(
-              id: volume.id,
-              title: volume.title,
-              chapters: chapters,
-            );
-          })
-          .where((volume) => volume != null) // 过滤掉 null
-          .map((volume) => volume!) // 将非空的卷转换为非空类型
-          .toList();
+      final volumes =
+          download.novelDownloadVolume
+              .map((volume) {
+                final chapters =
+                    download.novelDownloadChapter
+                        .where((chapter) => chapter.volumeId == volume.id)
+                        .map(
+                          (chapter) => Chapter(
+                            aid: chapter.aid,
+                            cid: chapter.id,
+                            title: chapter.title,
+                            url: chapter.url,
+                          ),
+                        )
+                        .toList();
+                // 只返回有章节的卷
+                if (chapters.isEmpty) return null;
+                return Volume(
+                  id: volume.id,
+                  title: volume.title,
+                  chapters: chapters,
+                );
+              })
+              .where((volume) => volume != null) // 过滤掉 null
+              .map((volume) => volume!) // 将非空的卷转换为非空类型
+              .toList();
 
       final history = await w8.novelHistoryById(novelId: novelId);
-      emit(NovelDownloadInfoLoaded(
-        download: download,
-        volumes: volumes,
-        readingHistory: history,
-      ));
+      emit(
+        NovelDownloadInfoLoaded(
+          download: download,
+          volumes: volumes,
+          readingHistory: history,
+        ),
+      );
     } catch (e) {
       emit(NovelDownloadInfoError(e.toString()));
     }
@@ -82,12 +88,30 @@ class NovelDownloadInfoCubit extends Cubit<NovelDownloadInfoState> {
     final readingHistory = await w8.novelHistoryById(novelId: novelId);
     if (state is NovelDownloadInfoLoaded) {
       final currentState = state as NovelDownloadInfoLoaded;
-      emit(NovelDownloadInfoLoaded(
-        download: currentState.download,
-        volumes: currentState.volumes,
-        readingHistory: readingHistory,
-      ));
+      emit(
+        NovelDownloadInfoLoaded(
+          download: currentState.download,
+          volumes: currentState.volumes,
+          readingHistory: readingHistory,
+        ),
+      );
     }
+  }
+
+  void acceptListeningPosition(ReadingProgress progress) {
+    final current = state;
+    if (isClosed ||
+        current is! NovelDownloadInfoLoaded ||
+        progress.bookId != novelId) {
+      return;
+    }
+    emit(
+      NovelDownloadInfoLoaded(
+        download: current.download,
+        volumes: current.volumes,
+        readingHistory: progress.toHistory(),
+      ),
+    );
   }
 
   Future<void> deleteDownload() async {
@@ -99,4 +123,4 @@ class NovelDownloadInfoCubit extends Cubit<NovelDownloadInfoState> {
       }
     }
   }
-} 
+}

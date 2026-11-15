@@ -2,6 +2,9 @@ import 'package:wild/models/reader_document.dart';
 
 typedef ReaderPlainPart = ({int offset, String text, bool image, bool mixed});
 final _documents = Expando<String>('reader mark text');
+const _imageMarker = '<!--image-->';
+const _anchorGap = r'[\s\u00a0\u3000]*';
+final _anchorWhitespace = RegExp(r'[\s\u00a0\u3000]+');
 
 /// Image markers do not become selectable text, but retain their position so
 /// both layouts can locate the surrounding content and bookmark artwork.
@@ -54,4 +57,44 @@ String readerMarkText(String content, ReaderDocument? document) {
     }
   }
   return _documents[document] = text.toString();
+}
+
+/// Resolve an EPUB position between its paginated DOM and its plain transcript.
+/// The two layouts can insert different whitespace around the same characters.
+int? matchEpubTextOffset(String source, int offset, String target) {
+  if (source == target) return offset.clamp(0, target.length);
+  if (source.isEmpty || target.isEmpty) return null;
+
+  final center = offset.clamp(0, source.length - 1);
+  final priorLine = center == 0 ? -1 : source.lastIndexOf('\n', center - 1);
+  final priorImage = source.lastIndexOf(_imageMarker, center);
+  final start = (center - 18).clamp(priorLine + 1, center);
+  final prefixStart =
+      priorImage < start
+          ? start
+          : (priorImage + _imageMarker.length).clamp(start, center);
+  var end = (center + 24).clamp(center, source.length);
+  final nextImage = source.indexOf(_imageMarker, center);
+  if (nextImage >= 0 && nextImage < end) end = nextImage;
+
+  String pattern(String text) => text
+      .replaceAll(_anchorWhitespace, '')
+      .runes
+      .map((rune) => RegExp.escape(String.fromCharCode(rune)))
+      .join(_anchorGap);
+
+  final prefix = pattern(source.substring(prefixStart, center));
+  final suffix = pattern(source.substring(center, end));
+  if (suffix.isEmpty) return null;
+  final gap = prefix.isEmpty ? '' : _anchorGap;
+  final estimate = (center * target.length / source.length).round();
+  final matches = RegExp('($prefix$gap)$suffix').allMatches(target);
+  int? best;
+  for (final match in matches) {
+    final at = match.start + match[1]!.length;
+    if (best == null || (at - estimate).abs() < (best - estimate).abs()) {
+      best = at;
+    }
+  }
+  return best;
 }

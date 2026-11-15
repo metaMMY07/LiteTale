@@ -58,6 +58,16 @@ dependencies:
   crypto: ^3.0.6
   webview_windows: ^0.4.0
   flutter_secure_storage: 9.2.4
+  flutter_edge_tts:
+    git:
+      url: https://github.com/Moosphan/flutter_edge_tts.git
+      # Includes the upstream connection fix and supports Flutter 3.29.
+      ref: a06632a85255916ffacb21543a36c77026a2f950
+  just_audio: 0.10.5
+  # audio_session 0.2.4 requires Android API 24. LiteTale supports API 21.
+  audio_session: 0.2.3
+  path_provider: ^2.1.5
+  scrollable_positioned_list: 0.3.8
   html: 0.15.5
   csslib: 1.0.2
   archive: 3.6.1
@@ -75,7 +85,6 @@ dev_dependencies:
   flutter_lints: ^5.0.0
   integration_test:
     sdk: flutter
-  path_provider: ^2.1.5
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

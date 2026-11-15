@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/pages/apple_books_open_page.dart';
 import 'package:wild/services/reading_progress.dart';
+import 'package:wild/services/reader_listening_chapter.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
@@ -15,11 +17,13 @@ import 'html_reader_page.dart';
 import 'line_height_cubit.dart';
 import 'paragraph_spacing_cubit.dart';
 import 'reader_page.dart';
+import 'reader_listening_page.dart';
 import 'reader_type_cubit.dart';
 import 'theme_cubit.dart';
 import 'top_bar_height_cubit.dart';
 
 const novelReaderRouteName = '/novel/reader';
+const novelListeningRouteName = '/novel/listening';
 
 ({SourceId active, int revision, int session}) bookNavigationScope(
   String aid,
@@ -29,8 +33,8 @@ const novelReaderRouteName = '/novel/reader';
   session: readerSessionGeneration(aid),
 );
 
-PageRoute<void> novelReaderRoute(RouteSettings settings) {
-  return HorizontalCoverPageRoute<void>(
+PageRoute<ReaderListeningRequest> novelReaderRoute(RouteSettings settings) {
+  return HorizontalCoverPageRoute<ReaderListeningRequest>(
     settings: settings,
     builder: (context) {
       final args = settings.arguments as Map<String, dynamic>;
@@ -45,7 +49,8 @@ PageRoute<void> novelReaderRoute(RouteSettings settings) {
       final initialPage = args['initialPage'] as int?;
       final initialTextOffset = args['initialTextOffset'] as int?;
       final fromScroll = initialPage == scrollReaderProgressPage;
-      if (context.read<ReaderTypeCubit>().state == ReaderType.html) {
+      if (args['forcePaged'] != true &&
+          context.read<ReaderTypeCubit>().state == ReaderType.html) {
         return HtmlReaderPage(
           novelInfo: info,
           initialAid: aid,
@@ -76,4 +81,82 @@ PageRoute<void> novelReaderRoute(RouteSettings settings) {
       );
     },
   );
+}
+
+Future<void> pushNovelReader(
+  BuildContext context,
+  RouteSettings settings, {
+  bool fromDetail = true,
+  ValueChanged<ReadingProgress>? onListeningPosition,
+}) async {
+  final aid = (settings.arguments as Map)['novelId'] as String;
+  final scope = bookNavigationScope(aid);
+  final listening = await pushAndWaitForPageExit(
+    context,
+    novelReaderRoute(settings),
+  );
+  if (listening == null ||
+      !context.mounted ||
+      ModalRoute.of(context)?.isCurrent == false ||
+      scope != bookNavigationScope(aid)) {
+    return;
+  }
+  if (fromDetail) {
+    await openReaderListening(
+      context,
+      listening,
+      onPosition: onListeningPosition,
+    );
+  } else {
+    await Navigator.of(context).pushNamed<void>(
+      '/novel/info',
+      arguments: {'novelId': aid, 'listening': listening},
+    );
+  }
+}
+
+Future<void> openReaderListening(
+  BuildContext context,
+  ReaderListeningRequest request, {
+  ValueChanged<ReadingProgress>? onPosition,
+}) async {
+  await pushAndWaitForPageExit(
+    context,
+    HorizontalCoverPageRoute<void>(
+      settings: const RouteSettings(name: novelListeningRouteName),
+      builder:
+          (_) => ReaderListeningPage(request: request, onPosition: onPosition),
+    ),
+  );
+  await ReadingProgressQueue.instance.flushBounded();
+}
+
+/// Primary route status covers both the Cupertino slide and Android's cover.
+Future<bool> waitForListeningArrival(BuildContext context) async {
+  final route = ModalRoute.of(context);
+  final animation = route?.animation;
+  if (route != null && animation != null && !animation.isCompleted) {
+    final arrived = Completer<bool>();
+    void status(AnimationStatus status) {
+      if (status == AnimationStatus.completed && !arrived.isCompleted) {
+        arrived.complete(true);
+      }
+    }
+
+    animation.addStatusListener(status);
+    try {
+      if (!await Future.any([
+        arrived.future,
+        route.completed.then((_) => false),
+      ])) {
+        return false;
+      }
+    } finally {
+      animation.removeStatusListener(status);
+    }
+  }
+  await WidgetsBinding.instance.endOfFrame;
+  return context.mounted &&
+      route?.isCurrent != false &&
+      route?.offstage != true;
 }

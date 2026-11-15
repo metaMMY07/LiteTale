@@ -33,7 +33,8 @@ class _ReaderMenuMotionState extends State<ReaderMenuMotion> {
 
   @override
   Widget build(BuildContext context) {
-    if (!usesAppleGlass) {
+    final exit = ReaderSpeechScope.exitOf(context);
+    if (!usesAppleGlass && exit == null) {
       return widget.visible ? widget.child : const SizedBox.shrink();
     }
     final target = widget.visible ? 1.0 : 0.0;
@@ -42,31 +43,46 @@ class _ReaderMenuMotionState extends State<ReaderMenuMotion> {
       duration:
           MediaQuery.disableAnimationsOf(context)
               ? Duration.zero
-              : const Duration(milliseconds: 240),
+              : readerMenuMotionDuration,
       curve: Curves.easeInOutCubic,
       child: _hasOpened ? widget.child : const SizedBox.shrink(),
       builder:
-          (context, progress, child) => Offstage(
-            offstage: !widget.visible && progress == 0,
-            child: IgnorePointer(
-              ignoring: !widget.visible,
-              child: ExcludeSemantics(
-                excluding: !widget.visible,
-                child: ExcludeFocus(
-                  excluding: !widget.visible,
-                  child: FractionalTranslation(
-                    translation: Offset(
-                      0,
-                      (1 - progress) * (widget.fromBottom ? .55 : -1),
+          (context, progress, child) => AnimatedBuilder(
+            animation: exit ?? kAlwaysDismissedAnimation,
+            child: child,
+            builder: (context, child) {
+              final departing = Curves.easeInOutCubic.transform(
+                exit?.value ?? 0,
+              );
+              final inactive = !widget.visible || exit != null;
+              return Offstage(
+                offstage: (!widget.visible && progress == 0) || departing == 1,
+                child: IgnorePointer(
+                  ignoring: inactive,
+                  child: ExcludeSemantics(
+                    excluding: inactive,
+                    child: ExcludeFocus(
+                      excluding: inactive,
+                      child: FractionalTranslation(
+                        translation: Offset(
+                          0,
+                          widget.fromBottom
+                              ? (1 - progress) * .55 + departing * 1.5
+                              : -(1 - progress) - departing * 1.5,
+                        ),
+                        child:
+                            widget.fromBottom
+                                ? Opacity(
+                                  opacity: progress * (1 - departing),
+                                  child: child,
+                                )
+                                : child,
+                      ),
                     ),
-                    child:
-                        widget.fromBottom
-                            ? Opacity(opacity: progress, child: child)
-                            : child,
                   ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
     );
   }
@@ -145,18 +161,6 @@ class ReaderToolbar extends StatelessWidget {
                       : Icons.play_arrow_rounded,
             ),
           ],
-          if (ReaderSpeechScope.openOf(context) case final onSpeech?) ...[
-            const SizedBox(width: 8),
-            ReaderRoundAction(
-              key: const ValueKey('reader-speech'),
-              label: '朗读',
-              onPressed: onSpeech,
-              icon:
-                  usesAppleGlass
-                      ? CupertinoIcons.headphones
-                      : Icons.headphones_outlined,
-            ),
-          ],
           const SizedBox(width: 8),
           ReaderRoundAction(
             key: const ValueKey('reader-settings'),
@@ -166,6 +170,21 @@ class ReaderToolbar extends StatelessWidget {
             icon:
                 usesAppleGlass ? CupertinoIcons.gear : Icons.settings_outlined,
           ),
+          if (ReaderSpeechScope.actionOf(context) case (
+            visible: true,
+            :final open,
+          )) ...[
+            const SizedBox(width: 8),
+            ReaderRoundAction(
+              key: const ValueKey('reader-speech'),
+              label: '听书',
+              onPressed: open,
+              icon:
+                  usesAppleGlass
+                      ? CupertinoIcons.headphones
+                      : Icons.headphones_outlined,
+            ),
+          ],
         ],
       ),
     ),
@@ -257,12 +276,16 @@ class ReaderPageScrubber extends StatefulWidget {
     required this.onSeek,
     this.label = '本章',
     this.active = true,
+    this.embedded = false,
+    this.unit = '',
   });
   final int index, count;
   final Object revision;
   final ValueChanged<int> onSeek;
   final String label;
   final bool active;
+  final bool embedded;
+  final String unit;
   @override
   State<ReaderPageScrubber> createState() => _ReaderPageScrubberState();
 }
@@ -296,43 +319,42 @@ class _ReaderPageScrubberState extends State<ReaderPageScrubber> {
       0.0,
       last.toDouble(),
     );
+    final content = Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Semantics(
+            label: widget.unit == '段' ? '跳转段落' : '${widget.label}跳转书页',
+            child: AppSlider(
+              key: const ValueKey('reader-page-scrubber'),
+              min: 0,
+              max: last > 0 ? last.toDouble() : 1,
+              interactionRevision: _interactionRevision,
+              value: value,
+              onChangeCancel: () => setState(_resetDrag),
+              onChangeStart: (_) => _dragging = canScrub,
+              onChanged: canScrub ? (v) => setState(() => _draft = v) : null,
+              onChangeEnd: (v) {
+                final valid = widget.active && _dragging;
+                setState(_resetDrag);
+                if (valid) widget.onSeek(v.round().clamp(0, last));
+              },
+            ),
+          ),
+          Text(
+            '${widget.label} ${value.round() + 1}/${widget.count.clamp(1, 1 << 30)}${widget.unit}',
+            style: Theme.of(context).textTheme.labelMedium,
+          ),
+        ],
+      ),
+    );
+    if (widget.embedded) return content;
     return SafeArea(
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
-        child: ReaderControlSurface(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Semantics(
-                  label: '${widget.label}跳转书页',
-                  child: AppSlider(
-                    key: const ValueKey('reader-page-scrubber'),
-                    min: 0,
-                    max: last > 0 ? last.toDouble() : 1,
-                    interactionRevision: _interactionRevision,
-                    value: value,
-                    onChangeCancel: () => setState(_resetDrag),
-                    onChangeStart: (_) => _dragging = canScrub,
-                    onChanged:
-                        canScrub ? (v) => setState(() => _draft = v) : null,
-                    onChangeEnd: (v) {
-                      final valid = widget.active && _dragging;
-                      setState(_resetDrag);
-                      if (valid) widget.onSeek(v.round().clamp(0, last));
-                    },
-                  ),
-                ),
-                Text(
-                  '${widget.label} ${value.round() + 1}/${widget.count.clamp(1, 1 << 30)}',
-                  style: Theme.of(context).textTheme.labelMedium,
-                ),
-              ],
-            ),
-          ),
-        ),
+        child: ReaderControlSurface(child: content),
       ),
     );
   }

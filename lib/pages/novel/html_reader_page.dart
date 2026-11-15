@@ -35,6 +35,7 @@ import 'package:wild/pages/novel/auto_scroll_config_cubit.dart';
 import 'package:wild/utils/controller_event.dart';
 import 'package:wild/widgets/reader_volume_turn_scope.dart';
 import 'package:wild/widgets/reader_speech_scope.dart';
+import 'package:wild/services/reader_listening_chapter.dart';
 import 'package:wild/theme/app_fonts.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
 import 'dart:io';
@@ -727,16 +728,21 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
             return ReaderSpeechScope(
               chapter:
                   state is HtmlReaderLoaded
-                      ? (aid: state.aid, cid: state.cid)
+                      ? ReaderListeningChapter(
+                        aid: state.aid,
+                        cid: state.cid,
+                        title: state.title,
+                        text: state.markContent ?? state.rawContent,
+                        encoded: state.sourceFont != null,
+                      )
                       : null,
-              readText:
-                  () =>
-                      state is HtmlReaderLoaded
-                          ? (
-                            text: state.markContent ?? state.rawContent,
-                            encoded: state.sourceFont != null,
-                          )
-                          : null,
+              request:
+                  (chapter) => ReaderListeningRequest(
+                    chapter: chapter,
+                    volumes: cubit.initialVolumes,
+                    info: cubit.novelInfo,
+                    offset: _marks.visiblePosition(0, _topInset)?.offset ?? 0,
+                  ),
               child: reader,
             );
           },

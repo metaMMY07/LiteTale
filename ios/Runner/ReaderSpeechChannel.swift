@@ -57,10 +57,9 @@ final class ReaderSpeechChannel: NSObject, FlutterStreamHandler, AVSpeechSynthes
   private func handle(_ call: FlutterMethodCall, result: FlutterResult) {
     switch call.method {
     case "voices":
-      let voices = AVSpeechSynthesisVoice.speechVoices().sorted {
-        ($0.language, $0.name) < ($1.language, $1.name)
-      }.map { voice in
-        ["id": voice.identifier, "name": voice.name, "language": voice.language]
+      let voices: [[String: Any]] = installedVoices().map { voice in
+        ["id": voice.identifier, "name": voice.name, "language": voice.language,
+         "quality": voice.quality.rawValue]
       }
       result(["limit": 1000, "voices": voices])
     case "speak":
@@ -82,6 +81,21 @@ final class ReaderSpeechChannel: NSObject, FlutterStreamHandler, AVSpeechSynthes
     return id == utteranceID
   }
 
+  private func installedVoices() -> [AVSpeechSynthesisVoice] {
+    AVSpeechSynthesisVoice.speechVoices().filter { voice in
+      if #available(iOS 17.0, *) {
+        return !voice.voiceTraits.contains(.isNoveltyVoice) &&
+          !voice.voiceTraits.contains(.isPersonalVoice)
+      }
+      return true
+    }.sorted { lhs, rhs in
+      if lhs.quality != rhs.quality {
+        return lhs.quality.rawValue > rhs.quality.rawValue
+      }
+      return (lhs.language, lhs.name) < (rhs.language, rhs.name)
+    }
+  }
+
   private func speak(_ argument: Any?, result: FlutterResult) {
     guard let args = argument as? [String: Any],
           let id = args["id"] as? String, let text = args["text"] as? String,
@@ -99,8 +113,10 @@ final class ReaderSpeechChannel: NSObject, FlutterStreamHandler, AVSpeechSynthes
     if let identifier = args["voice"] as? String {
       voice = AVSpeechSynthesisVoice(identifier: identifier)
     } else {
-      voice = AVSpeechSynthesisVoice(language: "zh-CN") ??
-        AVSpeechSynthesisVoice.speechVoices().first { $0.language.hasPrefix("zh-") }
+      let voices = installedVoices()
+      voice = voices.first { $0.language == "zh-CN" } ??
+        voices.first { $0.language.hasPrefix("zh-") } ??
+        AVSpeechSynthesisVoice(language: "zh-CN")
     }
     guard let voice else {
       stop()
@@ -162,6 +178,10 @@ final class ReaderSpeechChannel: NSObject, FlutterStreamHandler, AVSpeechSynthes
     guard let reason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
           reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue else { return }
     interrupt()
+  }
+
+  func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart spoken: AVSpeechUtterance) {
+    send("started", for: spoken)
   }
 
   func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish spoken: AVSpeechUtterance) {

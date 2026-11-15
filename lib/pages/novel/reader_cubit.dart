@@ -643,6 +643,18 @@ class ReaderCubit extends Cubit<ReaderState> {
     );
   }
 
+  int listeningOffset(ReaderLoaded loaded, String text) {
+    final page = loaded.pages[loaded.currentPageIndex];
+    final css = page.cssPage;
+    final domText = css?.markText;
+    if (css != null && domText != null) {
+      return matchEpubTextOffset(domText, css.domStart, text) ??
+          page.textStart ??
+          0;
+    }
+    return page.markStart ?? 0;
+  }
+
   bool markOnPage(ReaderLoaded loaded, ReaderMarkLocation location) {
     final current = markLocation(loaded);
     if (current.chapter != location.chapter || current.axis != location.axis) {
@@ -1080,8 +1092,22 @@ class ReaderCubit extends Cubit<ReaderState> {
       );
       if (!current() || !identical(_bookFlow, flow)) return;
       if (position == null && initialSourceOffset != null) {
-        final pages = window.refs[window.index].owner.pages;
-        final index = _pageAtSourceOffset(pages, initialSourceOffset);
+        final chapter = window.refs[window.index].owner;
+        final pages = chapter.pages;
+        if (pages.first.cssPage?.markText case final domText?) {
+          final data = chapter.data;
+          final offset = matchEpubTextOffset(
+            readerMarkText(data.content, data.document),
+            initialSourceOffset,
+            domText,
+          );
+          if (offset != null) {
+            position = ReaderPosition(0, 0, false, epubOffset: offset);
+          }
+        }
+        final index =
+            position?.pageIn(pages) ??
+            _pageAtSourceOffset(pages, initialSourceOffset);
         if (index != 0) window = await flow.open(cid, initialPage: index);
         if (!current() || !identical(_bookFlow, flow)) return;
       }

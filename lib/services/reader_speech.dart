@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:wild/services/reader_mark_text.dart';
 
 typedef ReaderSpeechVoice =
-    ({String id, String name, String language, bool network});
+    ({String id, String name, String language, bool network, int quality});
 typedef ReaderSpeechInfo = ({int limit, List<ReaderSpeechVoice> voices});
 typedef ReaderSpeechEvent =
     ({String id, String type, int? start, String? message});
@@ -17,6 +17,14 @@ abstract interface class ReaderSpeechEngine {
   Future<bool> pause(String id);
   Future<bool> resume(String id);
   Future<void> stop(String id);
+}
+
+abstract interface class ReaderSpeechPrefetch {
+  void prefetch(String text, String? voice);
+}
+
+abstract interface class ReaderSpeechLiveRate {
+  Future<void> setPlaybackRate(String id, double rate);
 }
 
 class PlatformReaderSpeech implements ReaderSpeechEngine {
@@ -60,6 +68,7 @@ class PlatformReaderSpeech implements ReaderSpeechEngine {
             name: voice['name'] as String,
             language: voice['language'] as String,
             network: voice['network'] == true,
+            quality: voice['quality'] as int? ?? 0,
           ),
       ],
     );
@@ -86,30 +95,85 @@ class PlatformReaderSpeech implements ReaderSpeechEngine {
   Future<void> stop(String id) => _commands.invokeMethod<void>('stop', id);
 }
 
-List<String> readerSpeechSegments(String content, int limit) {
-  final maximum = limit.clamp(2, 1000);
-  final endings = RegExp(r'[。！？；.!?;，、,\s]');
-  final segments = <String>[];
-  for (final part in readerPlainParts(content)) {
-    if (part.image) continue;
-    final text = part.text.trim();
+typedef ReaderSpeechChunk = ({String text, int offset, int paragraph});
+typedef ReaderSpeechParagraph = ({String text, int offset});
+
+final _speechText = RegExp(r'[\p{L}\p{N}\p{S}]', unicode: true);
+final _sentenceEnd = RegExp(r'[。！？；.!?;]');
+final _clauseEnd = RegExp(r'[，、：,:\s]');
+final _number = RegExp(r'[0-9]');
+
+bool readerHasSpeech(String? text) =>
+    text != null &&
+    readerPlainParts(
+      text,
+    ).any((part) => !part.image && _speechText.hasMatch(part.text));
+
+class ReaderSpeechPlan {
+  ReaderSpeechPlan(String content, int limit) {
+    var lineEnd = -1;
+    for (final part in readerPlainParts(content)) {
+      if (part.image) continue;
+      final text = part.text.trim();
+      if (!_speechText.hasMatch(text)) continue;
+      final offset = part.offset + part.text.indexOf(text);
+      if (part.offset > lineEnd) {
+        final nextLine = content.indexOf('\n', part.offset);
+        lineEnd = nextLine < 0 ? content.length : nextLine;
+        paragraphs.add((text: text, offset: offset));
+      } else {
+        final previous = paragraphs.last;
+        paragraphs[paragraphs.length - 1] = (
+          text: '${previous.text} $text',
+          offset: previous.offset,
+        );
+      }
+      _split(text, offset, paragraphs.length - 1, limit.clamp(2, 240));
+    }
+  }
+
+  final paragraphs = <ReaderSpeechParagraph>[];
+  final chunks = <ReaderSpeechChunk>[];
+
+  void _split(String text, int offset, int paragraph, int limit) {
     var start = 0;
     while (start < text.length) {
-      var end = (start + maximum).clamp(0, text.length);
+      var end = (start + limit).clamp(0, text.length);
       if (end < text.length) {
-        final boundary = text.lastIndexOf(endings, end - 1);
-        if (boundary >= start + maximum ~/ 2) {
-          end = boundary + 1;
-        } else if (_lowSurrogate(text.codeUnitAt(end))) {
-          end--;
+        if (_lowSurrogate(text.codeUnitAt(end))) end--;
+        final window = text.substring(start, end);
+        final sentence = window.lastIndexOf(_sentenceEnd);
+        final clauses = _clauseEnd.allMatches(window).where((match) {
+          final at = start + match.start;
+          return match.end >= limit ~/ 2 &&
+              !(at > start &&
+                  _number.hasMatch(text[at - 1]) &&
+                  _number.hasMatch(text[at + 1]));
+        });
+        final clause = clauses.lastOrNull;
+        if (sentence >= limit ~/ 3) {
+          end = start + sentence + 1;
+          if (end < text.length &&
+              end - start < limit &&
+              '」』”’'.contains(text[end])) {
+            end++;
+          }
+        } else if (clause != null) {
+          end = start + clause.end;
         }
       }
-      final segment = text.substring(start, end).trim();
-      if (segment.isNotEmpty) segments.add(segment);
+      final raw = text.substring(start, end);
+      final segment = raw.trim();
+      if (segment.isNotEmpty) {
+        chunks.add((
+          text: segment,
+          offset: offset + start + raw.indexOf(segment),
+          paragraph: paragraph,
+        ));
+      }
       start = end;
     }
   }
-  return segments;
 }
 
 bool _lowSurrogate(int unit) => unit >= 0xDC00 && unit <= 0xDFFF;
@@ -125,81 +189,105 @@ class ReaderSpeechController extends ChangeNotifier {
   static bool get isAnyPlaying => _active.value != null;
   static int _utteranceSequence = 0;
   static double _preferredRate = 1;
-  static String? _preferredVoice;
 
-  final ReaderSpeechEngine _engine;
+  ReaderSpeechEngine _engine;
   StreamSubscription<ReaderSpeechEvent>? _subscription;
-  List<String> _segments = const [];
-  List<ReaderSpeechVoice> voices = const [];
+  List<ReaderSpeechChunk> _segments = const [];
+  List<ReaderSpeechParagraph> paragraphs = const [];
   String? _utterance;
-  String? voice = _preferredVoice;
+  String? voice;
   String? message;
   double rate = _preferredRate;
   int _index = 0, _offset = 0, _utteranceOffset = 0;
-  int _revision = 0, _playbackRequest = 0;
+  int spokenOffset = 0;
+  bool hasSpoken = false;
+  int _playbackRequest = 0;
   bool _disposed = false, _nativePaused = false;
-  bool loading = false, playing = false, paused = false;
-  bool canRetryInitialization = false;
+  bool playing = false, paused = false;
+  bool _initialized = false;
 
   bool get ready => _segments.isNotEmpty;
-  int get currentSegment => (_index + 1).clamp(0, _segments.length);
-  int get segmentCount => _segments.length;
+  int get paragraphIndex =>
+      ready ? _segments[_index.clamp(0, _segments.length - 1)].paragraph : 0;
+  int get segmentCount => paragraphs.length;
   bool get finished => ready && _index == _segments.length;
 
-  Future<void> prepare(({String text, bool encoded})? chapter) async {
-    if (ready || loading || _disposed) return;
-    if (chapter == null || chapter.encoded || chapter.text.trim().isEmpty) {
-      message = chapter?.encoded == true ? '当前章节使用专用字形，暂不可朗读' : '当前章节暂无可朗读的正文';
-      notifyListeners();
-      return;
+  void loadPlan(ReaderSpeechPlan plan, int initialOffset) {
+    _clearPlayback();
+    _segments = plan.chunks;
+    paragraphs = plan.paragraphs;
+    spokenOffset = initialOffset;
+    final cursor = _segments.lastIndexWhere(
+      (part) => part.offset <= initialOffset,
+    );
+    if (cursor >= 0) {
+      _index = cursor;
+      final chunk = _segments[cursor];
+      _offset = (initialOffset - chunk.offset).clamp(0, chunk.text.length - 1);
+      if (_lowSurrogate(chunk.text.codeUnitAt(_offset))) _offset--;
     }
-    final revision = _revision;
-    loading = true;
-    canRetryInitialization = false;
+    if (_segments.isEmpty) message = '当前章节暂无可朗读的正文';
+    notifyListeners();
+  }
+
+  void _listen() {
+    _subscription ??= _engine.events.listen(
+      _onEvent,
+      onError: (Object _) {
+        if (_utterance != null) _fail('朗读连接已中断，请重试');
+      },
+    );
+  }
+
+  void selectEngine(ReaderSpeechEngine engine, String? selectedVoice) {
+    if (identical(engine, _engine) && voice == selectedVoice) return;
+    final autoplay = playing;
+    suspend();
+    if (!identical(engine, _engine)) {
+      unawaited(_subscription?.cancel());
+      _subscription = null;
+      _engine = engine;
+      _initialized = false;
+    }
+    voice = selectedVoice;
+    notifyListeners();
+    if (autoplay) unawaited(play());
+  }
+
+  void seekParagraph(int index, {required bool autoplay}) {
+    final next = _segments.indexWhere((part) => part.paragraph == index);
+    if (next < 0) return;
+    _playbackRequest++;
+    _releaseUtterance();
+    _releaseOwner();
+    _index = next;
+    _offset = 0;
+    playing = false;
     message = null;
     notifyListeners();
-    try {
-      final info = await _engine.initialize().timeout(
-        const Duration(seconds: 8),
-      );
-      if (_disposed || revision != _revision) return;
-      voices = info.voices;
-      if (!voices.any((entry) => entry.id == voice)) voice = null;
-      _segments = readerSpeechSegments(chapter.text, info.limit);
-      if (_segments.isEmpty) message = '当前章节暂无可朗读的正文';
-      if (ready) {
-        _subscription ??= _engine.events.listen(
-          _onEvent,
-          onError: (Object _) {
-            if (_utterance != null) _fail('朗读连接已中断，请重试');
-          },
-        );
-      }
-    } catch (error) {
-      if (!_disposed && revision == _revision) {
-        canRetryInitialization = !ready;
-        message = _message(error, '无法启动系统语音，请检查设备语音设置');
-      }
-    } finally {
-      if (!_disposed && revision == _revision) {
-        loading = false;
-        notifyListeners();
-      }
-    }
+    if (autoplay) unawaited(play());
   }
 
   void setRate(double value) {
-    if (playing || rate == value) return;
+    if (rate == value) return;
+    final id = _utterance;
+    final engine = _engine;
+    if (id != null && engine is ReaderSpeechLiveRate) {
+      rate = _preferredRate = value;
+      unawaited(
+        (engine as ReaderSpeechLiveRate)
+            .setPlaybackRate(id, value)
+            .catchError((Object _) {}),
+      );
+      notifyListeners();
+      return;
+    }
+    final autoplay = playing;
+    if (autoplay) suspend();
     _releaseUtterance();
     rate = _preferredRate = value;
     notifyListeners();
-  }
-
-  void setVoice(String? value) {
-    if (playing || voice == value) return;
-    _releaseUtterance();
-    voice = _preferredVoice = value;
-    notifyListeners();
+    if (autoplay) unawaited(play());
   }
 
   Future<void> play() async {
@@ -216,6 +304,19 @@ class ReaderSpeechController extends ChangeNotifier {
     final nativePaused = _nativePaused;
     _nativePaused = false;
     notifyListeners();
+    if (!_initialized) {
+      try {
+        await _engine.initialize().timeout(const Duration(seconds: 8));
+        if (_disposed || request != _playbackRequest || !playing) return;
+        _initialized = true;
+        _listen();
+      } catch (error) {
+        if (!_disposed && request == _playbackRequest) {
+          _fail(_message(error, '无法启动朗读，请重试'));
+        }
+        return;
+      }
+    }
     if (nativePaused && id != null) {
       bool resumed;
       try {
@@ -259,6 +360,7 @@ class ReaderSpeechController extends ChangeNotifier {
 
   void suspend() {
     if (!playing && _utterance == null) return;
+    _playbackRequest++;
     _releaseUtterance();
     _setPaused();
   }
@@ -268,6 +370,7 @@ class ReaderSpeechController extends ChangeNotifier {
     _releaseUtterance();
     _releaseOwner();
     _index = _offset = 0;
+    hasSpoken = false;
     message = null;
     playing = paused = false;
   }
@@ -277,40 +380,55 @@ class ReaderSpeechController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void reset({bool notify = true}) {
-    _revision++;
-    loading = false;
-    canRetryInitialization = false;
-    _segments = const [];
-    _clearPlayback();
-    if (notify) notifyListeners();
-  }
-
   Future<void> _speak() async {
     if (!playing || _index >= _segments.length) return;
     final segment = _segments[_index];
     final id = _utterance = '${++_utteranceSequence}';
     _utteranceOffset = _offset;
     try {
-      await _engine.speak(id, segment.substring(_offset), rate, voice);
+      await _engine.speak(id, segment.text.substring(_offset), rate, voice);
+      final engine = _engine;
+      if (id == _utterance &&
+          engine is ReaderSpeechPrefetch &&
+          _index + 1 < _segments.length) {
+        (engine as ReaderSpeechPrefetch).prefetch(
+          _segments[_index + 1].text,
+          voice,
+        );
+      }
     } catch (error) {
-      if (id == _utterance) _fail(_message(error, '系统语音未能播放，请重试'));
+      if (id == _utterance) _fail(_message(error, '朗读失败，请重试'));
     }
   }
 
   void _onEvent(ReaderSpeechEvent event) {
     if (_disposed || event.id != _utterance) return;
     switch (event.type) {
+      case 'started':
+        if (playing && _index < _segments.length) {
+          hasSpoken = true;
+          spokenOffset = _segments[_index].offset + _offset;
+        }
       case 'range':
         if (!playing || _index >= _segments.length) return;
         final start = _utteranceOffset + (event.start ?? 0);
         final segment = _segments[_index];
         if (start >= _offset &&
-            start < segment.length &&
-            !_lowSurrogate(segment.codeUnitAt(start))) {
+            start < segment.text.length &&
+            !_lowSurrogate(segment.text.codeUnitAt(start))) {
           _offset = start;
+          hasSpoken = true;
+          spokenOffset = segment.offset + start;
         }
       case 'done':
+        if (_index < _segments.length) {
+          hasSpoken = true;
+          final segment = _segments[_index];
+          final end = segment.text.length - 1;
+          spokenOffset =
+              segment.offset +
+              (_lowSurrogate(segment.text.codeUnitAt(end)) ? end - 1 : end);
+        }
         _index++;
         _offset = 0;
         if (!playing || finished) {
@@ -325,7 +443,7 @@ class ReaderSpeechController extends ChangeNotifier {
       case 'interrupted':
         suspend();
       case 'error':
-        _fail(event.message ?? '系统语音未能播放，请重试');
+        _fail(event.message ?? '朗读失败，请重试');
     }
   }
 
