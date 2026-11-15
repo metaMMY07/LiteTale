@@ -177,7 +177,7 @@ const biliSearchProbeScript =
     result.retiredSearchPage=true;return JSON.stringify(result);
   }
   if (biliCheckAccess(result) || biliCheckSearchVerification(result)) return JSON.stringify(result);
-  if (document.readyState === 'loading' || location.pathname === '/' || !document.body) return JSON.stringify(result);
+  if (location.pathname === '/' || !document.body) return JSON.stringify(result);
   const path = location.pathname;
   const searchPath = ['/S6/','/search.html'].includes(path);
   const detail = path.match(/^\/novel\/([1-9]\d*)\.html$/);
@@ -187,7 +187,7 @@ const biliSearchProbeScript =
   if (summary) {
     result.resultKeyword = summary[1].trim();
     result.resultCount = Number(summary[2]);
-  } else if (window.__liteTaleBiliSearchPending) {
+  } else if (result.documentLoading || window.__liteTaleBiliSearchPending) {
     return JSON.stringify(result);
   }
   const images = root => {
@@ -238,6 +238,9 @@ const biliSearchProbeScript =
     }
     if (result.books.length >= 100) break;
   }
+  // The exact count confirms a complete result even with trailing scripts
+  // pending. A partially streamed or paginated list still waits for parsing.
+  if (result.documentLoading && result.books.length !== result.resultCount) return JSON.stringify(result);
   const currentParams = new URL(location.href).searchParams;
   const page = Number(currentParams.get('page') || '1');
   const keyword = result.resultKeyword || currentParams.get('searchkey');

@@ -9,6 +9,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/pages/auth_cubit.dart';
+import 'package:wild/settings/rule_source_manager.dart';
+import 'package:wild/settings/source_settings_page.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/rule_source_registry.dart';
 import 'package:wild/src/rust/frb_generated.dart';
@@ -362,7 +364,7 @@ void main() {
   }
 
   testWidgets(
-    'iOS native source menu keeps the website outside the menu and follows selection',
+    'iOS source cards follow selection and open the existing management page',
     (tester) async {
       final previousSource = activeSource.value;
       activeSource.value = SourceId.wenku8;
@@ -384,19 +386,24 @@ void main() {
           ],
           child: MaterialApp(
             theme: iosGlassTheme(Brightness.light),
-            home: const Scaffold(
-              body: SingleChildScrollView(child: SourceSettings()),
-            ),
+            home: const SourceSettingsPage(),
           ),
         ),
       );
       final nativeMenu = find.byType(AppleGlassMenu);
-      expect(find.text('https://m.wenku8.net/'), findsOneWidget);
+      expect(find.text('https://m.wenku8.net/'), findsNothing);
       expect(
-        tester.getTopLeft(find.byType(SourceWebsiteLink)).dy,
+        tester.getTopLeft(find.text('原站登录')).dy,
         greaterThan(tester.getBottomLeft(nativeMenu).dy),
       );
+      await tester.tap(find.text('原站登录'));
+      await tester.pumpAndSettle();
+      expect(find.text('登录'), findsOneWidget);
+      await tester.tap(find.text('打开原网站'));
+      await tester.pumpAndSettle();
+      expect(launcher.launches.single.$1, 'https://m.wenku8.net/');
       final menu = tester.widget<AppleGlassMenu>(nativeMenu);
+      expect(menu.textOnly, isTrue);
       expect(
         menu.items.every((item) => !item['label']!.contains('http')),
         isTrue,
@@ -408,14 +415,21 @@ void main() {
       await tester.pumpAndSettle();
       expect(activeSource.value, SourceId.bili);
       expect(rustApi.sourceSelections, ['bili']);
-      expect(find.text('https://www.bilinovel.net/'), findsOneWidget);
+      expect(find.text('https://www.bilinovel.net/'), findsNothing);
       expect(find.text('https://m.wenku8.net/'), findsNothing);
       await tester.tap(find.text('打开原网站'));
       await tester.pumpAndSettle();
-      expect(launcher.launches.single.$1, 'https://www.bilinovel.net/');
+      expect(launcher.launches.last.$1, 'https://www.bilinovel.net/');
       expect(activeSource.value, SourceId.bili);
       expect(auth.state, authBefore);
       expect(rustApi.sourceSelections, ['bili']);
+      expect(find.byType(RuleSourceManager), findsNothing);
+      await tester.tap(find.text('添加与管理书源'));
+      await tester.pumpAndSettle();
+      expect(find.byType(RuleSourceManager), findsOneWidget);
+      expect(find.text('本地文件'), findsOneWidget);
+      expect(find.text('链接导入'), findsOneWidget);
+      expect(find.text('粘贴规则'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
@@ -460,7 +474,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(activeSource.value, SourceId.wenku8);
       expect(rustApi.sourceSelections, isEmpty);
-      expect(find.text('https://www.wenku8.net/'), findsOneWidget);
+      expect(find.text('原站登录'), findsOneWidget);
+      expect(find.text('https://www.wenku8.net/'), findsNothing);
       expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),

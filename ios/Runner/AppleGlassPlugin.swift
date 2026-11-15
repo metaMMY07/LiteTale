@@ -226,7 +226,24 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     }
     if let button = menuButton {
       menuItems = config["items"] as? [[String: String]] ?? []
-      prepare(button, symbol: config["symbol"] as? String ?? "line.3.horizontal.decrease", title: config["label"] as? String ?? "分类")
+      let label = config["label"] as? String ?? "分类"
+      if config["textOnly"] as? Bool == true {
+        button.contentHorizontalAlignment = .trailing
+        if #available(iOS 15.0, *) {
+          var style = UIButton.Configuration.plain()
+          style.title = label
+          style.titleLineBreakMode = .byTruncatingTail
+          style.contentInsets = .zero
+          style.baseForegroundColor = color
+          button.configuration = style
+        } else {
+          button.setImage(nil, for: .normal)
+          button.setTitle(label, for: .normal)
+        }
+      } else {
+        button.contentHorizontalAlignment = .center
+        prepare(button, symbol: config["symbol"] as? String ?? "line.3.horizontal.decrease", title: label)
+      }
       if #available(iOS 14.0, *) {
         let selected = config["selected"] as? String
         let groups = Array(NSOrderedSet(array: menuItems.map { $0["group"] ?? "" })) as? [String] ?? []

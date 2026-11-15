@@ -1,4 +1,5 @@
 import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/wenku8_recovery_button.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
@@ -79,47 +80,63 @@ class NovelInfoPage extends StatelessWidget {
         appBar: AppBar(
           title: const Text('小说详情'),
           actions: [
-            if (w8.sourceSupportsComments(novelId))
-              BlocBuilder<NovelInfoCubit, NovelInfoState>(
-                buildWhen: _detailActionsChanged,
-                builder: (context, state) {
-                  if (state is! NovelInfoLoaded) return const SizedBox.shrink();
-                  return AppIconButton(
-                    key: const ValueKey('detail-comments'),
-                    tooltip: '书评',
-                    icon: const Icon(Icons.chat_bubble_outline_rounded),
-                    onPressed:
-                        () => Navigator.pushNamed(
-                          context,
-                          '/novel/reviews',
-                          arguments: {
-                            'aid': novelId,
-                            'title': state.novelInfo.title,
-                          },
-                        ),
-                  );
-                },
-              ),
-            if (sourceOf(novelId) == SourceId.wenku8)
-              BlocBuilder<NovelInfoCubit, NovelInfoState>(
-                buildWhen: _detailActionsChanged,
-                builder: (context, state) {
-                  if (state is! NovelInfoLoaded) {
-                    return const SizedBox.shrink();
-                  }
-                  return AppIconButton(
-                    icon: const Icon(Icons.download_outlined),
-                    tooltip:
-                        sourceOf(novelId) == SourceId.wenku8
-                            ? '离线下载'
-                            : '此书源暂不支持离线下载',
-                    onPressed:
-                        sourceOf(novelId) == SourceId.wenku8
-                            ? () => navigateToDownload(context)
-                            : null,
-                  );
-                },
-              ),
+            BlocBuilder<NovelInfoCubit, NovelInfoState>(
+              buildWhen: _detailActionsChanged,
+              builder: (context, state) {
+                if (state is! NovelInfoLoaded) return const SizedBox.shrink();
+                final wenku8 = sourceOf(novelId) == SourceId.wenku8;
+                final actions = [
+                  if (state.novelInfo.tags.any((tag) => tag.trim().isNotEmpty))
+                    BookDetailTagsButton(
+                      tags: state.novelInfo.tags,
+                      onTag:
+                          wenku8
+                              ? (tag) => Navigator.pushNamed(
+                                context,
+                                '/category',
+                                arguments: {'tag': tag},
+                              )
+                              : null,
+                    ),
+                  if (w8.sourceSupportsComments(novelId))
+                    AppIconButton(
+                      key: const ValueKey('detail-comments'),
+                      tooltip: '书评',
+                      icon: const Icon(Icons.chat_bubble_outline_rounded),
+                      onPressed:
+                          () => Navigator.pushNamed(
+                            context,
+                            '/novel/reviews',
+                            arguments: {
+                              'aid': novelId,
+                              'title': state.novelInfo.title,
+                            },
+                          ),
+                    ),
+                  if (wenku8)
+                    AppIconButton(
+                      icon: const Icon(Icons.download_outlined),
+                      tooltip: '离线下载',
+                      onPressed: () => navigateToDownload(context),
+                    ),
+                ];
+                if (actions.isEmpty) return const SizedBox.shrink();
+                final buttons = Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: actions,
+                );
+                if (!usesAppleGlass) return buttons;
+                return Padding(
+                  padding: const EdgeInsetsDirectional.only(end: 16),
+                  child: Center(
+                    child: SizedBox(
+                      height: 44,
+                      child: AppleGlassSurface(capsule: true, child: buttons),
+                    ),
+                  ),
+                );
+              },
+            ),
           ],
         ),
         body: BlocBuilder<NovelInfoCubit, NovelInfoState>(
@@ -211,7 +228,7 @@ class NovelInfoPage extends StatelessWidget {
 
 bool _detailActionsChanged(NovelInfoState previous, NovelInfoState current) {
   if (previous is NovelInfoLoaded && current is NovelInfoLoaded) {
-    return previous.novelInfo.title != current.novelInfo.title;
+    return !identical(previous.novelInfo, current.novelInfo);
   }
   return (previous is NovelInfoLoaded) != (current is NovelInfoLoaded);
 }
@@ -336,14 +353,6 @@ class _NovelInfoContent extends StatelessWidget {
                   await cubit.loadHistory();
                 }
               }
-              : null,
-      onTag:
-          source == SourceId.wenku8
-              ? (tag) => Navigator.pushNamed(
-                context,
-                '/category',
-                arguments: {'tag': tag},
-              )
               : null,
       onRead:
           (chapter) => _navigateToReader(

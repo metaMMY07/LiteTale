@@ -138,7 +138,11 @@ class _SearchPageState extends State<SearchPage> {
     final request = ++_request;
     _readRequest?.cancel();
     _releaseSearchChallenge();
-    final readRequest = _readRequest = ReadRequest();
+    final readRequest =
+        _readRequest =
+            page == 1 && activeSource.value == SourceId.bili
+                ? BiliSearchRequest()
+                : ReadRequest();
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _loading = true;
@@ -194,7 +198,9 @@ class _SearchPageState extends State<SearchPage> {
       if (openSearchVerification &&
           e is BiliSiteVerificationRequired &&
           e.isSearchVerification &&
-          !e.manualSearch &&
+          (!e.manualSearch ||
+              (readRequest is BiliSearchRequest &&
+                  readRequest.openOriginalPage)) &&
           e.searchKeyword == key &&
           ModalRoute.of(context)?.isCurrent == true) {
         final verified = await openBiliVerification(
@@ -214,13 +220,49 @@ class _SearchPageState extends State<SearchPage> {
 
   Widget _body() {
     if (_loading && _results == null) {
+      final request = _readRequest;
       return SourceLoadingIndicator(
         source: activeSource.value,
         requestKey: _request,
-        message: '正在搜索，请稍候…',
+        message:
+            request is BiliSearchRequest && request.openOriginalPage
+                ? '正在打开原站…'
+                : '正在搜索，请稍候…',
+        action:
+            request is BiliSearchRequest
+                ? AppButton.outlinedIcon(
+                  onPressed:
+                      request.openOriginalPage
+                          ? null
+                          : () =>
+                              setState(() => request.openOriginalPage = true),
+                  icon: const Icon(Icons.open_in_browser_rounded),
+                  label: const Text('在应用内继续搜索'),
+                )
+                : null,
       );
     }
     if (_error != null && _results == null) {
+      if (_error case final BiliSiteVerificationRequired request
+          when request.manualSearch) {
+        return Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('可在原站页面继续本次搜索'),
+                const SizedBox(height: 12),
+                BiliRecoveryButton(
+                  error: request,
+                  source: activeSource.value,
+                  onRecovered: () => _search(openSearchVerification: false),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
       return Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),

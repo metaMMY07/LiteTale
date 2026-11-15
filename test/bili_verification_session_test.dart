@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/services/bili_browser.dart';
+import 'package:wild/services/read_request.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/utils/bili_site_dom.dart';
 
@@ -621,6 +622,77 @@ void main() {
     expect(browser.rendererGeneration, generation + 1);
   });
 
+  test('the original search opens while its form is still loading', () async {
+    const entry = 'https://www.bilinovel.net/search.html';
+    final port = _Port()..formResponses.add({'url': entry, 'ready': false});
+    final browser = session(port);
+    final owner = BiliSearchRequest()..openOriginalPage = true;
+    final request = await ReadRequest.run(
+      owner,
+      () => browser.search('魔法禁书', 1),
+    ).then<BiliSiteVerificationRequired>(
+      (_) => fail('expected the loading site form'),
+      onError: (Object error) => error as BiliSiteVerificationRequired,
+    );
+    expect(request.manualSearch, isTrue);
+    expect(request.kind, BiliProbeKind.searchForm);
+    expect(port.submitted, isFalse);
+    expect(port.urls, [entry]);
+    expect(browser.showHeldSearch(request, port), isTrue);
+    browser.releaseHeldSearch(request);
+  });
+
+  test(
+    'the in-app action takes the current search before the background deadline',
+    () async {
+      const entry = 'https://www.bilinovel.net/search.html';
+      const query = '魔法禁书';
+      final probeStarted = Completer<void>();
+      final port =
+          _Port()
+            ..firstSearchProbe = probeStarted
+            ..searchResult = {'url': entry, 'ready': false};
+      final browser = session(port);
+      final owner = BiliSearchRequest();
+      final handoff = ReadRequest.run(
+        owner,
+        () => browser.search(query, 1),
+      ).then<BiliSiteVerificationRequired>(
+        (_) => fail('expected the running search page'),
+        onError: (Object error) => error as BiliSiteVerificationRequired,
+      );
+      await probeStarted.future;
+      expect(port.submitted, isTrue);
+      owner.openOriginalPage = true;
+      final request = await handoff;
+      expect(request.manualSearch, isTrue);
+      expect(request.searchKeyword, query);
+      expect(port.urls, [entry]);
+      expect(browser.showHeldSearch(request, port), isTrue);
+
+      expect(
+        await browser.adoptVisiblePage(
+          request,
+          {
+            'url': entry,
+            'ready': true,
+            'resultKeyword': query,
+            'resultCount': 1,
+            'books': [
+              {'nid': '42', 'title': '创约 魔法禁书目录'},
+            ],
+          },
+          persistSession: () async {},
+          isCurrent: () => true,
+        ),
+        isTrue,
+      );
+      browser.releaseHeldSearch(request, verified: true);
+      expect((await browser.search(query, 1)).records.single.aid, 'bili:42');
+      expect(port.urls, [entry]);
+    },
+  );
+
   test(
     'a stalled site search can be finished in the same visible page',
     () async {
@@ -676,6 +748,7 @@ class _Port implements BiliBrowserPort {
   bool pending = false, submitted = false;
   bool denied = false, incomplete = false;
   Map<String, dynamic>? searchResult;
+  Completer<void>? firstSearchProbe;
   final searchResponses = <Map<String, dynamic>>[];
   final formResponses = <Map<String, dynamic>>[];
   @override
@@ -697,6 +770,8 @@ class _Port implements BiliBrowserPort {
       return {'url': current, 'ready': true};
     }
     if (script == biliSearchProbeScript) {
+      firstSearchProbe?.complete();
+      firstSearchProbe = null;
       if (searchResponses.isNotEmpty) return searchResponses.removeAt(0);
       if (searchResult case final result?) return result;
       return {

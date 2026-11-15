@@ -86,7 +86,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/ios-preview
-          flutter build ios --release --no-codesign --build-name 1.2.4 --build-number 112 2>&1 | tee build/ios-preview/build.log
+          flutter build ios --release --no-codesign --build-name 1.2.4 --build-number 113 2>&1 | tee build/ios-preview/build.log
       - name: Validate and package the device IPA
         run: |
           set -euo pipefail

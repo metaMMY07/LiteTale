@@ -136,13 +136,16 @@ class IosSettingsRow extends StatelessWidget {
     super.key,
     required this.icon,
     required this.title,
-    required this.description,
-    required this.onTap,
+    this.description,
+    this.trailing = const CupertinoListTileChevron(),
+    this.onTap,
   });
 
   final IconData icon;
-  final String title, description;
-  final VoidCallback onTap;
+  final String title;
+  final String? description;
+  final Widget? trailing;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -160,14 +163,17 @@ class IosSettingsRow extends StatelessWidget {
           fontWeight: FontWeight.w400,
         ),
       ),
-      subtitle: Text(
-        description,
-        maxLines: 4,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      ),
-      trailing: const CupertinoListTileChevron(),
+      subtitle:
+          description == null
+              ? null
+              : Text(
+                description!,
+                maxLines: 4,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+      trailing: trailing,
       onTap: onTap,
     );
   }

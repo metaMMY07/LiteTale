@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:wild/settings/settings_widgets.dart';
 import 'package:wild/sources/source_api.dart';
+import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/widgets/left_aligned_scrollable.dart';
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
@@ -11,13 +12,53 @@ import 'rule_source_manager.dart';
 class SourceSettingsPage extends StatelessWidget {
   const SourceSettingsPage({super.key});
 
+  void _manageSources(BuildContext context) => Navigator.of(
+    context,
+  ).push(HorizontalCoverPageRoute(builder: (_) => const _ManageSourcesPage()));
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: settingsAppBar(context, '书源与账号'),
+    body: LeftAlignedScrollView(
+      topInset: 12,
+      bottomInset: 28,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SourceSettings(),
+          const SizedBox(height: 12),
+          SettingsCard(
+            margin: EdgeInsets.zero,
+            filled: true,
+            child:
+                usesAppleGlass
+                    ? IosSettingsRow(
+                      icon: CupertinoIcons.folder,
+                      title: '添加与管理书源',
+                      onTap: () => _manageSources(context),
+                    )
+                    : ListTile(
+                      leading: const Icon(Icons.library_add_outlined),
+                      title: const Text('添加与管理书源'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => _manageSources(context),
+                    ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _ManageSourcesPage extends StatelessWidget {
+  const _ManageSourcesPage();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: settingsAppBar(context, '管理书源'),
     body: LeftAlignedCustomScrollView(
       bottomInset: 28,
       slivers: [
-        const SliverToBoxAdapter(child: SourceSettings()),
         const RuleSourceManager(),
         if (!usesAppleGlass)
           SliverToBoxAdapter(

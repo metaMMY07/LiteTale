@@ -223,52 +223,71 @@ class AppleGlassMenu extends StatelessWidget {
     this.selected,
     this.width = 98,
     this.symbol = 'line.3.horizontal.decrease',
+    this.textOnly = false,
   });
   final String label;
   final List<Map<String, String>> items;
   final String? selected;
   final double width;
   final String symbol;
+  final bool textOnly;
   final ValueChanged<String> onSelect;
   @override
-  Widget build(BuildContext context) => SizedBox(
-    width: width,
-    height: 44,
-    child: _AppleChrome(
-      parameters: {
-        'kind': 'menu',
-        'accent': Theme.of(context).colorScheme.primary.toARGB32(),
-        'label': label,
-        'symbol': symbol,
-        'items': items,
-        'selected': selected ?? '',
-        'dark': Theme.of(context).brightness == Brightness.dark,
-      },
-      onAction: (a, v) {
-        if (a == 'select') onSelect(v as String);
-      },
-      attachmentFallback: _GlassButtonPreview(
-        label: label,
-        icon: switch (symbol) {
-          'ellipsis' => CupertinoIcons.ellipsis,
-          _ => CupertinoIcons.line_horizontal_3_decrease,
+  Widget build(BuildContext context) {
+    final value = Align(
+      alignment: AlignmentDirectional.centerEnd,
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+          color: Theme.of(context).colorScheme.primary,
+        ),
+      ),
+    );
+    return SizedBox(
+      width: width,
+      height: 44,
+      child: _AppleChrome(
+        parameters: {
+          'kind': 'menu',
+          'accent': Theme.of(context).colorScheme.primary.toARGB32(),
+          'label': label,
+          'symbol': symbol,
+          'items': items,
+          'selected': selected ?? '',
+          'dark': Theme.of(context).brightness == Brightness.dark,
+          if (textOnly) 'textOnly': true,
         },
-      ),
-      fallback: PopupMenuButton<String>(
-        tooltip: label,
-        onSelected: onSelect,
-        itemBuilder:
-            (_) => [
-              for (final item in items)
-                PopupMenuItem(
-                  value: item['value'],
-                  child: Text(item['label']!),
+        onAction: (a, v) {
+          if (a == 'select') onSelect(v as String);
+        },
+        attachmentFallback:
+            textOnly
+                ? value
+                : _GlassButtonPreview(
+                  label: label,
+                  icon: switch (symbol) {
+                    'ellipsis' => CupertinoIcons.ellipsis,
+                    _ => CupertinoIcons.line_horizontal_3_decrease,
+                  },
                 ),
-            ],
-        child: Center(child: Text(label)),
+        fallback: PopupMenuButton<String>(
+          tooltip: label,
+          onSelected: onSelect,
+          itemBuilder:
+              (_) => [
+                for (final item in items)
+                  PopupMenuItem(
+                    value: item['value'],
+                    child: Text(item['label']!),
+                  ),
+              ],
+          child: textOnly ? value : Center(child: Text(label)),
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 /// UIKit owns the material, selection animation, SF Symbols and accessibility.

@@ -134,7 +134,8 @@ void main() {
         await tester.tap(entry);
         await tester.pumpAndSettle();
         expect(find.byType(SourceSettingsPage), findsOneWidget);
-        expect(find.text('https://www.wenku8.net/'), findsOneWidget);
+        expect(find.text('原站登录'), findsOneWidget);
+        expect(find.text('https://www.wenku8.net/'), findsNothing);
         await tester.tap(find.byKey(const ValueKey('source-picker-button')));
         await tester.pumpAndSettle();
         expect(find.text('选择书源'), findsOneWidget);

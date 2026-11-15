@@ -9,11 +9,10 @@ import 'package:wild/theme/ios_glass_theme.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/book_details_view.dart';
 import 'package:wild/widgets/fluid_navigation_bar.dart';
-import 'package:wild/widgets/platform_controls.dart';
 
 void main() {
   testWidgets(
-    'iOS detail tags use semicircular ends for short and long labels',
+    'iOS detail tags open a compact sheet and return the selected label',
     (tester) async {
       tester.view.physicalSize = const Size(420, 900);
       tester.view.devicePixelRatio = 1;
@@ -36,38 +35,35 @@ void main() {
         MaterialApp(
           theme: iosGlassTheme(Brightness.dark),
           home: Scaffold(
+            appBar: AppBar(
+              actions: [
+                BookDetailTagsButton(
+                  tags: info.tags,
+                  onTag: (tag) => selected = tag,
+                ),
+              ],
+            ),
             body: BookDetailsView(
               info: info,
               source: SourceId.wenku8,
               volumes: const [],
               onRead: (_) {},
-              onTag: (tag) => selected = tag,
             ),
           ),
         ),
       );
-      for (final chip in tester.widgetList<AppChip>(find.byType(AppChip))) {
-        expect(chip.capsule, isTrue);
-      }
-      final clips = find.descendant(
-        of: find.byType(AppChip),
-        matching: find.byType(ClipPath),
-      );
-      expect(clips, findsNWidgets(6));
-      for (final element in clips.evaluate()) {
-        final clip = element.widget as ClipPath;
-        expect(
-          (clip.clipper! as ShapeBorderClipper).shape,
-          isA<StadiumBorder>(),
-        );
-        final box = element.renderObject! as RenderBox;
-        final path = clip.clipper!.getClip(box.size);
-        expect(path.contains(Offset(.5, box.size.height / 2)), isTrue);
-        expect(path.contains(const Offset(.5, .5)), isFalse);
+      expect(find.text('校园'), findsNothing);
+      await tester.tap(find.byType(BookDetailTagsButton));
+      await tester.pumpAndSettle();
+      expect(find.text('书籍标签'), findsOneWidget);
+      expect(tester.getTopLeft(find.text('书籍标签')).dy, greaterThan(450));
+      for (final tag in info.tags) {
+        expect(find.text(tag), findsOneWidget);
       }
       await tester.tap(find.text('校园'));
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(selected, '校园');
+      expect(find.text('校园'), findsNothing);
       expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),

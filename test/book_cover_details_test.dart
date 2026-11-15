@@ -155,6 +155,57 @@ void main() {
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );
 
+  testWidgets(
+    'the synopsis opens at half height and expands without shifting the detail page',
+    (tester) async {
+      tester.view.physicalSize = const Size(402, 874);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final introduction = List.filled(18, '<p>这是一段小说简介。</p>').join();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: iosGlassTheme(Brightness.light),
+          home: Scaffold(
+            body: BookDetailsView(
+              info: NovelInfo(
+                title: '通用小说',
+                author: '',
+                status: '',
+                finUpdate: '',
+                imgUrl: '',
+                introduce: '$introduction<p>完整简介的最后一段。</p>',
+                tags: const [],
+                heat: '',
+                trending: '',
+                isAnimated: false,
+              ),
+              volumes: volumes,
+              source: SourceId.bili,
+              onRead: (_) {},
+            ),
+          ),
+        ),
+      );
+      final preview = find.byKey(const ValueKey('detail-introduction'));
+      final previewRect = tester.getRect(preview);
+      await tester.tap(preview);
+      await tester.pumpAndSettle();
+      final sheet = find.byType(DraggableScrollableSheet);
+      expect(tester.getSize(sheet).height, closeTo(437, 2));
+      // Start on the header so the same scroll controller can expand the sheet.
+      final start = tester.getTopLeft(sheet) + const Offset(130, 40);
+      await tester.dragFrom(start, const Offset(0, -310));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(sheet).height, closeTo(874, 2));
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(sheet, findsNothing);
+      expect(tester.getRect(preview), previewRect);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
   testWidgets('opening a long volume builds the nearby chapters only', (
     tester,
   ) async {

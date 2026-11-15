@@ -15,6 +15,11 @@ abstract interface class BiliBrowserPort {
   Future<void> setDesktopSite(bool enabled);
 }
 
+/// The search page can present this request's original WebView while it loads.
+class BiliSearchRequest extends ReadRequest {
+  bool openOriginalPage = false;
+}
+
 class BiliBrowserException implements Exception {
   const BiliBrowserException(this.message);
   final String message;
@@ -703,6 +708,7 @@ class BiliBrowserSession extends ChangeNotifier {
     int? searchPage,
   }) async {
     Duration? verificationStarted;
+    final request = ReadRequest.current;
     final manualSearchAt = clock.elapsed + searchPageGrace;
     while (clock.elapsed < operationTimeout) {
       dynamic raw;
@@ -810,7 +816,8 @@ class BiliBrowserSession extends ChangeNotifier {
       if (searchEntry != null &&
           searchKeyword != null &&
           searchPage == 1 &&
-          clock.elapsed >= manualSearchAt &&
+          (clock.elapsed >= manualSearchAt ||
+              (request is BiliSearchRequest && request.openOriginalPage)) &&
           _samePage(loaded, searchEntry)) {
         throw BiliSiteVerificationRequired(
           target: loaded,

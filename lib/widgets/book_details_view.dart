@@ -27,7 +27,6 @@ class BookDetailsView extends StatefulWidget {
     this.onBookmark,
     this.onComments,
     this.onAuthor,
-    this.onTag,
   }) : loading = null;
 
   const BookDetailsView.loading({
@@ -42,8 +41,7 @@ class BookDetailsView extends StatefulWidget {
        inShelf = false,
        onBookmark = null,
        onComments = null,
-       onAuthor = null,
-       onTag = null;
+       onAuthor = null;
 
   final NovelInfo? info;
   final BookDetailHint? hint;
@@ -55,7 +53,6 @@ class BookDetailsView extends StatefulWidget {
   final bool inShelf;
   final Future<void> Function()? onBookmark;
   final VoidCallback? onComments, onAuthor;
-  final ValueChanged<String>? onTag;
   @override
   State<BookDetailsView> createState() => _BookDetailsViewState();
 }
@@ -65,7 +62,7 @@ class _BookDetailsViewState extends State<BookDetailsView> {
   final _volumeStarts = <int>[];
   Chapter? _firstChapter, _resumeChapter;
   int _chapterCount = 0, _rowCount = 0;
-  bool _busy = false, _fullDescription = false;
+  bool _busy = false;
   String _description = '';
   @override
   void initState() {
@@ -87,7 +84,6 @@ class _BookDetailsViewState extends State<BookDetailsView> {
             old.info?.title != widget.info?.title);
     if (changedBook) {
       _open.clear();
-      _fullDescription = false;
     }
     if (changedBook || !identical(old.volumes, widget.volumes)) {
       _indexCatalog();
@@ -332,82 +328,36 @@ class _BookDetailsViewState extends State<BookDetailsView> {
     );
     return [
       SliverToBoxAdapter(child: actions),
-      if (info.tags.any((t) => t.trim().isNotEmpty))
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final tag in info.tags.where((t) => t.trim().isNotEmpty))
-                  InkWell(
-                    borderRadius: BorderRadius.circular(20),
-                    customBorder: apple ? const StadiumBorder() : null,
-                    onTap:
-                        widget.onTag == null ? null : () => widget.onTag!(tag),
-                    child: AppChip(
-                      capsule: apple,
-                      padding:
-                          apple
-                              ? const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 8,
-                              )
-                              : null,
-                      label: Text(tag),
-                      backgroundColor: colors.primaryContainer,
-                      labelStyle: TextStyle(color: colors.onPrimaryContainer),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
       if (_description.isNotEmpty)
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text('简介', style: Theme.of(context).textTheme.titleLarge),
-                const SizedBox(height: 10),
-                if (_fullDescription)
-                  Html(
-                    data: info.introduce,
-                    style: {
-                      'body': Style(
-                        margin: Margins.zero,
-                        padding: HtmlPaddings.zero,
-                        color: colors.onSurface,
-                        fontFamily:
-                            Theme.of(context).textTheme.bodyMedium?.fontFamily,
-                        fontSize: FontSize(15),
-                      ),
-                    },
-                  )
-                else
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+            child: InkWell(
+              key: const ValueKey('detail-introduction'),
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => _showIntroduction(context, info.introduce),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    _description,
-                    maxLines: 5,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(height: 1.65),
-                  ),
-                if (_description.length > 150)
-                  Align(
-                    alignment: AlignmentDirectional.centerEnd,
-                    child: AppButton.text(
-                      onPressed:
-                          () => setState(
-                            () => _fullDescription = !_fullDescription,
-                          ),
-                      child: Text(_fullDescription ? '收起简介' : '展开简介'),
+                    '简介',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: colors.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-              ],
+                  const SizedBox(height: 8),
+                  Text(
+                    _description,
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colors.onSurfaceVariant,
+                      height: 1.6,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -566,6 +516,207 @@ class _BookDetailsViewState extends State<BookDetailsView> {
         child: SafeArea(top: false, child: SizedBox(height: 32)),
       ),
     ];
+  }
+}
+
+class BookDetailTagsButton extends StatelessWidget {
+  const BookDetailTagsButton({super.key, required this.tags, this.onTag});
+
+  final List<String> tags;
+  final ValueChanged<String>? onTag;
+
+  Future<void> _showTags(BuildContext context, Set<String> labels) async {
+    final tag = await _showBookInfoSheet<String>(
+      context,
+      (sheetContext) => ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(sheetContext).height * .6,
+        ),
+        child: SingleChildScrollView(
+          child: SafeArea(
+            top: false,
+            minimum: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _BookInfoSheetHeading(
+                  title: '书籍标签',
+                  icon: Icons.sell_outlined,
+                ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final label in labels)
+                      InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap:
+                            onTag == null
+                                ? null
+                                : () => Navigator.pop(sheetContext, label),
+                        child: Ink(
+                          decoration: BoxDecoration(
+                            color: Theme.of(sheetContext).colorScheme.surface,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: Theme.of(sheetContext).dividerColor,
+                              width: 0,
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            child: Text(label),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      enableDrag: true,
+    );
+    if (tag != null &&
+        context.mounted &&
+        ModalRoute.of(context)?.isCurrent != false) {
+      onTag?.call(tag);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = {
+      for (final tag in tags)
+        if (tag.trim().isNotEmpty) tag.trim(),
+    };
+    if (labels.isEmpty) return const SizedBox.shrink();
+    return AppIconButton(
+      tooltip: '书籍标签',
+      icon: Icon(usesAppleGlass ? CupertinoIcons.tag : Icons.sell_outlined),
+      onPressed: () => _showTags(context, labels),
+    );
+  }
+}
+
+Future<void> _showIntroduction(BuildContext context, String introduction) =>
+    _showBookInfoSheet<void>(
+      context,
+      (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: .5,
+        minChildSize: .5,
+        maxChildSize: 1,
+        snap: true,
+        builder: (context, controller) {
+          final theme = Theme.of(context);
+          return ListView(
+            controller: controller,
+            padding: EdgeInsets.fromLTRB(
+              24,
+              0,
+              24,
+              24 + MediaQuery.paddingOf(context).bottom,
+            ),
+            children: [
+              const _BookInfoSheetHeading(
+                title: '简介',
+                icon: Icons.description_outlined,
+              ),
+              SelectionArea(
+                child: Html(
+                  data: introduction,
+                  style: {
+                    'body': Style(
+                      margin: Margins.zero,
+                      padding: HtmlPaddings.zero,
+                      color: theme.colorScheme.onSurface,
+                      fontFamily: theme.textTheme.bodyMedium?.fontFamily,
+                      fontSize: FontSize(16),
+                    ),
+                  },
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+      enableDrag: false,
+    );
+
+Future<T?> _showBookInfoSheet<T>(
+  BuildContext context,
+  WidgetBuilder builder, {
+  required bool enableDrag,
+}) async {
+  final navigator = Navigator.of(context);
+  final apple = usesAppleGlass;
+  final route = ModalBottomSheetRoute<T>(
+    builder: builder,
+    capturedThemes: InheritedTheme.capture(
+      from: context,
+      to: navigator.context,
+    ),
+    isScrollControlled: true,
+    useSafeArea: true,
+    enableDrag: enableDrag,
+    showDragHandle: false,
+    clipBehavior: Clip.antiAlias,
+    backgroundColor: apple ? Theme.of(context).scaffoldBackgroundColor : null,
+    shape:
+        apple
+            ? const ContinuousRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(36)),
+            )
+            : null,
+    sheetAnimationStyle:
+        MediaQuery.disableAnimationsOf(context)
+            ? AnimationStyle.noAnimation
+            : null,
+    barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+  );
+  final result = await navigator.push(route);
+  await route.completed;
+  return result;
+}
+
+class _BookInfoSheetHeading extends StatelessWidget {
+  const _BookInfoSheetHeading({required this.title, required this.icon});
+
+  final String title;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Center(
+          child: Container(
+            width: 36,
+            height: 5,
+            margin: const EdgeInsets.only(top: 8, bottom: 16),
+            decoration: ShapeDecoration(
+              color: theme.colorScheme.onSurfaceVariant.withValues(alpha: .4),
+              shape: const StadiumBorder(),
+            ),
+          ),
+        ),
+        Row(
+          children: [
+            Icon(icon, size: 22, color: theme.colorScheme.primary),
+            const SizedBox(width: 8),
+            Expanded(child: Text(title, style: theme.textTheme.titleMedium)),
+          ],
+        ),
+        const SizedBox(height: 12),
+      ],
+    );
   }
 }
 

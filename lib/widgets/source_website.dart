@@ -69,6 +69,7 @@ class SourceLoadingIndicator extends StatefulWidget {
     required this.source,
     this.requestKey,
     this.message,
+    this.action,
     this.delay = const Duration(seconds: 8),
     this.size,
     this.centered = true,
@@ -76,6 +77,7 @@ class SourceLoadingIndicator extends StatefulWidget {
   final SourceId source;
   final Object? requestKey;
   final String? message;
+  final Widget? action;
   final Duration delay;
   final double? size;
   final bool centered;
@@ -96,7 +98,7 @@ class _SourceLoadingIndicatorState extends State<SourceLoadingIndicator> {
   void _start() {
     _timer?.cancel();
     _slow = false;
-    if (widget.source == SourceId.localEpub) return;
+    if (widget.source == SourceId.localEpub || widget.action != null) return;
     _timer = Timer(widget.delay, () {
       if (mounted) setState(() => _slow = true);
     });
@@ -107,7 +109,8 @@ class _SourceLoadingIndicatorState extends State<SourceLoadingIndicator> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.source != widget.source ||
         oldWidget.requestKey != widget.requestKey ||
-        oldWidget.delay != widget.delay) {
+        oldWidget.delay != widget.delay ||
+        (oldWidget.action == null) != (widget.action == null)) {
       _start();
     }
   }
@@ -130,7 +133,10 @@ class _SourceLoadingIndicatorState extends State<SourceLoadingIndicator> {
             const SizedBox(height: 16),
             Text(widget.message!, textAlign: TextAlign.center),
           ],
-          if (_slow) ...[
+          if (widget.action case final action?) ...[
+            const SizedBox(height: 16),
+            action,
+          ] else if (_slow) ...[
             const SizedBox(height: 16),
             const Text('加载较久，可打开原网站对照访问情况。', textAlign: TextAlign.center),
             const SizedBox(height: 8),
