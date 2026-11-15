@@ -204,8 +204,15 @@ class IosAppDockHost extends StatelessWidget {
               left: 0,
               right: 0,
               bottom: 0,
-              child: Offstage(
-                offstage: hidden,
+              child: AnimatedBuilder(
+                animation: progress,
+                // Platform views need to leave the painted scene when covered.
+                // Keep the same Flutter element and native tab selection.
+                builder:
+                    (_, dock) => Offstage(
+                      offstage: hidden || progress.value >= 1,
+                      child: dock,
+                    ),
                 child: IgnorePointer(
                   ignoring: blocked,
                   child: ExcludeSemantics(
@@ -219,7 +226,10 @@ class IosAppDockHost extends StatelessWidget {
                           progress,
                           media.size.height,
                           direction,
-                          rounded: !media.disableAnimations,
+                          radius:
+                              media.disableAnimations
+                                  ? BorderRadius.zero
+                                  : iosSlidingPageRadius(media.size),
                         ),
                         child: SlideTransition(
                           position: progress.drive(_dockParallax),
@@ -256,13 +266,13 @@ class _ReaderDockClipper extends CustomClipper<Path> {
     this.progress,
     this.viewportHeight,
     this.direction, {
-    required this.rounded,
+    required this.radius,
   }) : super(reclip: progress);
 
   final Animation<double> progress;
   final double viewportHeight;
   final TextDirection direction;
-  final bool rounded;
+  final BorderRadius radius;
 
   @override
   Path getClip(Size size) {
@@ -280,7 +290,7 @@ class _ReaderDockClipper extends CustomClipper<Path> {
     return Path.combine(
       PathOperation.difference,
       dock,
-      rounded ? iosSlidingPageOutline(page) : (Path()..addRect(page)),
+      Path()..addRRect(radius.toRRect(page)),
     );
   }
 
@@ -289,5 +299,5 @@ class _ReaderDockClipper extends CustomClipper<Path> {
       oldClipper.progress != progress ||
       oldClipper.viewportHeight != viewportHeight ||
       oldClipper.direction != direction ||
-      oldClipper.rounded != rounded;
+      oldClipper.radius != radius;
 }

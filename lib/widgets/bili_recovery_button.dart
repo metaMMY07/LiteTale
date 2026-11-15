@@ -122,7 +122,13 @@ class _BiliRecoveryButtonState extends State<BiliRecoveryButton> {
     return AppButton.outlinedIcon(
       onPressed: _opening ? null : _recover,
       icon: const Icon(Icons.open_in_browser_rounded),
-      label: Text(request.contentRequired ? '打开原站加载完整正文' : '打开哔哩原站验证'),
+      label: Text(
+        request.contentRequired
+            ? '打开原站加载完整正文'
+            : request.manualSearch
+            ? '在应用内继续搜索'
+            : '打开哔哩原站验证',
+      ),
     );
   }
 }

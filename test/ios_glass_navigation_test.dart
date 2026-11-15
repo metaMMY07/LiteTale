@@ -244,6 +244,7 @@ void main() {
     await tester.pumpWidget(_dockedApp(navigator, dock));
     await tester.pumpAndSettle();
     final bar = find.byType(AppleGlassBottomBar);
+    final retainedBar = find.byType(AppleGlassBottomBar, skipOffstage: false);
     final barElement = tester.element(bar);
     final dockClip = find.ancestor(of: bar, matching: find.byType(ClipPath));
     final restingDock = tester.getRect(bar);
@@ -267,22 +268,28 @@ void main() {
     await tester.pump(const Duration(milliseconds: 60));
     expect(tester.element(bar), same(barElement));
     expect(tester.getRect(bar).left, lessThan(restingDock.left));
-    final paperClip = find.ancestor(of: paper, matching: find.byType(ClipPath));
-    final movingPage = tester.widget<ClipPath>(paperClip);
+    final paperClip = find.ancestor(
+      of: paper,
+      matching: find.byType(ClipRRect),
+    );
+    final movingPage = tester.widget<ClipRRect>(paperClip);
     expect(movingPage.clipBehavior, Clip.antiAlias);
-    final outline = movingPage.clipper!.getClip(tester.getSize(paperClip));
-    expect(outline.contains(const Offset(2, 2)), isFalse);
-    expect(outline.contains(const Offset(2, 842)), isFalse);
+    final outline = movingPage.borderRadius
+        .resolve(TextDirection.ltr)
+        .toRRect(Offset.zero & tester.getSize(paperClip));
+    expect(outline.contains(const Offset(12, 12)), isFalse);
+    expect(outline.contains(const Offset(12, 832)), isFalse);
+    expect(outline.contains(const Offset(26, 26)), isTrue);
     expect(outline.contains(const Offset(2, 422)), isTrue);
     final leadingEdge = tester.getRect(paper).left;
     expect(dockOutline().contains(Offset(leadingEdge - 3, 8)), isTrue);
     expect(dockOutline().contains(Offset(leadingEdge + 5, 8)), isFalse);
 
     await tester.pumpAndSettle();
-    expect(tester.element(bar), same(barElement));
-    expect(dockOutline().getBounds().isEmpty, isTrue);
+    expect(bar, findsNothing);
+    expect(tester.element(retainedBar), same(barElement));
     expect(find.text('书架').hitTestable(), findsNothing);
-    expect(tester.widget<ClipPath>(paperClip).clipBehavior, Clip.none);
+    expect(tester.widget<ClipRRect>(paperClip).clipBehavior, Clip.none);
     final coveredHome = find.byKey(
       const ValueKey('home-fixture'),
       skipOffstage: false,
@@ -303,13 +310,24 @@ void main() {
       rect.bottom,
       tester.view.physicalSize.height / tester.view.devicePixelRatio,
     );
+    final swipe = await tester.startGesture(const Offset(2, 422));
+    await swipe.moveBy(const Offset(100, 0));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(tester.element(bar), same(barElement));
+    await tester.pump(const Duration(seconds: 1));
+    await swipe.up();
+    await tester.pumpAndSettle();
+    expect(paper, findsOneWidget);
+    expect(bar, findsNothing);
+    expect(tester.element(retainedBar), same(barElement));
+
     navigator.currentState!.pop();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 45));
     expect(tester.element(bar), same(barElement));
     expect(dockOutline().getBounds().width, inExclusiveRange(0, 390));
     expect(tester.getRect(paper).height, rect.height);
-    expect(tester.widget<ClipPath>(paperClip).clipBehavior, Clip.antiAlias);
+    expect(tester.widget<ClipRRect>(paperClip).clipBehavior, Clip.antiAlias);
     await tester.pumpAndSettle();
     expect(tester.element(bar), same(barElement));
     expect(tester.getRect(bar), restingDock);

@@ -194,6 +194,7 @@ class _SearchPageState extends State<SearchPage> {
       if (openSearchVerification &&
           e is BiliSiteVerificationRequired &&
           e.isSearchVerification &&
+          !e.manualSearch &&
           e.searchKeyword == key &&
           ModalRoute.of(context)?.isCurrent == true) {
         final verified = await openBiliVerification(

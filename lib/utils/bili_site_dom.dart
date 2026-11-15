@@ -1,24 +1,38 @@
 import 'dart:convert';
 
+const biliRetireSearchPageScript = r'''(() => {
+  window.__liteTaleRetiredSearchPage = true;
+  return true;
+})()''';
+
+const _biliFindSearchField = r'''
+  function biliFindSearchField() {
+    if (document.readyState === 'loading' || window.__liteTaleRetiredSearchPage) return null;
+    const field = document.querySelector('#searchkey[name="searchkey"]');
+    const form = field && field.form;
+    if (!form || field.disabled || !['post','get'].includes(form.method.toLowerCase()) ||
+        form.querySelector('input[type="password"]')) return null;
+    const action = new URL(form.action, location.href);
+    if (action.origin !== location.origin || action.username || action.password ||
+        action.hash || !['/S6/','/search.html'].includes(action.pathname)) return null;
+    return field;
+  }
+''';
+
 String biliSubmitSearchScript(String keyword) => '''(() => {
-  const field = document.querySelector('#searchkey[name="searchkey"]');
-  const form = field && field.form;
-  if (!form || !['post','get'].includes(form.method.toLowerCase()) ||
-      form.querySelector('input[type="password"]')) return false;
-  const action = new URL(form.action, location.href);
-  if (action.origin !== location.origin || action.username || action.password ||
-      action.hash || !['/S6/','/search.html'].includes(action.pathname)) return false;
+  $_biliFindSearchField
+  const field = biliFindSearchField();
+  if (!field || window.__liteTaleBiliSearchPending) return false;
+  const form = field.form;
+  const submit = form.querySelector('[type="submit"]');
+  if (!form.requestSubmit && !submit) return false;
   field.value = ${jsonEncode(keyword)};
   field.dispatchEvent(new Event('input', {bubbles:true}));
   // A form submission may stay on /search.html. Ignore the previous document's suggested
   // books until real navigation replaces this window and its pending marker.
   window.__liteTaleBiliSearchPending = true;
   if (form.requestSubmit) form.requestSubmit();
-  else {
-    const button = form.querySelector('[type="submit"]');
-    if (!button) return false;
-    button.click();
-  }
+  else submit.click();
   return true;
 })()''';
 
@@ -98,9 +112,14 @@ const biliHomeReadyScript =
     r'''(() => {''' +
     _biliAccessGuard +
     _biliSearchVerificationGuard +
+    _biliFindSearchField +
     r'''
-  const out={url:location.href,documentLoading:document.readyState==='loading',ready:!!document.querySelector('#searchkey[name="searchkey"]')};
+  const out={url:location.href,documentLoading:document.readyState==='loading',ready:false};
+  if (window.__liteTaleRetiredSearchPage) {
+    out.retiredSearchPage=true;return JSON.stringify(out);
+  }
   if (biliCheckAccess(out) || biliCheckSearchVerification(out)) return JSON.stringify(out);
+  out.ready=!window.__liteTaleBiliSearchPending && !!biliFindSearchField();
   return JSON.stringify(out);
 })()''';
 
@@ -154,6 +173,9 @@ const biliSearchProbeScript =
     _biliSearchVerificationGuard +
     r'''
   const result = {url:location.href, documentLoading:document.readyState==='loading', ready:false, books:[], next:null};
+  if (window.__liteTaleRetiredSearchPage) {
+    result.retiredSearchPage=true;return JSON.stringify(result);
+  }
   if (biliCheckAccess(result) || biliCheckSearchVerification(result)) return JSON.stringify(result);
   if (document.readyState === 'loading' || location.pathname === '/' || !document.body) return JSON.stringify(result);
   const path = location.pathname;
@@ -216,10 +238,22 @@ const biliSearchProbeScript =
     }
     if (result.books.length >= 100) break;
   }
+  const currentParams = new URL(location.href).searchParams;
+  const page = Number(currentParams.get('page') || '1');
+  const keyword = result.resultKeyword || currentParams.get('searchkey');
   const next = [...document.querySelectorAll('a[href]')].find(a => {
     if (a.rel !== 'next' && !/^(下一页|下页|下一頁|›|»)$/.test(a.innerText.trim())) return false;
-    const url = new URL(a.getAttribute('href'), location.href);
-    return url.origin === location.origin && ['/S6/','/search.html'].includes(url.pathname);
+    if (a.getAttribute('aria-disabled') === 'true' || a.closest('.disabled')) return false;
+    try {
+      const url = new URL(a.getAttribute('href'), location.href);
+      const nextKeyword = url.searchParams.get('searchkey');
+      return url.origin === location.origin && !url.hash &&
+        ['/S6/','/search.html'].includes(url.pathname) &&
+        url.searchParams.get('page') === String(page + 1) &&
+        (!keyword || nextKeyword === null || nextKeyword === keyword);
+    } catch (_) {
+      return false;
+    }
   });
   if (next) result.next = new URL(next.getAttribute('href'), location.href).href;
   result.ready = result.books.length > 0 || empty;

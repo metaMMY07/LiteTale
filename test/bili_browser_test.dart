@@ -15,7 +15,6 @@ void main() {
     Duration timeout = const Duration(seconds: 1),
   }) {
     final s = BiliBrowserSession(
-      startupGrace: Duration.zero,
       operationTimeout: timeout,
       pollInterval: const Duration(milliseconds: 1),
     );
@@ -39,7 +38,6 @@ void main() {
     'cold renderer attachment uses the remaining operation budget',
     () async {
       final s = BiliBrowserSession(
-        startupGrace: Duration.zero,
         operationTimeout: const Duration(seconds: 8),
         pollInterval: const Duration(milliseconds: 1),
       );
@@ -59,7 +57,6 @@ void main() {
     () async {
       final s = BiliBrowserSession(
         operationTimeout: const Duration(milliseconds: 40),
-        startupGrace: Duration.zero,
       );
       addTearDown(s.dispose);
       await expectLater(
@@ -149,14 +146,21 @@ void main() {
       throwsA(isA<BiliBrowserException>()),
     );
   });
-  test('rejects foreign search pagination instead of following it', () async {
-    final p = _Port()..next = 'https://other.example/S6/?page=2';
-    await expectLater(
-      session(p).search('sea', 1),
-      throwsA(isA<BiliBrowserException>()),
-    );
-    expect(p.urls.every(BiliBrowserSession.allowsNavigation), true);
-  });
+  test(
+    'a foreign next link leaves the current search results usable',
+    () async {
+      final p = _Port()..next = 'https://other.example/S6/?page=2';
+      final browser = session(p);
+      final first = await browser.search('sea', 1);
+      expect(first.records.single.title, 'SeaBed');
+      expect(first.maxPage, 1);
+      await expectLater(
+        browser.search('sea', 2),
+        throwsA(isA<BiliBrowserException>()),
+      );
+      expect(p.urls.every(BiliBrowserSession.allowsNavigation), true);
+    },
+  );
   test('search pagination waits for its committed URL and next link', () async {
     final p =
         _Port()
@@ -210,7 +214,8 @@ void main() {
       contains('https://www.bilinovel.net/search.html?searchkey=sea&page=2'),
     );
     p.next = 'https://www.bilinovel.net/search.html?searchkey=different&page=2';
-    await expectLater(s.search('sea', 1), throwsA(isA<BiliBrowserException>()));
+    expect((await s.search('sea', 1)).maxPage, 1);
+    await expectLater(s.search('sea', 2), throwsA(isA<BiliBrowserException>()));
   });
   test(
     'waits for navigation instead of accepting the previous document',

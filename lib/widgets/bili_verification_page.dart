@@ -145,7 +145,9 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
       final keyword = widget.request.searchKeyword;
       final entry = widget.request.searchEntry;
       if (!blocked &&
-          (widget.searchView == null || navigation > 0) &&
+          (widget.searchView == null ||
+              navigation > 0 ||
+              widget.request.manualSearch) &&
           keyword != null &&
           entry != null &&
           await _web.currentUrl().timeout(const Duration(seconds: 5)) ==
@@ -268,6 +270,8 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
         title: Text(
           widget.request.contentRequired
               ? '哔哩原站阅读'
+              : widget.request.manualSearch
+              ? '原站搜索'
               : widget.request.isSearchVerification
               ? '搜索验证'
               : '哔哩原站验证',
@@ -324,6 +328,8 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
                         ? '原站拒绝访问，当前页面没有可完成的验证。请返回并稍后重试。'
                         : widget.request.contentRequired
                         ? '请按原站提示完成阅读要求，正文完整显示后再继续。'
+                        : widget.request.manualSearch
+                        ? '请在原站搜索「${widget.request.searchKeyword}」，结果显示后再返回。'
                         : widget.searchView != null &&
                             widget.request.searchChallenge
                         ? '请在原站表单填写验证码，完成后继续搜索「${widget.request.searchKeyword}」。'
@@ -348,6 +354,8 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
                             ? '正在确认…'
                             : widget.request.contentRequired
                             ? '正文已完整，继续阅读'
+                            : widget.request.manualSearch
+                            ? '返回搜索结果'
                             : widget.request.kind == BiliProbeKind.chapter
                             ? '验证完成并继续阅读'
                             : '验证完成并返回',

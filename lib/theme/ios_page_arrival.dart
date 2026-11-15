@@ -4,9 +4,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/theme/ios_dock_insets.dart';
 
-Path iosSlidingPageOutline(Rect bounds) => ContinuousRectangleBorder(
-  borderRadius: BorderRadius.circular(bounds.shortestSide >= 600 ? 32 : 64),
-).getOuterPath(bounds);
+// A 64-point arc matches the visible silhouette of the phone reference.
+BorderRadius iosSlidingPageRadius(Size viewport) =>
+    BorderRadius.circular(viewport.shortestSide >= 600 ? 32 : 64);
 
 /// Preserves the Cupertino slide and edge swipe while exposing the first
 /// settled frame to work that should not compete with the entrance.
@@ -252,22 +252,12 @@ class _IosPageArrivalState extends State<_IosPageArrival> {
     chromeAtRest: _chromeAtRest && _pending == null,
     child:
         widget.roundWhileSliding
-            ? ClipPath(
-              clipper: const _IosSlidingPageClipper(),
+            ? ClipRRect(
+              borderRadius: iosSlidingPageRadius(MediaQuery.sizeOf(context)),
               clipBehavior:
                   widget.animation.isCompleted ? Clip.none : Clip.antiAlias,
               child: widget.child,
             )
             : widget.child,
   );
-}
-
-class _IosSlidingPageClipper extends CustomClipper<Path> {
-  const _IosSlidingPageClipper();
-
-  @override
-  Path getClip(Size size) => iosSlidingPageOutline(Offset.zero & size);
-
-  @override
-  bool shouldReclip(_IosSlidingPageClipper oldClipper) => false;
 }

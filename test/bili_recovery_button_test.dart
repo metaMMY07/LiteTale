@@ -162,6 +162,42 @@ void main() {
       expect(find.text('海床'), findsOneWidget);
     },
   );
+  testWidgets('a stalled search offers the original page on demand', (
+    tester,
+  ) async {
+    final target = Uri.parse('https://www.bilinovel.net/search.html');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SearchPage(
+          initialSearchKey: '一周一次买下',
+          historyLoader: () async => [],
+          searcher: ({
+            required searchType,
+            required searchKey,
+            required int page,
+          }) async {
+            throw BiliSiteVerificationRequired(
+              target: target,
+              kind: BiliProbeKind.searchResults,
+              revision: sourceRevision.value,
+              manualSearch: true,
+              searchKeyword: searchKey,
+              searchEntry: target,
+              searchPage: page,
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('在应用内继续搜索'), findsOneWidget);
+    expect(find.text('原站搜索'), findsNothing);
+    await tester.tap(find.text('在应用内继续搜索'));
+    await tester.pumpAndSettle();
+    expect(find.text('原站搜索'), findsOneWidget);
+    expect(find.text('返回搜索结果'), findsOneWidget);
+  });
+
   testWidgets(
     'partial content offers a reading flow and retries after confirmation',
     (tester) async {
