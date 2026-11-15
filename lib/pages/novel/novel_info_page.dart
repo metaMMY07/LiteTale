@@ -123,6 +123,15 @@ class NovelInfoPage extends StatelessWidget {
           ],
         ),
         body: BlocBuilder<NovelInfoCubit, NovelInfoState>(
+          buildWhen: (previous, current) {
+            if (previous is NovelInfoLoaded && current is NovelInfoLoaded) {
+              return !identical(previous.novelInfo, current.novelInfo) ||
+                  !identical(previous.volumes, current.volumes) ||
+                  previous.readingHistory?.chapterId !=
+                      current.readingHistory?.chapterId;
+            }
+            return true;
+          },
           builder: (context, state) {
             if (state is NovelInfoLoading || state is NovelInfoLoaded) {
               return _NovelInfoContent(novelId: novelId, state: state);

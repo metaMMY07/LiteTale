@@ -456,6 +456,56 @@ void main() {
     },
   );
 
+  test('a mobile result page must show the keyword being verified', () async {
+    final port = _Port();
+    final browser = session(port);
+    final entry = Uri.parse('https://www.bilinovel.net/search.html');
+    final request = BiliSiteVerificationRequired(
+      target: entry,
+      kind: BiliProbeKind.searchResults,
+      revision: sourceRevision.value,
+      searchEntry: entry,
+      searchKeyword: '魔法禁书',
+      searchPage: 1,
+    );
+    final result = <String, dynamic>{
+      'url': 'https://www.bilinovel.net/search/results',
+      'ready': true,
+      'resultKeyword': '魔法禁书',
+      'resultCount': 9,
+      'books': [
+        {'nid': '42', 'title': '创约 魔法禁书目录'},
+      ],
+    };
+    for (final wrongResult in [
+      {...result, 'resultKeyword': '新约'},
+      {...result}..remove('resultKeyword'),
+      {...result, 'books': []},
+    ]) {
+      await expectLater(
+        browser.adoptVisiblePage(
+          request,
+          wrongResult,
+          persistSession:
+              () async => fail('must not persist a mismatched page'),
+          isCurrent: () => true,
+        ),
+        throwsA(isA<BiliBrowserException>()),
+      );
+    }
+    expect(
+      await browser.adoptVisiblePage(
+        request,
+        result,
+        persistSession: () async {},
+        isCurrent: () => true,
+      ),
+      isTrue,
+    );
+    expect((await browser.search('魔法禁书', 1)).records.single.aid, 'bili:42');
+    expect(port.submitted, isFalse);
+  });
+
   test(
     'search CAPTCHA hands back the result and can open again in the same browser',
     () async {

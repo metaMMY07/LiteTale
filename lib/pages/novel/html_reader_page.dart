@@ -687,12 +687,12 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                                             )
                                             : const SizedBox.shrink(),
                                   ),
-                                  // 顶部和底部导航按钮（仅在隐藏 AppBar 时显示）
-                                  if (!isFullscreen)
-                                    Positioned(
-                                      top: 0,
-                                      left: 0,
-                                      right: 0,
+                                  Positioned(
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    child: ReaderMenuMotion(
+                                      visible: !isFullscreen,
                                       child: ReaderToolbar(
                                         title:
                                             state is HtmlReaderLoaded
@@ -707,6 +707,7 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                                             () => _toggleAutoScroll(context),
                                       ),
                                     ),
+                                  ),
                                   if (state is HtmlReaderLoaded)
                                     Positioned.fill(
                                       child: ReaderMarkLayer(selection: _marks),

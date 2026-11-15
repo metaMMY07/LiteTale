@@ -12,6 +12,7 @@ import 'package:wild/theme/ios_system_colors.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/app_launch_screen.dart';
 import 'package:wild/widgets/ios_app_dock.dart';
+import 'package:wild/widgets/reader_controls.dart';
 
 void iosTest(String name, WidgetTesterCallback body) {
   testWidgets(
@@ -231,9 +232,12 @@ void main() {
     expect(find.text('首页 2'), findsOneWidget);
   });
 
-  iosTest('reader stays full screen through exit and restores the same dock', (
-    tester,
-  ) async {
+  iosTest('reader gradually covers and reveals the same dock', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.viewPadding = const FakeViewPadding(bottom: 34);
+    tester.view.padding = const FakeViewPadding(bottom: 34);
+    addTearDown(tester.view.reset);
     final navigator = GlobalKey<NavigatorState>();
     final dock = IosDockController(fullscreenRoutes: const {'/reader'});
     addTearDown(dock.dispose);
@@ -241,6 +245,12 @@ void main() {
     await tester.pumpAndSettle();
     final bar = find.byType(AppleGlassBottomBar);
     final barElement = tester.element(bar);
+    final dockClip = find.ancestor(of: bar, matching: find.byType(ClipPath));
+    final restingDock = tester.getRect(bar);
+    Path dockOutline() => tester
+        .widget<ClipPath>(dockClip)
+        .clipper!
+        .getClip(tester.getSize(dockClip));
     final home = find.byKey(const ValueKey('home-fixture'));
     final homeHeight = tester.getSize(home).height;
     final homeBottomInset =
@@ -252,8 +262,27 @@ void main() {
           (_) => const Scaffold(body: SizedBox.expand(key: ValueKey('正文'))),
     );
     navigator.currentState!.push(reader);
+    final paper = find.byKey(const ValueKey('正文'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(tester.element(bar), same(barElement));
+    expect(tester.getRect(bar).left, lessThan(restingDock.left));
+    final paperClip = find.ancestor(of: paper, matching: find.byType(ClipPath));
+    final movingPage = tester.widget<ClipPath>(paperClip);
+    expect(movingPage.clipBehavior, Clip.antiAlias);
+    final outline = movingPage.clipper!.getClip(tester.getSize(paperClip));
+    expect(outline.contains(const Offset(2, 2)), isFalse);
+    expect(outline.contains(const Offset(2, 842)), isFalse);
+    expect(outline.contains(const Offset(2, 422)), isTrue);
+    final leadingEdge = tester.getRect(paper).left;
+    expect(dockOutline().contains(Offset(leadingEdge - 3, 8)), isTrue);
+    expect(dockOutline().contains(Offset(leadingEdge + 5, 8)), isFalse);
+
     await tester.pumpAndSettle();
-    expect(bar, findsNothing);
+    expect(tester.element(bar), same(barElement));
+    expect(dockOutline().getBounds().isEmpty, isTrue);
+    expect(find.text('书架').hitTestable(), findsNothing);
+    expect(tester.widget<ClipPath>(paperClip).clipBehavior, Clip.none);
     final coveredHome = find.byKey(
       const ValueKey('home-fixture'),
       skipOffstage: false,
@@ -265,11 +294,9 @@ void main() {
       ).bottom,
       homeBottomInset,
     );
-    final rect = tester.getRect(find.byKey(const ValueKey('正文')));
+    final rect = tester.getRect(paper);
     expect(
-      MediaQuery.paddingOf(
-        tester.element(find.byKey(const ValueKey('正文'))),
-      ).bottom,
+      MediaQuery.paddingOf(tester.element(paper)).bottom,
       tester.view.padding.bottom / tester.view.devicePixelRatio,
     );
     expect(
@@ -278,14 +305,89 @@ void main() {
     );
     navigator.currentState!.pop();
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 120));
-    expect(bar, findsNothing);
-    expect(
-      tester.getRect(find.byKey(const ValueKey('正文'))).height,
-      rect.height,
-    );
+    await tester.pump(const Duration(milliseconds: 45));
+    expect(tester.element(bar), same(barElement));
+    expect(dockOutline().getBounds().width, inExclusiveRange(0, 390));
+    expect(tester.getRect(paper).height, rect.height);
+    expect(tester.widget<ClipPath>(paperClip).clipBehavior, Clip.antiAlias);
     await tester.pumpAndSettle();
     expect(tester.element(bar), same(barElement));
+    expect(tester.getRect(bar), restingDock);
+  });
+
+  iosTest('reader controls reverse smoothly over the same paper', (
+    tester,
+  ) async {
+    var visible = false;
+    late StateSetter update;
+    const topKey = ValueKey('menu-top');
+    const bottomKey = ValueKey('menu-bottom');
+    final paper = find.byKey(const ValueKey('paper'));
+    final toolbar = find.byKey(topKey);
+    final scrubber = find.byKey(bottomKey);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) {
+              update = setState;
+              return Stack(
+                children: [
+                  const Positioned.fill(
+                    child: SizedBox(key: ValueKey('paper')),
+                  ),
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: ReaderMenuMotion(
+                      visible: visible,
+                      child: const SizedBox(key: topKey, height: 56),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: ReaderMenuMotion(
+                      visible: visible,
+                      fromBottom: true,
+                      child: const SizedBox(key: bottomKey, height: 56),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    final paperRect = tester.getRect(paper);
+    expect(toolbar, findsNothing);
+    update(() => visible = true);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(tester.getTopLeft(toolbar).dy, inExclusiveRange(-56, 0));
+    final restingBottom = paperRect.bottom - 56;
+    expect(
+      tester.getTopLeft(scrubber).dy,
+      inExclusiveRange(restingBottom, restingBottom + 31),
+    );
+    await tester.pumpAndSettle();
+    final toolbarElement = tester.element(toolbar);
+    update(() => visible = false);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    final departing = tester.getTopLeft(toolbar).dy;
+    expect(departing, inExclusiveRange(-56, 0));
+    update(() => visible = true);
+    await tester.pump();
+    expect(tester.getTopLeft(toolbar).dy, closeTo(departing, .001));
+    await tester.pumpAndSettle();
+    expect(tester.element(toolbar), same(toolbarElement));
+    expect(tester.getTopLeft(toolbar).dy, 0);
+    expect(tester.getTopLeft(scrubber).dy, restingBottom);
+    expect(tester.getRect(paper), paperRect);
   });
 
   iosTest('first-frame work waits for arrival and cancels on early exit', (

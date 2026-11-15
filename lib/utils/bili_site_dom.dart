@@ -44,7 +44,7 @@ const _biliSearchVerificationGuard = r'''
       const images = [...form.querySelectorAll('img')].filter(visible);
       if (!images.length) return false;
       const namedCode = fields.some(input =>
-        /^(?:captcha|captcha_code|checkcode|verifycode|verify_code|seccode)$/i.test(input.name));
+        /^(?:captcha|captcha_code|checkcode|verifycode|verify_code|seccode|search_code)$/i.test(input.name));
       const codeImage = images.some(img => /captcha|checkcode|verifycode|seccode|验证码|驗證碼/i.test(
         [img.getAttribute('src'), img.alt, img.id].join(' ')));
       const verifySubmit = [...form.querySelectorAll('button,input[type="submit"]')].some(button =>
@@ -155,13 +155,23 @@ const biliSearchProbeScript =
     r'''
   const result = {url:location.href, documentLoading:document.readyState==='loading', ready:false, books:[], next:null};
   if (biliCheckAccess(result) || biliCheckSearchVerification(result)) return JSON.stringify(result);
-  if (window.__liteTaleBiliSearchPending) return JSON.stringify(result);
   if (document.readyState === 'loading' || location.pathname === '/' || !document.body) return JSON.stringify(result);
+  const path = location.pathname;
+  const searchPath = ['/S6/','/search.html'].includes(path);
+  const detail = path.match(/^\/novel\/([1-9]\d*)\.html$/);
+  const body = document.body.innerText;
+  const heading = body.slice(0, 8192);
+  const summary = !detail && heading.match(/^[^\S\r\n]*([^\r\n]{1,200}?)\s*(?:相关共有|相關共有)\s*(\d{1,7})\s*(?:条记录|條記錄)/m);
+  if (summary) {
+    result.resultKeyword = summary[1].trim();
+    result.resultCount = Number(summary[2]);
+  } else if (window.__liteTaleBiliSearchPending) {
+    return JSON.stringify(result);
+  }
   const images = root => {
     const img = root && (root.matches('img') ? root : root.querySelector('img'));
     return img ? ['data-src','data-original','src'].map(k => img.getAttribute(k)).filter(Boolean) : [];
   };
-  const detail = location.pathname.match(/^\/novel\/([1-9]\d*)\.html$/);
   const title = document.querySelector('h1.book-name,h1.book-title');
   if (detail && title) {
     result.books = [{nid:detail[1],title:title.innerText.trim(),images:[
@@ -171,34 +181,48 @@ const biliSearchProbeScript =
     ]}];
     result.ready = true; return JSON.stringify(result);
   }
-  if (!['/S6/','/search.html'].includes(location.pathname)) return JSON.stringify(result);
-  const body = document.body.innerText;
-  if (/搜索间隔|搜索频繁|请.*秒后.*搜索/.test(body)) {
+  if (!searchPath && !(summary && /搜索结果|搜索結果|搜尋結果/.test(document.title + heading))) return JSON.stringify(result);
+  if (!summary && /搜索间隔|搜索频繁|请.*秒后.*搜索/.test(body)) {
     result.error='原站暂时限制搜索频率，请稍后重试';return JSON.stringify(result);
   }
+  const empty = summary
+    ? result.resultCount === 0
+    : /没有找到|未找到|无搜索结果|没有相关|查无|未搜索到|没有搜到/.test(body);
+  const lists = '.search-list,.search-result,.bookbox,.rank_d_list,table.grid,.book-list,#searchResult,#list_content';
+  const scopes = [...document.querySelectorAll(lists)];
   // The mobile search form and its suggestions are also at /search.html.
-  if (location.pathname === '/search.html' &&
+  if (path === '/search.html' && !summary &&
       document.querySelector('#searchkey[name="searchkey"]') &&
-      !document.querySelector('.search-list,.search-result,.bookbox,.rank_d_list,table.grid,.book-list,#searchResult,#list_content') &&
-      !/没有找到|未找到|无搜索结果|没有相关|查无|未搜索到|没有搜到/.test(body)) return JSON.stringify(result);
+      !scopes.length && !empty) return JSON.stringify(result);
+  if (summary && empty) {
+    result.ready = true;
+    return JSON.stringify(result);
+  }
   const seen = new Set();
-  const scopes = [...document.querySelectorAll('.search-list,.search-result,.bookbox,.rank_d_list,table.grid,.book-list,#searchResult,#list_content')];
+  if (summary) {
+    scopes.push(...document.querySelectorAll('.book-li,.book-item,.module-search-item'));
+  }
   for (const root of (scopes.length ? scopes : [document.body])) {
-    if (!root) continue;
     for (const a of root.querySelectorAll('a[href]')) {
       const url = new URL(a.getAttribute('href'),location.href);
       const m = url.origin === location.origin && url.pathname.match(/^\/novel\/([1-9]\d*)\.html$/);
-      const card=a.closest('.bookbox,.rank_d_list,tr,li')||a;
-      const text = (card.querySelector('h4.book-title,.rank_d_b_name')||a).innerText.trim();
-      if (!m || !text || seen.has(m[1])) continue;
+      if (!m || seen.has(m[1]) || a.closest('#searchHotHistory,#searchPopularWords')) continue;
+      const card = a.closest('.bookbox,.rank_d_list,.book-li,.book-item,.module-search-item,tr,li') || a;
+      const title = card.querySelector('.book-title,.rank_d_b_name,h3,h4') || a;
+      const text = title.innerText.replace(/\s+/g, ' ').trim();
+      if (!text) continue;
       seen.add(m[1]); result.books.push({nid:m[1],title:text,images:images(card)});
       if (result.books.length >= 100) break;
     }
+    if (result.books.length >= 100) break;
   }
-  const next = [...document.querySelectorAll('a[href]')].find(a =>
-    a.rel === 'next' || /^(下一页|下页|下一頁|›|»)$/.test(a.innerText.trim()));
-  if (next) result.next = new URL(next.getAttribute('href'),location.href).href;
-  result.ready = result.books.length > 0 || /没有找到|未找到|无搜索结果|没有相关|查无|未搜索到|没有搜到/.test(body);
+  const next = [...document.querySelectorAll('a[href]')].find(a => {
+    if (a.rel !== 'next' && !/^(下一页|下页|下一頁|›|»)$/.test(a.innerText.trim())) return false;
+    const url = new URL(a.getAttribute('href'), location.href);
+    return url.origin === location.origin && ['/S6/','/search.html'].includes(url.pathname);
+  });
+  if (next) result.next = new URL(next.getAttribute('href'), location.href).href;
+  result.ready = result.books.length > 0 || empty;
   return JSON.stringify(result);
 })()''';
 

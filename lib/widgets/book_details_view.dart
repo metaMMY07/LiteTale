@@ -201,6 +201,9 @@ class _BookDetailsViewState extends State<BookDetailsView> {
     final resume = _resumeChapter;
     final target = resume ?? _firstChapter;
     final allOpen = _open.length == widget.volumes.length;
+    final captionStyle = (Theme.of(context).textTheme.bodySmall ??
+            const TextStyle())
+        .copyWith(color: colors.onSurfaceVariant);
     final actionHeight =
         apple
             ? math.max(
@@ -305,16 +308,23 @@ class _BookDetailsViewState extends State<BookDetailsView> {
               Expanded(child: readButton),
             ],
           ),
-          if (resume != null)
+          // Keep the rows below the button still when reading progress arrives.
+          if (apple || resume != null)
             Padding(
               padding: const EdgeInsets.only(top: 10),
               child: Text(
-                resume.title,
-                maxLines: 2,
+                resume?.title ?? '\u00a0',
+                semanticsLabel: resume == null ? '' : null,
+                maxLines: apple ? 1 : 2,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
+                style: captionStyle,
+                strutStyle:
+                    apple
+                        ? StrutStyle.fromTextStyle(
+                          captionStyle,
+                          forceStrutHeight: true,
+                        )
+                        : null,
               ),
             ),
         ],

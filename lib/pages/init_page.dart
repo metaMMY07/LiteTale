@@ -42,6 +42,12 @@ class InitPage extends StatefulWidget {
 
 class _InitPageState extends State<InitPage> {
   Future<void> _initializeCubits() async {
+    final launchHold =
+        Platform.isIOS
+            ? WidgetsBinding.instance.endOfFrame.then(
+              (_) => Future<void>.delayed(const Duration(milliseconds: 550)),
+            )
+            : Future<void>.value();
     String root;
     if (Platform.isMacOS || Platform.isLinux || Platform.isWindows) {
       root = await desktopRoot();
@@ -101,6 +107,8 @@ class _InitPageState extends State<InitPage> {
     AppLogs.instance.level =
         context.read<SettingsPreferencesCubit>().state.logLevel;
 
+    await launchHold;
+    if (!mounted || ModalRoute.isCurrentOf(context) == false) return;
     Navigator.pushReplacementNamed(context, '/home');
   }
 

@@ -4,9 +4,16 @@ import 'package:flutter/cupertino.dart' show CupertinoModalPopupRoute;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/theme/ios_dock_insets.dart';
+import 'package:wild/theme/ios_page_arrival.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 
-typedef _DockState = ({bool mounted, bool fullscreen, bool blocked});
+typedef _DockState =
+    ({
+      bool mounted,
+      bool fullscreen,
+      bool blocked,
+      Animation<double>? readerAnimation,
+    });
 
 /// Owns the selection independently of any one page in the Navigator.
 class IosDockController extends NavigatorObserver {
@@ -22,6 +29,7 @@ class IosDockController extends NavigatorObserver {
     mounted: false,
     fullscreen: false,
     blocked: false,
+    readerAnimation: null,
   ));
   bool _publishQueued = false;
   bool _disposed = false;
@@ -45,6 +53,16 @@ class IosDockController extends NavigatorObserver {
       route is CupertinoModalPopupRoute;
   bool get _fullscreen =>
       _dismissing.any(_isFullscreen) || _routes.any(_isFullscreen);
+
+  Animation<double>? get _readerAnimation {
+    final fullscreen = [..._routes, ..._dismissing].where(_isFullscreen);
+    if (fullscreen.length != 1) return null;
+    final route = fullscreen.single;
+    if (route is PageRoute && fullscreenRoutes.contains(route.settings.name)) {
+      return route.animation;
+    }
+    return null;
+  }
 
   void select(int index) {
     final nav = navigator;
@@ -83,6 +101,7 @@ class IosDockController extends NavigatorObserver {
           mounted: _homeIndex >= 0,
           fullscreen: _fullscreen,
           blocked: _modal || navigator?.userGestureInProgress == true,
+          readerAnimation: _readerAnimation,
         );
       }
     });
@@ -145,8 +164,8 @@ class IosDockController extends NavigatorObserver {
   }
 }
 
-/// Mounts the UIKit bar as a sibling of the Navigator so no page transition
-/// can move or reattach it. Pages paint under its translucent surface.
+/// Keeps the UIKit bar mounted beside the Navigator, under a sliding reader
+/// and above the regular pages that scroll under its translucent surface.
 class IosAppDockHost extends StatelessWidget {
   const IosAppDockHost({
     super.key,
@@ -164,8 +183,11 @@ class IosAppDockHost extends StatelessWidget {
     builder: (context, state, child) {
       final media = MediaQuery.of(context);
       final keyboard = media.viewInsets.bottom > 0;
-      final hidden = state.fullscreen || keyboard;
-      final blocked = hidden || state.blocked;
+      final reader = state.readerAnimation;
+      final hidden = keyboard || (state.fullscreen && reader == null);
+      final blocked = hidden || state.fullscreen || state.blocked;
+      final direction = Directionality.of(context);
+      final progress = reader ?? kAlwaysDismissedAnimation;
       return Stack(
         fit: StackFit.expand,
         children: [
@@ -190,13 +212,27 @@ class IosAppDockHost extends StatelessWidget {
                     excluding: blocked,
                     child: ExcludeFocus(
                       excluding: blocked,
-                      child: ValueListenableBuilder<int>(
-                        valueListenable: controller.selection,
-                        builder:
-                            (_, index, _) => AppleGlassBottomBar(
-                              index: index,
-                              onSelect: controller.select,
-                            ),
+                      child: ClipPath(
+                        clipBehavior:
+                            reader == null ? Clip.none : Clip.antiAlias,
+                        clipper: _ReaderDockClipper(
+                          progress,
+                          media.size.height,
+                          direction,
+                          rounded: !media.disableAnimations,
+                        ),
+                        child: SlideTransition(
+                          position: progress.drive(_dockParallax),
+                          textDirection: direction,
+                          child: ValueListenableBuilder<int>(
+                            valueListenable: controller.selection,
+                            builder:
+                                (_, index, _) => AppleGlassBottomBar(
+                                  index: index,
+                                  onSelect: controller.select,
+                                ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -207,4 +243,51 @@ class IosAppDockHost extends StatelessWidget {
       );
     },
   );
+}
+
+// The bottom bar travels with the page under the reader's Cupertino slide.
+final _dockParallax = Tween<Offset>(
+  begin: Offset.zero,
+  end: const Offset(-1 / 3, 0),
+);
+
+class _ReaderDockClipper extends CustomClipper<Path> {
+  _ReaderDockClipper(
+    this.progress,
+    this.viewportHeight,
+    this.direction, {
+    required this.rounded,
+  }) : super(reclip: progress);
+
+  final Animation<double> progress;
+  final double viewportHeight;
+  final TextDirection direction;
+  final bool rounded;
+
+  @override
+  Path getClip(Size size) {
+    final value = progress.value.clamp(0.0, 1.0);
+    if (value == 1) return Path();
+    final dock = Path()..addRect(Offset.zero & size);
+    if (value == 0) return dock;
+    final distance = size.width * (1 - value);
+    final page = Rect.fromLTWH(
+      direction == TextDirection.ltr ? distance : -distance,
+      size.height - viewportHeight,
+      size.width,
+      viewportHeight,
+    );
+    return Path.combine(
+      PathOperation.difference,
+      dock,
+      rounded ? iosSlidingPageOutline(page) : (Path()..addRect(page)),
+    );
+  }
+
+  @override
+  bool shouldReclip(_ReaderDockClipper oldClipper) =>
+      oldClipper.progress != progress ||
+      oldClipper.viewportHeight != viewportHeight ||
+      oldClipper.direction != direction ||
+      oldClipper.rounded != rounded;
 }

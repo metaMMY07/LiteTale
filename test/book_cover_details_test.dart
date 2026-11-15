@@ -117,6 +117,44 @@ Widget _cover(
 );
 
 void main() {
+  testWidgets(
+    'iOS synopsis stays in place when the current chapter first appears',
+    (tester) async {
+      const book = NovelInfo(
+        title: '通用小说',
+        author: '',
+        status: '',
+        finUpdate: '',
+        imgUrl: '',
+        introduce: '这是小说简介。',
+        tags: [],
+        heat: '',
+        trending: '',
+        isAnimated: false,
+      );
+      Widget detail(String? chapter) => MaterialApp(
+        theme: iosGlassTheme(Brightness.light),
+        home: Scaffold(
+          body: BookDetailsView(
+            info: book,
+            volumes: volumes,
+            source: SourceId.bili,
+            resumeChapterId: chapter,
+            onRead: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpWidget(detail(null));
+      final synopsis = find.text('简介');
+      final initial = tester.getRect(synopsis);
+      expect(find.text('开始阅读'), findsOneWidget);
+      await tester.pumpWidget(detail('one'));
+      expect(tester.getRect(synopsis), initial);
+      expect(find.text('继续阅读'), findsOneWidget);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
   testWidgets('opening a long volume builds the nearby chapters only', (
     tester,
   ) async {

@@ -4,6 +4,10 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/theme/ios_dock_insets.dart';
 
+Path iosSlidingPageOutline(Rect bounds) => ContinuousRectangleBorder(
+  borderRadius: BorderRadius.circular(bounds.shortestSide >= 600 ? 32 : 64),
+).getOuterPath(bounds);
+
 /// Preserves the Cupertino slide and edge swipe while exposing the first
 /// settled frame to work that should not compete with the entrance.
 class LiteTaleCupertinoTransitionsBuilder
@@ -32,6 +36,8 @@ class LiteTaleCupertinoTransitionsBuilder
       route: route,
       animation: animation,
       secondary: secondary,
+      roundWhileSliding:
+          !route.fullscreenDialog && !route.isFirst && !reduceMotion,
       child: IosDockInsets.applyToPage(
         context,
         route,
@@ -165,12 +171,14 @@ class _IosPageArrival extends StatefulWidget {
     required this.route,
     required this.animation,
     required this.secondary,
+    required this.roundWhileSliding,
     required this.child,
   });
 
   final ModalRoute<Object?> route;
   final Animation<double> animation;
   final Animation<double> secondary;
+  final bool roundWhileSliding;
   final Widget child;
 
   @override
@@ -242,6 +250,24 @@ class _IosPageArrivalState extends State<_IosPageArrival> {
   Widget build(BuildContext context) => IosPageArrival._(
     pending: _pending?.future,
     chromeAtRest: _chromeAtRest && _pending == null,
-    child: widget.child,
+    child:
+        widget.roundWhileSliding
+            ? ClipPath(
+              clipper: const _IosSlidingPageClipper(),
+              clipBehavior:
+                  widget.animation.isCompleted ? Clip.none : Clip.antiAlias,
+              child: widget.child,
+            )
+            : widget.child,
   );
+}
+
+class _IosSlidingPageClipper extends CustomClipper<Path> {
+  const _IosSlidingPageClipper();
+
+  @override
+  Path getClip(Size size) => iosSlidingPageOutline(Offset.zero & size);
+
+  @override
+  bool shouldReclip(_IosSlidingPageClipper oldClipper) => false;
 }

@@ -796,11 +796,12 @@ class _ReaderViewState extends State<_ReaderView> {
                           context.read<FontSettingsCubit>().state.readerFamily,
                     ),
                   ),
-                  if (state.showControls) ...[
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: ReaderMenuMotion(
+                      visible: state.showControls,
                       child: ReaderToolbar(
                         title: widget.title,
                         onBack: () => Navigator.pop(context),
@@ -808,10 +809,14 @@ class _ReaderViewState extends State<_ReaderView> {
                         onSettings: _showSettings,
                       ),
                     ),
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: ReaderMenuMotion(
+                      visible: state.showControls,
+                      fromBottom: true,
                       child: Builder(
                         builder: (context) {
                           final cubit = context.read<ReaderCubit>();
@@ -820,6 +825,7 @@ class _ReaderViewState extends State<_ReaderView> {
                             index: progress.index,
                             count: progress.count,
                             revision: progress.revision,
+                            active: state.showControls,
                             onSeek: (page) async {
                               try {
                                 await cubit.seekChapterPage(page);
@@ -837,7 +843,7 @@ class _ReaderViewState extends State<_ReaderView> {
                         },
                       ),
                     ),
-                  ],
+                  ),
                   if (_selecting)
                     Positioned.fill(
                       child: GestureDetector(

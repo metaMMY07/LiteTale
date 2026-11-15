@@ -132,7 +132,7 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
   }
 
   Future<void> _inspectAccess() async {
-    if (!_initialized || !_current) return;
+    if (!_initialized || !_current || _checking) return;
     final navigation = _navigation, inspection = ++_inspection;
     try {
       final raw = await _web

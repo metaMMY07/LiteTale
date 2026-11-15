@@ -246,8 +246,7 @@ class BiliBrowserSession extends ChangeNotifier {
         keyword != null &&
         request.searchEntry != null &&
         _sameOrigin(uri, request.searchEntry!) &&
-        _isVerifiedSearchResult(uri, value, page ?? 1) &&
-        _matchesSearch(uri, keyword, page ?? 1);
+        _matchesSearchResult(uri, value, keyword, page ?? 1);
     if (!isVerificationTarget(request) ||
         uri == null ||
         !allowsVerificationNavigation('$uri', request) ||
@@ -339,14 +338,29 @@ class BiliBrowserSession extends ChangeNotifier {
     return true;
   }
 
-  static bool _isVerifiedSearchResult(
+  static bool _matchesSearchResult(
     Uri uri,
     Map<String, dynamic> value,
+    String keyword,
     int page,
   ) {
-    if (const {'/search.html', '/S6/'}.contains(uri.path)) return true;
-    final book = RegExp(r'^/novel/([1-9]\d*)\.html$').firstMatch(uri.path);
+    if (!_matchesSearch(uri, keyword, page)) return false;
+    final displayedKeyword = value['resultKeyword'];
+    if (displayedKeyword != null && displayedKeyword != keyword) return false;
     final books = value['books'];
+    final count = value['resultCount'];
+    if (displayedKeyword != null &&
+        (count is! int ||
+            count < 0 ||
+            books is! List ||
+            (count == 0 ? books.isNotEmpty : books.isEmpty))) {
+      return false;
+    }
+    if (const {'/search.html', '/S6/'}.contains(uri.path)) return true;
+    // Some searches return a standalone mobile result page. Accept it only
+    // with the site's result count and the exact keyword visibly on that page.
+    if (page == 1 && displayedKeyword == keyword) return true;
+    final book = RegExp(r'^/novel/([1-9]\d*)\.html$').firstMatch(uri.path);
     return page == 1 &&
         book != null &&
         !uri.hasQuery &&
@@ -711,7 +725,16 @@ class BiliBrowserSession extends ChangeNotifier {
           searchTarget != null &&
           value['verificationRequired'] == true &&
           _sameOrigin(loaded, searchTarget);
-      if (!allowsNavigation('${value['url']}') && !searchVerification) {
+      final searchResult =
+          script == biliSearchProbeScript &&
+          searchKeyword != null &&
+          searchTarget != null &&
+          value['ready'] == true &&
+          _sameOrigin(loaded, searchTarget) &&
+          _matchesSearchResult(loaded, value, searchKeyword, searchPage ?? 1);
+      if (!allowsNavigation('${value['url']}') &&
+          !searchVerification &&
+          !searchResult) {
         final origin = _searchOrigin;
         if (origin != null &&
             _sameOrigin(loaded, origin) &&
@@ -948,11 +971,13 @@ class BiliBrowserSession extends ChangeNotifier {
             return _sameOrigin(actual, searchEntry!) &&
                 _matchesSearch(actual, query, page) &&
                 (value['ready'] != true ||
-                    _isVerifiedSearchResult(actual, value, page));
+                    _matchesSearchResult(actual, value, query, page));
           }
           // loadRequest may return before the previous document is replaced.
           // Match the real next link, regardless of query parameter order.
-          return _samePage(actual, expected);
+          return _samePage(actual, expected) &&
+              (value['ready'] != true ||
+                  _matchesSearchResult(actual, value, query, page));
         },
       );
       return _acceptSearchPage(value, page, query);

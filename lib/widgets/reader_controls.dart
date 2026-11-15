@@ -4,6 +4,73 @@ import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/material_control_motion.dart';
 import 'package:wild/widgets/platform_controls.dart';
 
+/// Moves the reader controls over the paper without resizing the viewport.
+class ReaderMenuMotion extends StatefulWidget {
+  const ReaderMenuMotion({
+    super.key,
+    required this.visible,
+    required this.child,
+    this.fromBottom = false,
+  });
+
+  final bool visible;
+  final Widget child;
+  final bool fromBottom;
+
+  @override
+  State<ReaderMenuMotion> createState() => _ReaderMenuMotionState();
+}
+
+class _ReaderMenuMotionState extends State<ReaderMenuMotion> {
+  late bool _hasOpened = widget.visible;
+
+  @override
+  void didUpdateWidget(ReaderMenuMotion oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _hasOpened = _hasOpened || widget.visible;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!usesAppleGlass) {
+      return widget.visible ? widget.child : const SizedBox.shrink();
+    }
+    final target = widget.visible ? 1.0 : 0.0;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: target, end: target),
+      duration:
+          MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 240),
+      curve: Curves.easeInOutCubic,
+      child: _hasOpened ? widget.child : const SizedBox.shrink(),
+      builder:
+          (context, progress, child) => Offstage(
+            offstage: !widget.visible && progress == 0,
+            child: IgnorePointer(
+              ignoring: !widget.visible,
+              child: ExcludeSemantics(
+                excluding: !widget.visible,
+                child: ExcludeFocus(
+                  excluding: !widget.visible,
+                  child: FractionalTranslation(
+                    translation: Offset(
+                      0,
+                      (1 - progress) * (widget.fromBottom ? .55 : -1),
+                    ),
+                    child:
+                        widget.fromBottom
+                            ? Opacity(opacity: progress, child: child)
+                            : child,
+                  ),
+                ),
+              ),
+            ),
+          ),
+    );
+  }
+}
+
 /// Floating reader chrome; neither toolbar changes the laid-out paper size.
 class ReaderToolbar extends StatelessWidget {
   const ReaderToolbar({
@@ -176,31 +243,42 @@ class ReaderPageScrubber extends StatefulWidget {
     required this.revision,
     required this.onSeek,
     this.label = '本章',
+    this.active = true,
   });
   final int index, count;
   final Object revision;
   final ValueChanged<int> onSeek;
   final String label;
+  final bool active;
   @override
   State<ReaderPageScrubber> createState() => _ReaderPageScrubberState();
 }
 
 class _ReaderPageScrubberState extends State<ReaderPageScrubber> {
   double? _draft;
-  Object? _scrubRevision;
+  int _interactionRevision = 0;
+  bool _dragging = false;
+
+  void _resetDrag() {
+    _draft = null;
+    _dragging = false;
+  }
+
   @override
   void didUpdateWidget(ReaderPageScrubber oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.revision != oldWidget.revision ||
-        widget.count != oldWidget.count) {
-      _draft = null;
-      _scrubRevision = null;
+        widget.count != oldWidget.count ||
+        widget.active != oldWidget.active) {
+      _interactionRevision++;
+      _resetDrag();
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final last = (widget.count - 1).clamp(0, 1 << 30);
+    final canScrub = widget.active && last > 0;
     final value = (_draft ?? widget.index.toDouble()).clamp(
       0.0,
       last.toDouble(),
@@ -221,22 +299,15 @@ class _ReaderPageScrubberState extends State<ReaderPageScrubber> {
                     key: const ValueKey('reader-page-scrubber'),
                     min: 0,
                     max: last > 0 ? last.toDouble() : 1,
-                    interactionRevision: widget.revision,
+                    interactionRevision: _interactionRevision,
                     value: value,
-                    onChangeCancel:
-                        () => setState(() {
-                          _draft = null;
-                          _scrubRevision = null;
-                        }),
-                    onChangeStart: (_) => _scrubRevision = widget.revision,
+                    onChangeCancel: () => setState(_resetDrag),
+                    onChangeStart: (_) => _dragging = canScrub,
                     onChanged:
-                        last > 0 ? (v) => setState(() => _draft = v) : null,
+                        canScrub ? (v) => setState(() => _draft = v) : null,
                     onChangeEnd: (v) {
-                      final valid = _scrubRevision == widget.revision;
-                      setState(() {
-                        _draft = null;
-                        _scrubRevision = null;
-                      });
+                      final valid = widget.active && _dragging;
+                      setState(_resetDrag);
                       if (valid) widget.onSeek(v.round().clamp(0, last));
                     },
                   ),
