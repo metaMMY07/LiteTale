@@ -53,7 +53,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
       return Scaffold(
         appBar: AppBar(
           title: const Text('我的书架'),
-          actions: [_localLibraryButton(context)],
+          actions: [if (supportsLocalEpub) _localLibraryButton(context)],
         ),
         body: SourceLoadingIndicator(source: activeSource.value),
       );
@@ -63,7 +63,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
       return Scaffold(
         appBar: AppBar(
           title: const Text('我的书架'),
-          actions: [_localLibraryButton(context)],
+          actions: [if (supportsLocalEpub) _localLibraryButton(context)],
         ),
         body: RefreshIndicator(
           onRefresh: () => context.read<BookshelfCubit>().loadBookcases(),
@@ -106,7 +106,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
       return Scaffold(
         appBar: AppBar(
           title: const Text('我的书架'),
-          actions: [_localLibraryButton(context)],
+          actions: [if (supportsLocalEpub) _localLibraryButton(context)],
         ),
         body: const Center(child: Text('暂无书架')),
       );
@@ -116,7 +116,8 @@ class _BookshelfPageState extends State<BookshelfPage> {
       appBar: AppBar(
         title: const Text('我的书架'),
         actions: [
-          if (!state.isSelecting) _localLibraryButton(context),
+          if (supportsLocalEpub && !state.isSelecting)
+            _localLibraryButton(context),
           if (state.isSelecting) ...[
             AppIconButton(
               icon: const Icon(Icons.delete_outline),

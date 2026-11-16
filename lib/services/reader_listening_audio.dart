@@ -7,22 +7,41 @@ import 'package:flutter_edge_tts/flutter_edge_tts.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:wild/services/qwen_reader_tts.dart';
 import 'package:wild/services/read_request.dart';
 import 'package:wild/services/reader_speech.dart';
 
 class ListeningVoice {
-  const ListeningVoice(this.id, this.name, {this.language = 'zh-CN'});
+  const ListeningVoice(this.id, this.name, {this.language = 'zh-CN'})
+    : qwenVoice = null;
+
+  const ListeningVoice._qwen(String voice, this.name)
+    : id = 'qwen:$voice',
+      language = 'auto',
+      qwenVoice = voice;
 
   final String id, name, language;
+  final String? qwenVoice;
 
-  static const female = ListeningVoice(
+  static const xiaoxiao = ListeningVoice(
     'zh-CN-XiaoxiaoNeural',
-    'LiteTale 默认音色（女）',
+    'LiteTale 默认音色（晓晓）',
   );
-  static const male = ListeningVoice('zh-CN-YunxiNeural', 'LiteTale 默认音色（男）');
+  static const xiaoyi = ListeningVoice(
+    'zh-CN-XiaoyiNeural',
+    'LiteTale 默认音色（晓伊）',
+  );
+  static const defaults = [xiaoxiao, xiaoyi];
+  static const qwenPresets = [
+    ListeningVoice._qwen('Ono Anna', '小野杏'),
+    ListeningVoice._qwen('Chelsie', '千雪'),
+  ];
   static const _storage = FlutterSecureStorage();
   static const _key = 'litetale.listening.voice.v1';
   static Future<void> _writes = Future.value();
+
+  static ListeningVoice? _qwenPreset(String id) =>
+      qwenPresets.where((voice) => voice.id == id).firstOrNull;
 
   static Future<ListeningVoice> load() async {
     try {
@@ -32,9 +51,24 @@ class ListeningVoice {
         final json = jsonDecode(saved) as Map<String, dynamic>;
         final voice = json['voice'] as Map<String, dynamic>;
         final id = voice['id'];
-        if (voice['source'] == 'online' && id is String && id.isNotEmpty) {
-          if (id == female.id) return female;
-          if (id == male.id) return male;
+        if (id is! String || id.isEmpty) return xiaoxiao;
+        if (voice['source'] == 'qwen') {
+          final preset = _qwenPreset(id);
+          if (preset != null && await QwenTtsSettings.load() != null) {
+            return preset;
+          }
+        }
+        if (voice['source'] == 'online') {
+          for (final preset in defaults) {
+            if (id == preset.id) return preset;
+          }
+          if (id == 'zh-CN-YunxiNeural' &&
+              voice['name'] == 'LiteTale 默认音色（男）') {
+            return const ListeningVoice(
+              'zh-CN-YunxiNeural',
+              'Yunxi · zh-CN · 男声',
+            );
+          }
           return ListeningVoice(
             id,
             voice['name'] as String,
@@ -45,13 +79,13 @@ class ListeningVoice {
     } catch (_) {
       // Settings from an older install or unavailable keychain are optional.
     }
-    return female;
+    return xiaoxiao;
   }
 
   Future<void> save() {
     final value = jsonEncode({
       'voice': {
-        'source': 'online',
+        'source': qwenVoice == null ? 'online' : 'qwen',
         'id': id,
         'name': name,
         'language': language,
@@ -70,7 +104,7 @@ class ListeningVoice {
   }.contains(language.toLowerCase().split(RegExp('[-_]')).first);
 
   static Future<List<ListeningVoice>> fetchOnline() async {
-    final client = FlutterEdgeTts(voice: female.id);
+    final client = FlutterEdgeTts(voice: xiaoxiao.id);
     try {
       final voices = await client.getVoices().timeout(
         const Duration(seconds: 12),
@@ -79,8 +113,7 @@ class ListeningVoice {
         for (final voice in voices)
           if (_isChinese(voice.locale) &&
               voice.shortName.isNotEmpty &&
-              voice.shortName != female.id &&
-              voice.shortName != male.id)
+              !defaults.any((preset) => preset.id == voice.shortName))
             ListeningVoice(
               voice.shortName,
               '${voice.shortName.split('-').last.replaceFirst('Neural', '')} · ${voice.locale} · ${voice.gender == 'Female' ? '女声' : '男声'}',
@@ -95,7 +128,8 @@ class ListeningVoice {
 
 typedef _ClipKey = (String, String);
 typedef _WordOffset = ({Duration time, int start});
-typedef _VoiceClip = ({Uint8List bytes, List<_WordOffset> words});
+typedef _VoiceClip =
+    ({Uint8List bytes, List<_WordOffset> words, String extension});
 
 /// One bounded lookahead, shared with the foreground request for that clip.
 /// Each command and playback callback belongs to one utterance ID.
@@ -107,14 +141,17 @@ class OnlineReaderSpeech
     Future<EdgeTtsSynthesisResult> Function(String, String, ReadRequest)
         synthesize =
         _synthesizeWithEdge,
+    QwenReaderTts qwen = const QwenReaderTts(),
   }) : _createPlayer = createPlayer,
        _temporaryDirectory = temporaryDirectory,
-       _synthesize = synthesize;
+       _synthesize = synthesize,
+       _qwen = qwen;
 
   final AudioPlayer Function() _createPlayer;
   final Future<Directory> Function() _temporaryDirectory;
   final Future<EdgeTtsSynthesisResult> Function(String, String, ReadRequest)
   _synthesize;
+  final QwenReaderTts _qwen;
   final _events = StreamController<ReaderSpeechEvent>.broadcast();
   final _ready = <_ClipKey, _VoiceClip>{};
   final _requests = <_ClipKey, (ReadRequest, Future<_VoiceClip>)>{};
@@ -130,7 +167,7 @@ class OnlineReaderSpeech
   Future<void> _commands = Future.value();
 
   static const _timeout = Duration(seconds: 18);
-  static const _maxBytes = 2 * 1024 * 1024;
+  static const _maxEdgeBytes = 2 * 1024 * 1024;
 
   @override
   Stream<ReaderSpeechEvent> get events => _events.stream;
@@ -139,7 +176,7 @@ class OnlineReaderSpeech
   Future<void> initialize() async {}
 
   _ClipKey _key(String text, String? voice) => (
-    voice ?? ListeningVoice.female.id,
+    voice ?? ListeningVoice.xiaoxiao.id,
     text,
   );
 
@@ -150,9 +187,6 @@ class OnlineReaderSpeech
     final future = _generate(key, request)
         .then((clip) {
           request.check();
-          if (clip.bytes.isEmpty || clip.bytes.length > _maxBytes) {
-            throw PlatformException(code: 'tts_audio', message: '语音服务返回了无效音频');
-          }
           if (_ready.length >= 3) _ready.remove(_ready.keys.first);
           _ready[key] = clip;
           return clip;
@@ -165,7 +199,14 @@ class OnlineReaderSpeech
   }
 
   Future<_VoiceClip> _generate(_ClipKey key, ReadRequest request) async {
+    if (ListeningVoice._qwenPreset(key.$1)?.qwenVoice case final voice?) {
+      final bytes = await _qwen.synthesize(voice, key.$2, request);
+      return (bytes: bytes, words: const <_WordOffset>[], extension: 'wav');
+    }
     final result = await _synthesize(key.$1, key.$2, request);
+    if (result.audioBytes.isEmpty || result.audioBytes.length > _maxEdgeBytes) {
+      throw PlatformException(code: 'tts_audio', message: '语音服务返回了无效音频');
+    }
     final offsets = <_WordOffset>[];
     var searchFrom = 0;
     for (final item in result.metadata) {
@@ -181,7 +222,7 @@ class OnlineReaderSpeech
       ));
       searchFrom = start + word.length;
     }
-    return (bytes: result.audioBytes, words: offsets);
+    return (bytes: result.audioBytes, words: offsets, extension: 'mp3');
   }
 
   static Future<EdgeTtsSynthesisResult> _synthesizeWithEdge(
@@ -248,7 +289,7 @@ class OnlineReaderSpeech
     if (id != _id) return;
     final directory = await _temporaryDirectory();
     final file = File(
-      '${directory.path}/litetale-tts-${DateTime.now().microsecondsSinceEpoch}.mp3',
+      '${directory.path}/litetale-tts-${DateTime.now().microsecondsSinceEpoch}.${clip.extension}',
     );
     try {
       await file.writeAsBytes(clip.bytes);

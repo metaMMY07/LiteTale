@@ -38,7 +38,6 @@ import Photos
   }
 
   private var isChangingLauncherIcon = false
-  private var appleBooks: AppleBooksChannel?
   private var paletteChannel: FlutterMethodChannel?
   private var readerImages: ReaderImageChannel?
   private var readerPanel: AppleReaderPanelChannel?
@@ -59,7 +58,6 @@ import Photos
       result(["light": self.systemColors(.light), "dark": self.systemColors(.dark)])
     }
     paletteChannel = palette
-    appleBooks = AppleBooksChannel(parent: controller, messenger: controller.binaryMessenger)
     readerImages = ReaderImageChannel(parent: controller, messenger: controller.binaryMessenger)
     readerPanel = AppleReaderPanelChannel(parent: controller, messenger: controller.binaryMessenger)
     readerSpeech = ReaderSpeechChannel(messenger: controller.binaryMessenger)
@@ -172,7 +170,7 @@ import Photos
 
 }
 
-/// Image export stays separate from Apple Books and source account sessions.
+/// Image export stays separate from source account sessions.
 private final class ReaderImageChannel: NSObject {
   private let channel: FlutterMethodChannel
   private weak var parent: UIViewController?

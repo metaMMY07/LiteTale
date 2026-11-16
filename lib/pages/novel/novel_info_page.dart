@@ -7,6 +7,7 @@ import 'package:wild/sources/book_source.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/sources/source_api.dart' as w8;
 import 'package:wild/widgets/book_details_view.dart';
+import 'package:wild/widgets/reader_controls.dart';
 import 'package:wild/models/book_detail_hint.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/pages/home/bookshelf_cubit.dart';
@@ -54,6 +55,12 @@ class NovelInfoPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!supportsLocalEpub && novelId.startsWith('epub:')) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('小说详情')),
+        body: const Center(child: Text('此设备无法打开本地 EPUB')),
+      );
+    }
     Future<void> navigateToDownload(BuildContext context) async {
       final state = context.read<NovelInfoCubit>().state;
       if (state is! NovelInfoLoaded) return;
@@ -85,6 +92,19 @@ class NovelInfoPage extends StatelessWidget {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('小说详情'),
+          leadingWidth: usesAppleGlass ? 60 : null,
+          leading:
+              usesAppleGlass &&
+                      (ModalRoute.of(context)?.impliesAppBarDismissal ?? false)
+                  ? Padding(
+                    padding: const EdgeInsetsDirectional.only(start: 16),
+                    child: Center(
+                      child: IosReaderBackButton(
+                        onPressed: () => Navigator.maybePop(context),
+                      ),
+                    ),
+                  )
+                  : null,
           actions: [
             BlocBuilder<NovelInfoCubit, NovelInfoState>(
               buildWhen: _detailActionsChanged,

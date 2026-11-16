@@ -60,18 +60,13 @@ class HistoryPage extends StatelessWidget {
             },
           ),
         ],
-        bottom: PreferredSize(
-          preferredSize: Size.fromHeight(usesMaterialYou ? 64 : 56),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child:
-                usesAppleGlass
-                    ? AppleGlassChoiceBar(
-                      labels: [activeSource.value.label, '本地 EPUB'],
-                      index: localOnly ? 1 : 0,
-                      onSelect: (index) => cubit.showLocal(index == 1),
-                    )
-                    : AppSegmentedButton<bool>(
+        bottom:
+            supportsLocalEpub
+                ? PreferredSize(
+                  preferredSize: Size.fromHeight(usesMaterialYou ? 64 : 56),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: AppSegmentedButton<bool>(
                       segments: [
                         ButtonSegment(
                           value: false,
@@ -86,8 +81,9 @@ class HistoryPage extends StatelessWidget {
                       onSelectionChanged:
                           (selection) => cubit.showLocal(selection.single),
                     ),
-          ),
-        ),
+                  ),
+                )
+                : null,
       ),
       body: BlocBuilder<HistoryCubit, HistoryState>(
         builder: (context, state) {

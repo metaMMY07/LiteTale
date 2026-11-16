@@ -91,13 +91,13 @@ void main() {
       expect(loaded().currentPageIndex, 1);
       expect(loaded().showControls, isTrue);
       await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 350));
       expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );
 
-  testWidgets('an image on the right leaf blocks menu taps across the spread', (
+  testWidgets('an image on either leaf hides the scrubber with the menu open', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1200, 700);
@@ -148,7 +148,8 @@ void main() {
     const leftMiddle = Offset(500, 330);
     await tester.tapAt(leftMiddle);
     await tester.pumpAndSettle();
-    expect(find.byType(ReaderToolbar), findsNothing);
+    expect(find.byType(ReaderToolbar), findsOneWidget);
+    expect(find.byType(ReaderPageScrubber), findsNothing);
 
     await preferences.update((value) => value.copyWith(tapToTurn: false));
     await tester.pump();
@@ -156,6 +157,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ReaderToolbar), findsNothing);
     expect(loaded().currentPageIndex, 0);
+
+    await tester.tapAt(const Offset(1120, 330));
+    await tester.pumpAndSettle();
+    expect(find.byType(ReaderToolbar), findsOneWidget);
+    expect(find.byType(ReaderPageScrubber), findsNothing);
+    await tester.tapAt(leftMiddle);
+    await tester.pumpAndSettle();
 
     await preferences.update((value) => value.copyWith(tapToTurn: true));
     await tester.pump();
@@ -165,9 +173,13 @@ void main() {
     await tester.tapAt(leftMiddle);
     await tester.pumpAndSettle();
     expect(find.byType(ReaderToolbar), findsOneWidget);
+    expect(find.byType(ReaderPageScrubber), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(tester.takeException(), isNull);
   });
 
-  testWidgets('scroll reader allows menu taps once the image scrolls away', (
+  testWidgets('scroll reader opens its menu even with an image in view', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(400, 800);
@@ -210,13 +222,16 @@ void main() {
 
     await tester.tapAt(textPoint);
     await tester.pumpAndSettle();
-    expect(find.byType(ReaderToolbar), findsNothing);
+    expect(find.byType(ReaderToolbar), findsOneWidget);
 
     tester.widget<ListView>(find.byType(ListView)).controller!.jumpTo(440);
     await tester.pumpAndSettle();
     await tester.tapAt(textPoint);
     await tester.pumpAndSettle();
-    expect(find.byType(ReaderToolbar), findsOneWidget);
+    expect(find.byType(ReaderToolbar), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(
@@ -261,6 +276,9 @@ void main() {
       expect(find.text(lines[0]), findsNothing);
       expect(find.text(lines[60]).hitTestable(), findsOneWidget);
       expect(tester.getTopLeft(find.text(lines[60])).dy, lessThan(180));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(tester.takeException(), isNull);
     },
   );
 }

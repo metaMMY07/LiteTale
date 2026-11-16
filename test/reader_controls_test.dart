@@ -24,6 +24,7 @@ import 'package:wild/pages/novel/top_bar_height_cubit.dart';
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/reader_controls.dart';
 import 'package:wild/widgets/reader_settings_panel.dart';
+import 'package:wild/widgets/wavy_slider_track_shape.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -85,6 +86,74 @@ void main() {
     old.onChangeEnd!(20);
     expect(seeks, isEmpty);
   });
+  testWidgets(
+    'the Android wave repaints in playback and stops with reduced motion',
+    (tester) async {
+      final state = ValueNotifier((playing: true, reduceMotion: false));
+      addTearDown(state.dispose);
+      const key = ValueKey('wave-capture');
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: ValueListenableBuilder(
+                valueListenable: state,
+                builder:
+                    (context, value, _) => MediaQuery(
+                      data: MediaQuery.of(
+                        context,
+                      ).copyWith(disableAnimations: value.reduceMotion),
+                      child: RepaintBoundary(
+                        key: key,
+                        child: SizedBox(
+                          width: 320,
+                          child: WavySlider(
+                            flowing: value.playing,
+                            child: Slider(value: .6, onChanged: (_) {}),
+                          ),
+                        ),
+                      ),
+                    ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      Future<List<int>> pixels() async {
+        final boundary = tester.renderObject<RenderRepaintBoundary>(
+          find.byKey(key),
+        );
+        return (await tester.runAsync(() async {
+          final image = await boundary.toImage();
+          try {
+            final bytes =
+                (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+            return bytes.buffer.asUint8List();
+          } finally {
+            image.dispose();
+          }
+        }))!;
+      }
+
+      final initial = await pixels();
+      await tester.pump(const Duration(milliseconds: 210));
+      expect(listEquals(initial, await pixels()), isFalse);
+
+      state.value = (playing: false, reduceMotion: false);
+      await tester.pump();
+      final paused = await pixels();
+      await tester.pump(const Duration(milliseconds: 210));
+      expect(listEquals(paused, await pixels()), isTrue);
+
+      state.value = (playing: true, reduceMotion: true);
+      await tester.pump();
+      final reduced = await pixels();
+      await tester.pump(const Duration(milliseconds: 210));
+      expect(listEquals(reduced, await pixels()), isTrue);
+    },
+  );
+
   testWidgets('one-page chapters disable the scrub without invalid ranges', (
     tester,
   ) async {

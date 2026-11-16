@@ -27,14 +27,15 @@ class HistoryCubit extends Cubit<HistoryState> {
   SourceId? _loadedSource;
   int? _loadedRevision;
   ReadRequest? _opening;
-  bool localOnly = false;
+  bool _localOnly = false;
+  bool get localOnly => supportsLocalEpub && _localOnly;
   SourceId get historySource =>
       localOnly ? SourceId.localEpub : activeSource.value;
   HistoryCubit() : super(HistoryInitial());
 
   void showLocal(bool local) {
-    if (localOnly == local) return;
-    localOnly = local;
+    if (!supportsLocalEpub || _localOnly == local) return;
+    _localOnly = local;
     _opening?.cancel();
     load();
   }

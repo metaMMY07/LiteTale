@@ -32,10 +32,7 @@ class ReaderSpeechScope extends StatefulWidget {
 
 class _ReaderSpeechScopeState extends State<ReaderSpeechScope>
     with SingleTickerProviderStateMixin {
-  late final _exit = AnimationController(
-    vsync: this,
-    duration: readerMenuMotionDuration,
-  );
+  AnimationController? _exit;
   late bool _canListen = _hasText(widget.chapter);
   bool _leaving = false;
 
@@ -63,12 +60,16 @@ class _ReaderSpeechScopeState extends State<ReaderSpeechScope>
       return;
     }
     final request = widget.request(chapter);
+    final exit = _exit ??= AnimationController(
+      vsync: this,
+      duration: readerMenuMotionDuration,
+    );
     setState(() => _leaving = true);
     try {
       if (MediaQuery.disableAnimationsOf(context)) {
-        _exit.value = 1;
+        exit.value = 1;
       } else {
-        await _exit.forward().orCancel;
+        await exit.forward().orCancel;
       }
       if (!mounted) return;
       if (route!.isCurrent &&
@@ -77,7 +78,7 @@ class _ReaderSpeechScopeState extends State<ReaderSpeechScope>
           widget.chapter?.cid == chapter.cid) {
         navigator.pop(request);
       } else {
-        _exit.reset();
+        exit.reset();
         setState(() => _leaving = false);
       }
     } on TickerCanceled {
@@ -87,7 +88,7 @@ class _ReaderSpeechScopeState extends State<ReaderSpeechScope>
 
   @override
   void dispose() {
-    _exit.dispose();
+    _exit?.dispose();
     super.dispose();
   }
 

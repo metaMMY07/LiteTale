@@ -110,15 +110,16 @@ class ReaderToolbar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Row(
         children: [
-          ReaderControlSurface(
-            child: AppIconButton(
-              tooltip: '返回',
-              onPressed: onBack,
-              icon: Icon(
-                usesAppleGlass ? CupertinoIcons.chevron_back : Icons.arrow_back,
+          if (usesAppleGlass)
+            IosReaderBackButton(onPressed: onBack)
+          else
+            ReaderControlSurface(
+              child: AppIconButton(
+                tooltip: '返回',
+                onPressed: onBack,
+                icon: const Icon(Icons.arrow_back),
               ),
             ),
-          ),
           const SizedBox(width: 10),
           Expanded(
             child: ReaderControlSurface(
@@ -192,6 +193,26 @@ class ReaderToolbar extends StatelessWidget {
   );
 }
 
+class IosReaderBackButton extends StatelessWidget {
+  const IosReaderBackButton({
+    super.key,
+    required this.onPressed,
+    this.label = '返回',
+  });
+
+  final VoidCallback onPressed;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => ReaderRoundAction(
+    label: label,
+    icon: CupertinoIcons.chevron_back,
+    size: 44,
+    color: Theme.of(context).colorScheme.onSurface,
+    onPressed: onPressed,
+  );
+}
+
 /// Square constraints make the native glass capsule a true circle.
 class ReaderRoundAction extends StatelessWidget {
   const ReaderRoundAction({
@@ -202,6 +223,7 @@ class ReaderRoundAction extends StatelessWidget {
     this.size = 48,
     this.selected = false,
     this.motion,
+    this.color,
   });
   final String label;
   final IconData icon;
@@ -209,6 +231,7 @@ class ReaderRoundAction extends StatelessWidget {
   final double size;
   final bool selected;
   final MaterialReaderMotion? motion;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) => SizedBox.square(
@@ -223,6 +246,7 @@ class ReaderRoundAction extends StatelessWidget {
                   child: AppIconButton(
                     tooltip: label,
                     padding: EdgeInsets.zero,
+                    color: color,
                     onPressed: onPressed,
                     icon: Icon(icon),
                   ),
@@ -280,6 +304,8 @@ class ReaderPageScrubber extends StatefulWidget {
     this.embedded = false,
     this.unit = '',
     this.wavy = false,
+    this.wavePlaying = false,
+    this.activeColor,
   });
   final int index, count;
   final Object revision;
@@ -289,6 +315,8 @@ class ReaderPageScrubber extends StatefulWidget {
   final bool embedded;
   final String unit;
   final bool wavy;
+  final bool wavePlaying;
+  final Color? activeColor;
   @override
   State<ReaderPageScrubber> createState() => _ReaderPageScrubberState();
 }
@@ -328,6 +356,7 @@ class _ReaderPageScrubberState extends State<ReaderPageScrubber> {
       max: last > 0 ? last.toDouble() : 1,
       interactionRevision: _interactionRevision,
       value: value,
+      activeColor: widget.activeColor,
       onChangeCancel: () => setState(_resetDrag),
       onChangeStart: (_) => _dragging = canScrub,
       onChanged: canScrub ? (v) => setState(() => _draft = v) : null,
@@ -338,17 +367,8 @@ class _ReaderPageScrubberState extends State<ReaderPageScrubber> {
       },
     );
     if (widget.wavy) {
-      final colors = Theme.of(context).colorScheme;
-      slider = SliderTheme(
-        data: SliderTheme.of(context).copyWith(
-          // Flutter 3.29 still defaults to the older circular handle.
-          // ignore: deprecated_member_use
-          year2023: false,
-          activeTrackColor: colors.primary,
-          inactiveTrackColor: colors.secondaryContainer,
-          trackShape: const WavySliderTrackShape(),
-          trackHeight: 4,
-        ),
+      slider = WavySlider(
+        flowing: widget.wavePlaying && widget.active,
         child: slider,
       );
     }
@@ -363,7 +383,10 @@ class _ReaderPageScrubberState extends State<ReaderPageScrubber> {
           ),
           Text(
             '${widget.label} ${value.round() + 1}/${widget.count.clamp(1, 1 << 30)}${widget.unit}',
-            style: Theme.of(context).textTheme.labelMedium,
+            style:
+                widget.embedded && usesAppleGlass
+                    ? Theme.of(context).textTheme.labelLarge
+                    : Theme.of(context).textTheme.labelMedium,
           ),
         ],
       ),

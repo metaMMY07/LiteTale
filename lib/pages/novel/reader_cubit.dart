@@ -155,7 +155,7 @@ class ReaderCubit extends Cubit<ReaderState> {
     final readRequest = _readRequest = ReadRequest();
     final targetAid = aid ?? initialAid;
     final targetCid = cid ?? initialCid;
-    if (sourceOf(targetAid) == SourceId.localEpub) {
+    if (supportsLocalEpub && sourceOf(targetAid) == SourceId.localEpub) {
       final anchor = readerMark?.location;
       await _loadLocalBook(
         targetAid,
@@ -968,6 +968,7 @@ class ReaderCubit extends Cubit<ReaderState> {
     bool? preserveControls,
     bool showLoading = true,
   }) async {
+    if (!supportsLocalEpub) return;
     final controls = preserveControls ?? state.showControls;
     final session = _session(aid);
     bool current() =>
@@ -1227,7 +1228,7 @@ class ReaderCubit extends Cubit<ReaderState> {
       ),
     );
     _savePageHistory(state as ReaderLoaded);
-    if (_cssReader != null) {
+    if (supportsLocalEpub && _cssReader != null) {
       unawaited(EpubCssReader.warm(window.pages, window.index));
     }
   }

@@ -4,7 +4,6 @@ import 'dart:async';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/models/book_detail_hint.dart';
-import 'package:wild/services/epub/apple_books_opener.dart';
 import 'package:wild/services/epub/epub_library_query.dart';
 import 'package:wild/services/epub/epub_models.dart';
 import 'package:wild/services/epub/local_epub_library.dart';
@@ -20,15 +19,9 @@ import 'package:wild/widgets/platform_controls.dart';
 import 'local_epub_library_controls.dart';
 
 class LocalEpubLibraryPage extends StatefulWidget {
-  const LocalEpubLibraryPage({
-    super.key,
-    this.library,
-    this.pickFiles,
-    this.opener,
-  });
+  const LocalEpubLibraryPage({super.key, this.library, this.pickFiles});
   final LocalEpubLibrary? library;
   final Future<List<XFile>> Function()? pickFiles;
-  final AppleBooksOpener? opener;
 
   @override
   State<LocalEpubLibraryPage> createState() => _LocalEpubLibraryPageState();
@@ -38,7 +31,6 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
   late final _library = widget.library ?? LocalEpubLibrary.instance;
   late final _organization = _library.organization;
   late final _queue = _library.imports;
-  late final _opener = widget.opener ?? AppleBooksOpener.instance;
   final _search = TextEditingController();
   final _selected = <String>{};
   bool _picking = false, _busy = false, _selecting = false, _choosing = false;
@@ -104,22 +96,11 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
         _picking = false;
       });
       // The queue is library-owned and continues after this route leaves.
-      final completion = _queue.start(
+      await _queue.start(
         files,
         collectionId: target == '' ? null : target,
         afterImport: _invalidateImportedPresentation,
       );
-      final generation = _queue.generation;
-      await completion;
-      if (generation != _queue.generation) return;
-      if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
-      final results = _queue.items;
-      if (files.length == 1 &&
-          results.length == 1 &&
-          results.single.result != null &&
-          _opener.isSupported) {
-        await _open(results.single.result!.book);
-      }
     } catch (error) {
       if (mounted) {
         setState(
@@ -206,26 +187,8 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
 
   Future<void> _open(LocalEpubBook book) async {
     if (!mounted || !_library.contains(book.id)) return;
-    // This records a real open action, never a made-up Apple Books reading status.
     if (_organization.isReady) {
       unawaited(_organization.recordOpened(book.id).catchError((Object _) {}));
-    }
-    if (_opener.isSupported) {
-      try {
-        await _opener.open(
-          _library,
-          book.id,
-          isActive:
-              () => mounted && (ModalRoute.of(context)?.isCurrent ?? false),
-        );
-      } catch (_) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('未能打开原 EPUB，请重新导入后重试。')));
-        }
-      }
-      return;
     }
     BookDetailHint.remember(book.id, book.title, book.coverUrl);
     await Navigator.pushNamed(context, '/novel/info', arguments: book.id);
@@ -625,9 +588,7 @@ class _LocalEpubLibraryPageState extends State<LocalEpubLibraryPage> {
                             _query.trim().isNotEmpty
                                 ? '试试其他书名或作者。'
                                 : all.isEmpty
-                                ? _opener.isSupported
-                                    ? '可一次选择多本 EPUB，点击书籍后在 Apple Books 中阅读。'
-                                    : '可一次选择多本 EPUB，离线保留原书排版。'
+                                ? '可一次选择多本 EPUB，离线保留原书排版。'
                                 : '在「全部」中长按书籍，即可批量加入分类。',
                             textAlign: TextAlign.center,
                           ),

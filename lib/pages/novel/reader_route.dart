@@ -1,9 +1,7 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:wild/pages/apple_books_open_page.dart';
 import 'package:wild/services/reading_progress.dart';
 import 'package:wild/services/reader_listening_chapter.dart';
 import 'package:wild/sources/book_source.dart';
@@ -39,8 +37,11 @@ PageRoute<ReaderListeningRequest> novelReaderRoute(RouteSettings settings) {
     builder: (context) {
       final args = settings.arguments as Map<String, dynamic>;
       final aid = args['novelId'] as String;
-      if (Platform.isIOS && sourceOf(aid) == SourceId.localEpub) {
-        return AppleBooksOpenPage(bookId: aid);
+      if (!supportsLocalEpub && aid.startsWith('epub:')) {
+        return Scaffold(
+          appBar: AppBar(title: const Text('阅读')),
+          body: const Center(child: Text('此设备无法打开本地 EPUB')),
+        );
       }
 
       final cid = args['chapterId'] as String;

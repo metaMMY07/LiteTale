@@ -111,9 +111,7 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final ScrollController _scrollController;
   final _readingSessionKey = GlobalKey<ReadingSessionScopeState>();
-  final _imageViewport = GlobalKey();
   final _markViewport = GlobalKey();
-  late final _visibleImages = ReaderImageHitRegistry(_imageViewport);
   late final FrameAutoScroller _autoScroller;
   late final ReaderMarkSelection _marks;
   bool _selecting = false;
@@ -567,15 +565,9 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                                     ),
                                   // 底层内容
                                   GestureDetector(
-                                    key: _imageViewport,
                                     onTap: () {
                                       if (_marks.clear()) return;
-                                      final fullscreen =
-                                          context.read<FullscreenCubit>();
-                                      if (!fullscreen.state ||
-                                          !_visibleImages.hasVisibleImage) {
-                                        fullscreen.toggle();
-                                      }
+                                      context.read<FullscreenCubit>().toggle();
                                     },
                                     child:
                                         state is HtmlReaderLoading
@@ -639,53 +631,49 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                                               ),
                                             )
                                             : state is HtmlReaderLoaded
-                                            ? ReaderImageHitScope(
-                                              registry: _visibleImages,
-                                              child: _ReaderContent(
-                                                key: ValueKey((
-                                                  state.aid,
-                                                  state.cid,
-                                                  _landing?.revision,
-                                                )),
-                                                parsedContent:
-                                                    state.parsedContent,
-                                                marks: _marks,
-                                                markLocation:
-                                                    ReaderMarkLocation(
-                                                      (
-                                                        aid: state.aid,
-                                                        cid: state.cid,
-                                                      ),
-                                                      state.title,
-                                                      ReaderMarkAxis.text,
-                                                      0,
-                                                    ),
-                                                startIndex:
-                                                    _landing?.chapter ==
-                                                            (
-                                                              aid: state.aid,
-                                                              cid: state.cid,
-                                                            )
-                                                        ? _landing!.index
-                                                        : 0,
-                                                // The open book owns its image
-                                                // policy, including on scroll.
-                                                source: sourceOf(
-                                                  context
-                                                      .read<HtmlReaderCubit>()
-                                                      .initialAid,
+                                            ? _ReaderContent(
+                                              key: ValueKey((
+                                                state.aid,
+                                                state.cid,
+                                                _landing?.revision,
+                                              )),
+                                              parsedContent:
+                                                  state.parsedContent,
+                                              marks: _marks,
+                                              markLocation: ReaderMarkLocation(
+                                                (
+                                                  aid: state.aid,
+                                                  cid: state.cid,
                                                 ),
-                                                onPreviousChapter: () {
-                                                  _saveVisiblePosition();
-                                                  cubit.goToPreviousChapter();
-                                                },
-                                                onNextChapter: () {
-                                                  _saveVisiblePosition();
-                                                  cubit.goToNextChapter();
-                                                },
-                                                scrollController:
-                                                    _scrollController,
+                                                state.title,
+                                                ReaderMarkAxis.text,
+                                                0,
                                               ),
+                                              startIndex:
+                                                  _landing?.chapter ==
+                                                          (
+                                                            aid: state.aid,
+                                                            cid: state.cid,
+                                                          )
+                                                      ? _landing!.index
+                                                      : 0,
+                                              // The open book owns its image
+                                              // policy, including on scroll.
+                                              source: sourceOf(
+                                                context
+                                                    .read<HtmlReaderCubit>()
+                                                    .initialAid,
+                                              ),
+                                              onPreviousChapter: () {
+                                                _saveVisiblePosition();
+                                                cubit.goToPreviousChapter();
+                                              },
+                                              onNextChapter: () {
+                                                _saveVisiblePosition();
+                                                cubit.goToNextChapter();
+                                              },
+                                              scrollController:
+                                                  _scrollController,
                                             )
                                             : const SizedBox.shrink(),
                                   ),

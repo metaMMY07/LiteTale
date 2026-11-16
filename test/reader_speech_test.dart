@@ -8,6 +8,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_edge_tts/flutter_edge_tts.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
@@ -16,6 +18,8 @@ import 'package:wild/pages/novel/line_height_cubit.dart';
 import 'package:wild/pages/novel/paragraph_spacing_cubit.dart';
 import 'package:wild/pages/novel/reader_listening_page.dart';
 import 'package:wild/pages/novel/theme_cubit.dart';
+import 'package:wild/services/qwen_reader_tts.dart';
+import 'package:wild/services/read_request.dart';
 import 'package:wild/services/reader_listening_audio.dart';
 import 'package:wild/services/reader_listening_chapter.dart';
 import 'package:wild/services/reader_mark_text.dart';
@@ -29,6 +33,7 @@ import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/theme/ios_glass_theme.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/reader_controls.dart';
 import 'package:wild/widgets/reader_listening_voice_panel.dart';
 import 'package:wild/widgets/reader_speech_scope.dart';
@@ -47,10 +52,34 @@ void main() {
             'voice': {'source': source, 'id': 'old-voice', 'name': '旧音色'},
           }),
         });
-        expect(await ListeningVoice.load(), same(ListeningVoice.female));
+        expect(await ListeningVoice.load(), same(ListeningVoice.xiaoxiao));
       }
-      await ListeningVoice.male.save();
-      expect(await ListeningVoice.load(), same(ListeningVoice.male));
+      await ListeningVoice.xiaoyi.save();
+      expect(await ListeningVoice.load(), same(ListeningVoice.xiaoyi));
+    },
+  );
+
+  test(
+    'the previous Yunxi selection stays available as an online voice',
+    () async {
+      addTearDown(() => FlutterSecureStorage.setMockInitialValues({}));
+      FlutterSecureStorage.setMockInitialValues({
+        'litetale.listening.voice.v1': jsonEncode({
+          'voice': {
+            'source': 'online',
+            'id': 'zh-CN-YunxiNeural',
+            'name': 'LiteTale 默认音色（男）',
+            'language': 'zh-CN',
+          },
+        }),
+      });
+      final voice = await ListeningVoice.load();
+      expect(voice.id, 'zh-CN-YunxiNeural');
+      expect(voice.name, 'Yunxi · zh-CN · 男声');
+      expect(ListeningVoice.defaults.map((voice) => voice.id), [
+        'zh-CN-XiaoxiaoNeural',
+        'zh-CN-XiaoyiNeural',
+      ]);
     },
   );
 
@@ -92,6 +121,132 @@ void main() {
     expect(speech.playing, isFalse);
     expect(player.playCount, 2);
   });
+
+  test(
+    'Qwen downloads WAV clips and reuses the next paragraph request',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('litetale-qwen-');
+      final requests = <http.Request>[];
+      final player = _AudioPlayer();
+      const audioHost = 'dashscope-result-sg.oss-ap-southeast-1.aliyuncs.com';
+      const audioQuery = 'Signature=example%2Bsignature%3D';
+      final wave =
+          Uint8List(46)
+            ..setRange(0, 4, 'RIFF'.codeUnits)
+            ..setRange(8, 12, 'WAVE'.codeUnits);
+      final engine = OnlineReaderSpeech(
+        createPlayer: () => player,
+        temporaryDirectory: () async => directory,
+        synthesize: (_, __, ___) async => fail('Qwen voice reached Edge'),
+        qwen: QwenReaderTts(
+          loadSettings:
+              () async => const QwenTtsSettings(
+                region: QwenTtsRegion.singapore,
+                apiKey: 'sk-test',
+              ),
+          createClient:
+              () => MockClient((request) async {
+                requests.add(request);
+                if (request.method == 'POST') {
+                  return http.Response(
+                    jsonEncode({
+                      'output': {
+                        'audio': {
+                          'url': 'http://$audioHost/clip.wav?$audioQuery',
+                        },
+                      },
+                    }),
+                    200,
+                  );
+                }
+                return http.Response.bytes(wave, 200);
+              }),
+        ),
+      );
+      final speech = ReaderSpeechController(engine: engine);
+      addTearDown(() async {
+        speech.dispose();
+        await engine.dispose();
+        await directory.delete();
+      });
+      speech.selectVoice(ListeningVoice.qwenPresets.first.id);
+      speech.loadPlan(ReaderSpeechPlan('晚上好。\nこんばんは。', 240), 0);
+      await speech.play();
+      expect(player.playCount, 1, reason: speech.message);
+      final second = player.plays.firstWhere((value) => value == 2);
+      player.completeClip();
+      await second.timeout(const Duration(seconds: 2));
+      expect(speech.paragraphIndex, 1);
+      final finished = engine.events.firstWhere(
+        (event) => event.type == 'done',
+      );
+      player.completeClip();
+      await finished;
+      expect(speech.finished, isTrue);
+      expect(player.loadedPaths, hasLength(2));
+      expect(player.loadedPaths, everyElement(endsWith('.wav')));
+      expect(requests.map((request) => request.method), [
+        'POST',
+        'GET',
+        'POST',
+        'GET',
+      ]);
+      for (final request in requests.where(
+        (request) => request.method == 'GET',
+      )) {
+        expect(
+          request.url.toString(),
+          'https://$audioHost/clip.wav?$audioQuery',
+        );
+        expect(request.headers['authorization'], isNull);
+      }
+      final posts = requests.where((request) => request.method == 'POST');
+      for (final request in posts) {
+        expect(
+          request.url.toString(),
+          'https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+        );
+        expect(request.headers['authorization'], 'Bearer sk-test');
+      }
+      expect(posts.map((request) => jsonDecode(request.body)), [
+        for (final text in ['晚上好。', 'こんばんは。'])
+          {
+            'model': 'qwen3-tts-flash',
+            'input': {
+              'text': text,
+              'voice': 'Ono Anna',
+              'language_type': 'Auto',
+            },
+          },
+      ]);
+    },
+  );
+
+  test(
+    'Qwen cancellation during credential lookup never submits text',
+    () async {
+      final lookup = Completer<QwenTtsSettings?>();
+      var sent = 0;
+      final qwen = QwenReaderTts(
+        loadSettings: () => lookup.future,
+        createClient:
+            () => MockClient((_) async {
+              sent++;
+              return http.Response('', 500);
+            }),
+      );
+      final request = ReadRequest();
+      final result = qwen.synthesize('Chelsie', '测试', request);
+      final cancelled = expectLater(result, throwsA(isA<ReadCancelled>()));
+      request.cancel();
+      await cancelled;
+      lookup.complete(
+        const QwenTtsSettings(region: QwenTtsRegion.beijing, apiKey: 'sk-test'),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(sent, 0);
+    },
+  );
 
   test('spoken EPUB offsets map back to independently spaced DOM text', () {
     const text = '章节标题\n第一段文字。\n　第二段继续向前阅读，直到末尾。';
@@ -223,7 +378,7 @@ void main() {
                     onPressed: () async {
                       chosen = await showListeningVoicePanel(
                         context,
-                        ListeningVoice.female,
+                        ListeningVoice.xiaoxiao,
                         (_) async {},
                       );
                     },
@@ -235,17 +390,103 @@ void main() {
       );
       await tester.tap(find.text('打开音色'));
       await tester.pumpAndSettle();
-      expect(find.byType(IosSettingsSection), findsOneWidget);
+      expect(find.byType(IosSettingsSection), findsNWidgets(2));
       expect(find.byType(AppleGlassSurface), findsNothing);
       expect(find.text('在线音色'), findsOneWidget);
       expect(find.text('系统音色'), findsNothing);
       expect(find.text('自定义'), findsNothing);
-      expect(find.text(ListeningVoice.female.name), findsOneWidget);
-      await tester.tap(find.text(ListeningVoice.male.name));
+      expect(find.text(ListeningVoice.xiaoxiao.name), findsOneWidget);
+      expect(find.textContaining('男'), findsNothing);
+      await tester.tap(find.text(ListeningVoice.xiaoyi.name));
       await tester.pumpAndSettle();
-      expect(chosen, same(ListeningVoice.male));
+      expect(chosen, same(ListeningVoice.xiaoyi));
     },
     variant: const TargetPlatformVariant({TargetPlatform.iOS}),
+  );
+
+  testWidgets(
+    'Qwen voices can be configured, previewed, selected and removed',
+    (tester) async {
+      FlutterSecureStorage.setMockInitialValues({});
+      addTearDown(() => FlutterSecureStorage.setMockInitialValues({}));
+      tester.view.physicalSize = const Size(402, 874);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      var chosen = ListeningVoice.xiaoxiao;
+      ListeningVoice? previewed;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme:
+              usesAppleGlass
+                  ? iosGlassTheme(Brightness.dark)
+                  : materialYouTheme(Brightness.light),
+          home: Scaffold(
+            body: Builder(
+              builder:
+                  (context) => TextButton(
+                    onPressed: () async {
+                      final result = await showListeningVoicePanel(
+                        context,
+                        chosen,
+                        (voice) async {
+                          previewed = voice;
+                        },
+                      );
+                      if (result != null) chosen = result;
+                    },
+                    child: const Text('打开音色'),
+                  ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('打开音色'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('小野杏'));
+      await tester.pumpAndSettle();
+      expect(find.text('百炼 API Key'), findsOneWidget);
+      expect(previewed, isNull);
+      await tester.tap(find.text('新加坡'));
+      final field = find.byType(EditableText);
+      expect(tester.widget<EditableText>(field).obscureText, isTrue);
+      await tester.enterText(field, ' sk-test ');
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      final settings = await QwenTtsSettings.load();
+      expect(settings?.region, QwenTtsRegion.singapore);
+      expect(settings?.apiKey, 'sk-test');
+      final qwenRow = find.widgetWithText(
+        usesAppleGlass ? IosSettingsRow : ListTile,
+        '千雪',
+      );
+      await tester.tap(
+        find.descendant(of: qwenRow, matching: find.byType(AppIconButton)),
+      );
+      await tester.pumpAndSettle();
+      expect(previewed, same(ListeningVoice.qwenPresets.last));
+      await tester.tap(find.text('千雪'));
+      await tester.pumpAndSettle();
+      expect(chosen, same(ListeningVoice.qwenPresets.last));
+      await tester.runAsync(() async {
+        await chosen.save();
+        expect(await ListeningVoice.load(), same(chosen));
+      });
+
+      await tester.tap(find.text('打开音色'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('更换百炼 API Key'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<EditableText>(field).controller.text, isEmpty);
+      await tester.tap(find.text('移除密钥'));
+      await tester.pumpAndSettle();
+      expect(await QwenTtsSettings.load(), isNull);
+      expect(chosen, same(ListeningVoice.xiaoxiao));
+      expect(await tester.runAsync(ListeningVoice.load), same(chosen));
+    },
+    variant: const TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+    }),
   );
 
   testWidgets(
@@ -293,21 +534,30 @@ void main() {
       final controls = find.byKey(const ValueKey('reader-listening-controls'));
       final panel = tester.getRect(controls);
       final body = tester.getRect(find.byType(ScrollablePositionedList));
-      expect(panel.height, greaterThanOrEqualTo(874 * .30));
       expect(body.bottom, closeTo(panel.top, .01));
-      expect(panel.bottom, lessThanOrEqualTo(874 - 34));
       final palette = Theme.of(tester.element(controls)).colorScheme;
       expect(
         palette.primary,
         ios ? palette.onSurface : theme.colorScheme.primary,
       );
-      expect(find.byType(AppleGlassSurface), findsNothing);
       if (ios) {
+        expect(panel.height, closeTo(874 / 3, .01));
+        expect(panel.bottom, 874);
+        final panelMaterial = tester.widget<Material>(controls);
+        expect(panelMaterial.color, palette.surfaceContainerHigh);
+        final back = find.byType(IosReaderBackButton);
+        expect(tester.getSize(back), const Size.square(44));
+        final glass = tester.widget<AppleGlassSurface>(
+          find.descendant(of: back, matching: find.byType(AppleGlassSurface)),
+        );
+        expect(glass.capsule, isTrue);
         final slider = tester.widget<AppleGlassSlider>(
           find.byType(AppleGlassSlider),
         );
-        expect(slider.activeColor, palette.onSurface);
+        expect(slider.activeColor, theme.colorScheme.primary);
       } else {
+        expect(panel.height, greaterThanOrEqualTo(874 * .30));
+        expect(panel.bottom, lessThanOrEqualTo(874 - 34));
         final slider = find.byType(Slider);
         expect(
           SliderTheme.of(tester.element(slider)).trackShape,
@@ -501,10 +751,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byTooltip('播放'), findsOneWidget);
       await tester.tap(find.text('第一个段落。'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 360));
       expect(engine.calls.single.text, '第一个段落。');
       engine.emit(engine.calls.single.id, 'done');
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 360));
       final second = engine.calls.last;
       expect(second.text, '第二个段落。');
       expect(find.text('第 2/2段'), findsOneWidget);
@@ -516,7 +768,8 @@ void main() {
       expect(find.byTooltip('播放'), findsOneWidget);
       expect(source.requests, isEmpty);
       await tester.tap(find.text('下一章'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 360));
       expect(source.requests, ['3']);
       final speak = engine.calls.last;
       expect(speak.text, _ListeningSource.second);
@@ -612,6 +865,7 @@ class _AudioPlayer extends Fake implements AudioPlayer {
   final _plays = StreamController<int>.broadcast(sync: true);
   Completer<void>? _completion;
   int playCount = 0;
+  final loadedPaths = <String>[];
   Stream<int> get plays => _plays.stream;
 
   @override
@@ -632,6 +886,7 @@ class _AudioPlayer extends Fake implements AudioPlayer {
     bool preload = true,
     dynamic tag,
   }) async {
+    loadedPaths.add(filePath);
     processingState = ProcessingState.ready;
     _publish();
     return const Duration(seconds: 1);

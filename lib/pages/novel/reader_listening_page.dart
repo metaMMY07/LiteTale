@@ -72,7 +72,7 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
   final _selectedParagraph = ValueNotifier(-1);
   final _list = ItemScrollController();
   OnlineReaderSpeech? _previewOnline;
-  ListeningVoice _voice = ListeningVoice.female;
+  ListeningVoice _voice = ListeningVoice.xiaoxiao;
   ReadRequest? _chapterRequest;
   Chapter? _retryChapter;
   Timer? _timer;
@@ -486,13 +486,25 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
   Future<void> _openVoices(BuildContext context) async {
     if (_voicePanel || !_valid) return;
     _voicePanel = true;
-    var resumeAfterPreview = false;
+    var resumeAfterPanel = false;
     final resumeRevision = _resumeRevision;
     try {
-      final choice = await showListeningVoicePanel(context, _voice, (voice) {
-        resumeAfterPreview |= _speech.playing;
-        return _preview(voice);
-      });
+      final choice = await showListeningVoicePanel(
+        context,
+        _voice,
+        (voice) {
+          resumeAfterPanel |= _speech.playing;
+          return _preview(voice);
+        },
+        onQwenSettingsChange: () {
+          if (!_valid) return;
+          if (_voice.qwenVoice != null) {
+            resumeAfterPanel |= _speech.playing;
+            _speech.suspend();
+          }
+          unawaited(_stopPreview());
+        },
+      );
       await _stopPreview();
       if (!_valid) return;
       if (choice != null) {
@@ -508,7 +520,7 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
           }),
         );
       }
-      if (resumeAfterPreview &&
+      if (resumeAfterPanel &&
           _foreground &&
           !_speech.playing &&
           resumeRevision == _resumeRevision) {
@@ -554,11 +566,13 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
           color: colors.onSurface,
         ),
       ),
-      child: Builder(builder: _buildPage),
+      child: Builder(
+        builder: (context) => _buildPage(context, trackColor: colors.primary),
+      ),
     );
   }
 
-  Widget _buildPage(BuildContext context) {
+  Widget _buildPage(BuildContext context, {Color? trackColor}) {
     final paper = context.watch<ThemeCubit>().state;
     final dark = switch (paper.themeMode) {
       ReaderThemeMode.dark => true,
@@ -584,7 +598,10 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
         body: LayoutBuilder(
           builder: (context, bounds) {
             final height = bounds.maxHeight;
-            final menuHeight = (height * .30).clamp(180.0, 320.0);
+            final menuHeight =
+                usesAppleGlass
+                    ? height / 3
+                    : (height * .30).clamp(180.0, 320.0);
             return Stack(
               children: [
                 Column(
@@ -596,7 +613,7 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
                         sizeFactor: _menuReveal,
                         child: ConstrainedBox(
                           constraints: BoxConstraints(maxHeight: height * .7),
-                          child: _controls(context, menuHeight),
+                          child: _controls(context, menuHeight, trackColor),
                         ),
                       ),
                   ],
@@ -624,15 +641,7 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
   Widget _exitButton(BuildContext context) {
     void exit() => Navigator.of(context).pop();
     return usesAppleGlass
-        ? SettingsCard(
-          color: Theme.of(context).colorScheme.surface,
-          margin: EdgeInsets.zero,
-          child: AppIconButton(
-            tooltip: '退出听书',
-            onPressed: exit,
-            icon: const Icon(CupertinoIcons.chevron_back),
-          ),
-        )
+        ? IosReaderBackButton(label: '退出听书', onPressed: exit)
         : ReaderRoundAction(
           label: '退出听书',
           onPressed: exit,
@@ -737,29 +746,40 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
     );
   }
 
-  Widget _controls(BuildContext context, double menuHeight) {
+  Widget _controls(BuildContext context, double menuHeight, Color? trackColor) {
     final colors = Theme.of(context).colorScheme;
+    const controlsKey = ValueKey('reader-listening-controls');
+    final contentHeight =
+        usesAppleGlass
+            ? menuHeight - MediaQuery.paddingOf(context).bottom
+            : menuHeight;
     final content = LayoutBuilder(
       builder:
           (_, bounds) => SingleChildScrollView(
             primary: false,
-            child: _playerContent(menuHeight.clamp(0.0, bounds.maxHeight)),
+            child: _playerContent(
+              contentHeight.clamp(0.0, bounds.maxHeight),
+              trackColor,
+            ),
           ),
     );
     if (usesAppleGlass) {
-      return SafeArea(
-        top: false,
-        child: SettingsCard(
-          color: colors.surface,
-          margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: content,
+      return Material(
+        key: controlsKey,
+        color: colors.surfaceContainerHigh,
+        shape: ContinuousRectangleBorder(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(36)),
+          side: BorderSide(color: colors.outlineVariant),
         ),
+        clipBehavior: Clip.antiAlias,
+        child: SafeArea(top: false, child: content),
       );
     }
     return SafeArea(
       top: false,
       minimum: const EdgeInsets.fromLTRB(12, 0, 12, 8),
       child: Material(
+        key: controlsKey,
         color: colors.surfaceContainer,
         borderRadius: BorderRadius.circular(materialPanelRadius),
         clipBehavior: Clip.antiAlias,
@@ -768,14 +788,10 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
     );
   }
 
-  Widget _playerContent(double menuHeight) {
+  Widget _playerContent(double menuHeight, Color? trackColor) {
     return Container(
-      key: const ValueKey('reader-listening-controls'),
       constraints: BoxConstraints(minHeight: menuHeight),
-      padding: EdgeInsets.symmetric(
-        horizontal: usesMaterialYou ? 16 : 12,
-        vertical: 12,
-      ),
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: ListenableBuilder(
         listenable: _speech,
         builder: (context, _) {
@@ -801,6 +817,8 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
                 ReaderPageScrubber(
                   embedded: true,
                   wavy: usesMaterialYou,
+                  wavePlaying: _speech.playing,
+                  activeColor: trackColor,
                   unit: '段',
                   label: '第',
                   index: index,
@@ -862,7 +880,7 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
                           : CupertinoIcons.play_fill,
                       _speech.playing ? Icons.pause : Icons.play_arrow,
                       play,
-                      size: 38,
+                      size: 42,
                     ),
                     _icon(
                       '下一段',
@@ -897,7 +915,7 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
                       usesAppleGlass
                           ? CupertinoIcons.headphones
                           : Icons.headphones,
-                      size: 24,
+                      size: usesAppleGlass ? 28 : 24,
                     ),
                   ),
                   _icon(
@@ -1034,14 +1052,14 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
     IconData ios,
     IconData android,
     VoidCallback? onPressed, {
-    double size = 24,
+    double? size,
   }) {
     if (usesMaterialYou) {
       return IconButton.filledTonal(
         tooltip: label,
         onPressed: onPressed,
         style: IconButton.styleFrom(minimumSize: const Size(56, 44)),
-        icon: Icon(android, size: size),
+        icon: Icon(android, size: size ?? 24),
       );
     }
     return AppIconButton(
@@ -1051,7 +1069,10 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
           usesAppleGlass && onPressed == null
               ? Theme.of(context).colorScheme.onSurfaceVariant
               : null,
-      icon: Icon(usesAppleGlass ? ios : android, size: size),
+      icon: Icon(
+        usesAppleGlass ? ios : android,
+        size: size ?? (usesAppleGlass ? 28 : 24),
+      ),
     );
   }
 }

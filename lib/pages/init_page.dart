@@ -6,6 +6,7 @@ import 'package:wild/cubits/app_accent_cubit.dart';
 import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
 import 'package:wild/sources/source_api.dart' show loadSourceSelection;
+import 'package:wild/sources/book_source.dart' show supportsLocalEpub;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -79,9 +80,10 @@ class _InitPageState extends State<InitPage> {
     if (!mounted) return;
     await Future.wait([
       if (Platform.isIOS) AppleReaderPanel.available.then<void>((_) {}),
-      LocalEpubLibrary.instance.initialize(root).catchError((Object _) {
-        // Local library exposes a retryable error; online reading still starts.
-      }),
+      if (supportsLocalEpub)
+        LocalEpubLibrary.instance.initialize(root).catchError((Object _) {
+          // Local library exposes a retryable error; online reading still starts.
+        }),
       context.read<FontSettingsCubit>().initialize(root),
       context.read<AppAccentCubit>().load(),
       context.read<ReaderCurlCubit>().load(),

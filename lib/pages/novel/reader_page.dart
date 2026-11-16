@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:wild/services/hardware_turn_buffer.dart';
 import 'package:wild/services/reader_speech.dart';
 import 'package:wild/models/reader_mark.dart' show ReaderMarkAxis;
+import 'package:wild/models/reader_page.dart'
+    show ReaderCssPage, ReaderCssImageRegion;
 import 'package:wild/widgets/reader_speech_scope.dart';
 import 'package:wild/services/reader_listening_chapter.dart';
 import 'package:wild/cubits/volume_control_cubit.dart';
@@ -22,7 +24,6 @@ import 'package:wild/pages/novel/theme_cubit.dart';
 import 'package:wild/services/reader_typography.dart';
 import 'package:wild/widgets/reader_system_ui_scope.dart';
 import 'package:wild/widgets/reader_paper_view.dart';
-import 'package:wild/widgets/reader_illustration.dart';
 import 'package:wild/widgets/reader_footer.dart';
 import 'package:wild/cubits/screen_keep_on.dart';
 import 'package:wild/utils/controller_event.dart';
@@ -48,6 +49,38 @@ import 'package:wild/services/reader_mark_store.dart';
 import 'package:wild/widgets/reader_mark_selection.dart';
 import 'package:wild/widgets/reader_marks_panel.dart';
 import 'package:wild/theme/ios_page_arrival.dart';
+
+class _CssProgressVisibility extends StatefulWidget {
+  const _CssProgressVisibility({
+    super.key,
+    required this.pages,
+    required this.child,
+  });
+
+  final List<ReaderCssPage> pages;
+  final Widget child;
+
+  @override
+  State<_CssProgressVisibility> createState() => _CssProgressVisibilityState();
+}
+
+class _CssProgressVisibilityState extends State<_CssProgressVisibility> {
+  // Share the renderer's cached image metadata for these visible leaves.
+  late final _images = Future.wait([
+    for (final page in widget.pages) Future.sync(page.readImages!),
+  ]);
+
+  @override
+  Widget build(BuildContext context) =>
+      FutureBuilder<List<List<ReaderCssImageRegion>>>(
+        future: _images,
+        builder:
+            (context, snapshot) =>
+                snapshot.data?.every((regions) => regions.isEmpty) == true
+                    ? widget.child
+                    : const SizedBox.shrink(),
+      );
+}
 
 class ReaderPage extends StatelessWidget {
   final String aid;
@@ -251,9 +284,7 @@ class _ReaderViewState extends State<_ReaderView> {
   );
   late ReaderCoverController _pageController;
   final _curlKey = GlobalKey<PageCurlViewState>();
-  final _imageViewport = GlobalKey();
   final _markViewport = GlobalKey();
-  late final _visibleImages = ReaderImageHitRegistry(_imageViewport);
   late final ReaderMarkSelection _marks;
   bool _selecting = false;
   int _markPaintRevision = 0;
@@ -375,24 +406,29 @@ class _ReaderViewState extends State<_ReaderView> {
 
   void _handleMenuTap() {
     if (_marks.clear()) return;
-    final cubit = context.read<ReaderCubit>();
-    final state = cubit.state;
-    if (state is! ReaderLoaded) return;
-    if (!state.showControls) {
-      final first = state.layout.firstPage(
-        state.layout.viewIndex(state.currentPageIndex),
-      );
-      final visibleLeaves = state.pages
-          .skip(first)
-          .take(state.layout.isSpread ? 2 : 1);
-      if (visibleLeaves.any(
-            (page) => page.isImage || page.artworkText != null,
-          ) ||
-          _visibleImages.hasVisibleImage) {
-        return;
-      }
+    context.read<ReaderCubit>().toggleControls();
+  }
+
+  Widget _progressOnTextPages(ReaderState state, Widget child) {
+    if (state is! ReaderLoaded) return const SizedBox.shrink();
+    final first = state.layout.firstPage(
+      state.layout.viewIndex(state.currentPageIndex),
+    );
+    final leaves = state.pages.skip(first).take(state.layout.isSpread ? 2 : 1);
+    if (leaves.any((page) => page.isImage || page.artworkText != null)) {
+      return const SizedBox.shrink();
     }
-    cubit.toggleControls();
+    final css = [
+      for (final leaf in leaves)
+        if (leaf.cssPage case final page? when page.readImages != null) page,
+    ];
+    if (css.isEmpty) return child;
+    if (!state.showControls) return const SizedBox.shrink();
+    return _CssProgressVisibility(
+      key: ValueKey((css.first, css.skip(1).firstOrNull)),
+      pages: css,
+      child: child,
+    );
   }
 
   void _handleTap(TapUpDetails details) {
@@ -775,34 +811,27 @@ class _ReaderViewState extends State<_ReaderView> {
                                 child: curl,
                               );
                         }
-                        return ReaderImageHitScope(
-                          registry: _visibleImages,
-                          child: GestureDetector(
-                            key: _imageViewport,
-                            onTapUp: _handleTap,
-                            child: ReaderCoverView(
-                              controller: _pageController,
-                              index: _viewIndex,
-                              pageCount: _viewCount,
-                              leafCount: widget.state.pages.length,
-                              isSpread: widget.state.layout.isSpread,
-                              active: !state.showControls && !_selecting,
-                              revision: Object.hash(
-                                widget.state.presentationKey ??
-                                    widget.state.pages,
-                                paperDecoration,
-                                widget.title,
-                              ),
-                              paperDecoration: paperDecoration,
-                              onPageChanged: _onViewChanged,
-                              onBoundaryTurn: _handleBoundaryTurn,
-                              pageBuilder:
-                                  (context, index) => _buildReaderPage(
-                                    context,
-                                    index,
-                                    textColor,
-                                  ),
+                        return GestureDetector(
+                          onTapUp: _handleTap,
+                          child: ReaderCoverView(
+                            controller: _pageController,
+                            index: _viewIndex,
+                            pageCount: _viewCount,
+                            leafCount: widget.state.pages.length,
+                            isSpread: widget.state.layout.isSpread,
+                            active: !state.showControls && !_selecting,
+                            revision: Object.hash(
+                              widget.state.presentationKey ??
+                                  widget.state.pages,
+                              paperDecoration,
+                              widget.title,
                             ),
+                            paperDecoration: paperDecoration,
+                            onPageChanged: _onViewChanged,
+                            onBoundaryTurn: _handleBoundaryTurn,
+                            pageBuilder:
+                                (context, index) =>
+                                    _buildReaderPage(context, index, textColor),
                           ),
                         );
                       },
@@ -838,33 +867,36 @@ class _ReaderViewState extends State<_ReaderView> {
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    child: ReaderMenuMotion(
-                      visible: state.showControls,
-                      fromBottom: true,
-                      child: Builder(
-                        builder: (context) {
-                          final cubit = context.read<ReaderCubit>();
-                          final progress = cubit.chapterProgress;
-                          return ReaderPageScrubber(
-                            index: progress.index,
-                            count: progress.count,
-                            revision: progress.revision,
-                            active: state.showControls,
-                            onSeek: (page) async {
-                              try {
-                                await cubit.seekChapterPage(page);
-                              } catch (_) {
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('未能跳转到该页，请重试'),
-                                    ),
-                                  );
+                    child: _progressOnTextPages(
+                      state,
+                      ReaderMenuMotion(
+                        visible: state.showControls,
+                        fromBottom: true,
+                        child: Builder(
+                          builder: (context) {
+                            final cubit = context.read<ReaderCubit>();
+                            final progress = cubit.chapterProgress;
+                            return ReaderPageScrubber(
+                              index: progress.index,
+                              count: progress.count,
+                              revision: progress.revision,
+                              active: state.showControls,
+                              onSeek: (page) async {
+                                try {
+                                  await cubit.seekChapterPage(page);
+                                } catch (_) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('未能跳转到该页，请重试'),
+                                      ),
+                                    );
+                                  }
                                 }
-                              }
-                            },
-                          );
-                        },
+                              },
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ),

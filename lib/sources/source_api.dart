@@ -78,7 +78,7 @@ Future<void> cleanAllWebCache() async {
 
 /// Account identity for an opened book; changing discovery alone is unrelated.
 int readerSessionGeneration(String aid) =>
-    sourceOf(aid) == SourceId.localEpub
+    supportsLocalEpub && sourceOf(aid) == SourceId.localEpub
         ? LocalEpubLibrary.instance.revisionFor(aid)
         : sourceOf(aid) == SourceId.lightNovelShelf
         ? ShelfSession.instance.generation
@@ -376,12 +376,17 @@ final Map<SourceId, BookSource> bookSources = {
   SourceId.lnovel: lnovelSource,
   SourceId.bili: biliSource,
   SourceId.esj: esjSource,
-  SourceId.localEpub: LocalEpubSource(),
+  if (supportsLocalEpub) SourceId.localEpub: LocalEpubSource(),
   SourceId.huanmeng: huanmengSource,
 };
 
-BookSource sourceAdapter(SourceId source) =>
-    bookSources[source] ?? (throw StateError('此书源已停用或移除。请在“书源与账号”中恢复或重新导入。'));
+BookSource sourceAdapter(SourceId source) {
+  if (!supportsLocalEpub && source == SourceId.localEpub) {
+    throw UnsupportedError('此设备无法打开本地 EPUB');
+  }
+  return bookSources[source] ??
+      (throw StateError('此书源已停用或移除。请在“书源与账号”中恢复或重新导入。'));
+}
 
 bool sourceSupportsComments(String bookId) {
   final adapter = bookSources[sourceOf(bookId)];
@@ -677,7 +682,7 @@ Future<void> prefetchReaderChapter({
   required String cid,
   required bool Function() isCurrent,
 }) async {
-  if (isCurrent() && sourceOf(aid) == SourceId.localEpub) {
+  if (supportsLocalEpub && isCurrent() && sourceOf(aid) == SourceId.localEpub) {
     await LocalEpubLibrary.instance.chapter(aid, cid);
     return;
   }
@@ -775,8 +780,11 @@ Future<List<w8.ReadingHistory>> listReadingHistory({
   required int limit,
   SourceId? source,
 }) async {
-  await ReadingProgressQueue.instance.flushBounded();
   final selectedSource = source ?? activeSource.value;
+  if (!supportsLocalEpub && selectedSource == SourceId.localEpub) {
+    return const [];
+  }
+  await ReadingProgressQueue.instance.flushBounded();
   final selected = <w8.ReadingHistory>[];
   for (var start = 0; selected.length < offset + limit; start += 100) {
     final chunk = await w8.listReadingHistory(offset: start, limit: 100);
@@ -785,7 +793,8 @@ Future<List<w8.ReadingHistory>> listReadingHistory({
         (h) =>
             sourceOf(h.novelId) == selectedSource &&
             (selectedSource != SourceId.localEpub ||
-                LocalEpubLibrary.instance.contains(h.novelId)),
+                (supportsLocalEpub &&
+                    LocalEpubLibrary.instance.contains(h.novelId))),
       ),
     );
     if (chunk.length < 100) break;
@@ -900,7 +909,10 @@ Future<void> addBookshelf({required String aid}) async {
 }
 
 Future<void> deleteBookcase({required String bid}) async {
-  if (sourceOf(bid) == SourceId.localEpub) return removeLocalEpub(bid);
+  if (sourceOf(bid) == SourceId.localEpub) {
+    if (supportsLocalEpub) await removeLocalEpub(bid);
+    return;
+  }
   if (sourceOf(bid) == SourceId.wenku8) return w8.deleteBookcase(bid: bid);
   final shelfKey = _shelfKeyFor(sourceOf(bid));
   await _serial(() async {

@@ -88,7 +88,7 @@ class ReaderImageRepository {
     '${ref.source.name}:${revision ?? sourceRevision.value}:${ref.url}',
     () async {
       if (ref.readLocal != null) return ReaderImageData(await ref.readLocal!());
-      if (ref.source == SourceId.localEpub) {
+      if (supportsLocalEpub && ref.source == SourceId.localEpub) {
         return ReaderImageData(
           await LocalEpubLibrary.instance.readAsset(ref.url),
         );

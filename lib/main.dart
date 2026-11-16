@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:wild/sources/book_source.dart' show supportsLocalEpub;
 import 'package:wild/widgets/bili_browser_host.dart';
 import 'package:wild/widgets/huanmeng_browser_host.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -74,11 +75,13 @@ final darkTheme = ThemeData(
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  LicenseRegistry.addLicense(() async* {
-    yield LicenseEntryWithLineBreaks([
-      'foliate-js',
-    ], await rootBundle.loadString('lib/assets/epub_foliate_LICENSE.txt'));
-  });
+  if (supportsLocalEpub) {
+    LicenseRegistry.addLicense(() async* {
+      yield LicenseEntryWithLineBreaks([
+        'foliate-js',
+      ], await rootBundle.loadString('lib/assets/epub_foliate_LICENSE.txt'));
+    });
+  }
   await AppInfo.init();
   await RustLib.init();
   runApp(const MyApp());

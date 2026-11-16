@@ -9,7 +9,6 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/pages/local_epub_library_page.dart';
-import 'package:wild/services/epub/apple_books_opener.dart';
 import 'package:wild/services/epub/local_epub_library.dart';
 
 import 'support/epub_fixture.dart';
@@ -75,19 +74,12 @@ void main() {
 
   XFile file(String title) =>
       XFile.fromData(buildEpubFixture(title: title), name: '$title.epub');
-  Widget app({
-    Future<List<XFile>> Function()? pickFiles,
-    AppleBooksOpener? opener,
-  }) => RepaintBoundary(
+  Widget app({Future<List<XFile>> Function()? pickFiles}) => RepaintBoundary(
     key: const ValueKey('epub-ui-capture'),
     child: MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: ThemeData(fontFamily: 'EPUB-QA'),
-      home: LocalEpubLibraryPage(
-        library: library,
-        pickFiles: pickFiles,
-        opener: opener,
-      ),
+      home: LocalEpubLibraryPage(library: library, pickFiles: pickFiles),
     ),
   );
   Future<void> capture(WidgetTester tester, String name) async {
@@ -104,68 +96,20 @@ void main() {
     });
   }
 
-  testWidgets(
-    'iOS batch does not open Apple Books automatically; tapping a book still opens it',
-    (tester) async {
-      const channel = MethodChannel('litetale/test_books_batch');
-      var opens = 0;
-      final messenger =
-          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      messenger.setMockMethodCallHandler(channel, (_) async {
-        opens++;
-        return {'completed': true};
-      });
-      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-      await tester.pumpWidget(
-        app(
-          pickFiles: () async => [file('第一本'), file('第二本')],
-          opener: AppleBooksOpener(channel: channel, isIOS: true),
-        ),
-      );
-      await tester.tap(find.byTooltip('导入 EPUB'));
-      await settleIo(
-        tester,
-        () => library.imports.hasResults && !library.imports.isRunning,
-      );
-      expect(library.books, hasLength(2));
-      expect(opens, 0);
-      expect(find.text('导入完成'), findsOneWidget);
-      await tester.ensureVisible(find.text('第一本'));
-      await tester.tap(find.text('第一本'));
-      await settleIo(tester, () => opens == 1);
-      expect(tester.takeException(), isNull);
-      var flushed = false;
-      unawaited(library.organization.flush().then((_) => flushed = true));
-      await settleIo(tester, () => flushed);
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
-
-  testWidgets('single-book iOS import preserves the existing open action', (
+  testWidgets('batch import adds both books to the local library', (
     tester,
   ) async {
-    const channel = MethodChannel('litetale/test_books_single');
-    var opens = 0;
-    final messenger =
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(channel, (_) async {
-      opens++;
-      return {'completed': true};
-    });
-    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
     await tester.pumpWidget(
-      app(
-        pickFiles: () async => [file('单本导入')],
-        opener: AppleBooksOpener(channel: channel, isIOS: true),
-      ),
+      app(pickFiles: () async => [file('第一本'), file('第二本')]),
     );
     await tester.tap(find.byTooltip('导入 EPUB'));
-    await settleIo(tester, () => opens == 1);
-    expect(library.books.single.title, '单本导入');
+    await settleIo(
+      tester,
+      () => library.imports.hasResults && !library.imports.isRunning,
+    );
+    expect(library.books, hasLength(2));
+    expect(find.text('导入完成'), findsOneWidget);
     expect(tester.takeException(), isNull);
-    var flushed = false;
-    unawaited(library.organization.flush().then((_) => flushed = true));
-    await settleIo(tester, () => flushed);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -348,67 +292,66 @@ void main() {
     },
   );
 
-  for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
-    testWidgets('$platform populated library supports selection on a phone', (
-      tester,
-    ) async {
-      debugDefaultTargetPlatformOverride = platform;
-      tester.view.physicalSize = const Size(390, 844);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      await tester.runAsync(() async {
-        await library.importFile(file('系列 第1卷'));
-        await library.importFile(file('系列 第2卷'));
-        await library.importFile(file('海边来信'));
-        await library.organization.createCollection('待看');
-      });
-      await tester.pumpWidget(app());
-      await tester.pumpAndSettle();
-      await capture(tester, 'local-epub-${platform.name}-library');
-      await tester.longPress(find.text('系列 第1卷'));
-      await tester.pumpAndSettle();
-      expect(find.text('已选 1 本'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-      await capture(tester, 'local-epub-${platform.name}-selection');
-      await tester.pumpWidget(const SizedBox());
-      debugDefaultTargetPlatformOverride = null;
+  const platform = TargetPlatform.android;
+  testWidgets('$platform populated library supports selection on a phone', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = platform;
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.runAsync(() async {
+      await library.importFile(file('系列 第1卷'));
+      await library.importFile(file('系列 第2卷'));
+      await library.importFile(file('海边来信'));
+      await library.organization.createCollection('待看');
     });
-    testWidgets('$platform narrow screen and large text remain scrollable', (
-      tester,
-    ) async {
-      debugDefaultTargetPlatformOverride = platform;
-      tester.view.physicalSize = const Size(360, 520);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      await tester.pumpWidget(
-        RepaintBoundary(
-          key: const ValueKey('epub-ui-capture'),
-          child: MaterialApp(
-            debugShowCheckedModeBanner: false,
-            theme: ThemeData(fontFamily: 'EPUB-QA'),
-            builder:
-                (context, child) => MediaQuery(
-                  data: MediaQuery.of(
-                    context,
-                  ).copyWith(textScaler: const TextScaler.linear(1.6)),
-                  child: child!,
-                ),
-            home: LocalEpubLibraryPage(library: library),
-          ),
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    await capture(tester, 'local-epub-${platform.name}-library');
+    await tester.longPress(find.text('系列 第1卷'));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 1 本'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await capture(tester, 'local-epub-${platform.name}-selection');
+    await tester.pumpWidget(const SizedBox());
+    debugDefaultTargetPlatformOverride = null;
+  });
+  testWidgets('$platform narrow screen and large text remain scrollable', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = platform;
+    tester.view.physicalSize = const Size(360, 520);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: const ValueKey('epub-ui-capture'),
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(fontFamily: 'EPUB-QA'),
+          builder:
+              (context, child) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: const TextScaler.linear(1.6)),
+                child: child!,
+              ),
+          home: LocalEpubLibraryPage(library: library),
         ),
-      );
-      await tester.pumpAndSettle();
-      await tester.drag(find.byType(CustomScrollView), const Offset(0, -350));
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-      await capture(tester, 'local-epub-${platform.name}-large-text');
-      var flushed = false;
-      unawaited(library.organization.flush().then((_) => flushed = true));
-      await settleIo(tester, () => flushed);
-      await tester.pumpWidget(const SizedBox());
-      debugDefaultTargetPlatformOverride = null;
-    });
-  }
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -350));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await capture(tester, 'local-epub-${platform.name}-large-text');
+    var flushed = false;
+    unawaited(library.organization.flush().then((_) => flushed = true));
+    await settleIo(tester, () => flushed);
+    await tester.pumpWidget(const SizedBox());
+    debugDefaultTargetPlatformOverride = null;
+  });
 }

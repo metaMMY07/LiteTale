@@ -1,7 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:wild/models/reader_document.dart';
 import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
 import 'package:wild/src/rust/wenku8/models.dart';
+
+bool get supportsLocalEpub =>
+    !Platform.isIOS && defaultTargetPlatform != TargetPlatform.iOS;
 
 class SourceId {
   const SourceId._(this.name, this._label);
@@ -25,7 +30,7 @@ class SourceId {
     bili,
     huanmeng,
     esj,
-    localEpub,
+    if (supportsLocalEpub) localEpub,
     ..._rules.values,
   ];
   static SourceId rule(String id, {String? label}) =>
