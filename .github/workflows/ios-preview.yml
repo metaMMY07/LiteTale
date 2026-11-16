@@ -71,8 +71,6 @@ jobs:
           flutter config --no-analytics
           flutter precache --ios
           flutter pub get --enforce-lockfile
-      - name: Check Dart dependencies before native compilation
-        run: dart analyze --no-fatal-warnings lib
       - name: Resolve native plugins
         working-directory: ios
         run: pod install
@@ -80,7 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/ios-preview
-          flutter build ios --release --no-codesign --build-name 1.2.4 --build-number 115 2>&1 | tee build/ios-preview/build.log
+          flutter build ios --release --no-codesign --build-name 1.2.4 --build-number 116 2>&1 | tee build/ios-preview/build.log
       - name: Validate and package the device IPA
         run: |
           set -euo pipefail

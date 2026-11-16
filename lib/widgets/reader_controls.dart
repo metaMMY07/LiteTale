@@ -328,6 +328,7 @@ class _ReaderPageScrubberState extends State<ReaderPageScrubber> {
             label: widget.unit == '段' ? '跳转段落' : '${widget.label}跳转书页',
             child: AppSlider(
               key: const ValueKey('reader-page-scrubber'),
+              useGlass: !widget.embedded,
               min: 0,
               max: last > 0 ? last.toDouble() : 1,
               interactionRevision: _interactionRevision,

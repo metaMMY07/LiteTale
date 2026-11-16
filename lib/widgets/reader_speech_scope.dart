@@ -93,7 +93,7 @@ class _ReaderSpeechScopeState extends State<ReaderSpeechScope>
 
   @override
   Widget build(BuildContext context) {
-    if (!PlatformReaderSpeech.supported ||
+    if (!readerSpeechSupported ||
         ModalRoute.of(context) is! ModalRoute<ReaderListeningRequest>) {
       return widget.child;
     }

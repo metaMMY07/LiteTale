@@ -4,15 +4,17 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:wild/services/reader_mark_text.dart';
 
-typedef ReaderSpeechVoice =
-    ({String id, String name, String language, bool network, int quality});
-typedef ReaderSpeechInfo = ({int limit, List<ReaderSpeechVoice> voices});
 typedef ReaderSpeechEvent =
     ({String id, String type, int? start, String? message});
 
+bool get readerSpeechSupported =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS);
+
 abstract interface class ReaderSpeechEngine {
   Stream<ReaderSpeechEvent> get events;
-  Future<ReaderSpeechInfo> initialize();
+  Future<void> initialize();
   Future<void> speak(String id, String text, double rate, String? voice);
   Future<bool> pause(String id);
   Future<bool> resume(String id);
@@ -25,74 +27,6 @@ abstract interface class ReaderSpeechPrefetch {
 
 abstract interface class ReaderSpeechLiveRate {
   Future<void> setPlaybackRate(String id, double rate);
-}
-
-class PlatformReaderSpeech implements ReaderSpeechEngine {
-  PlatformReaderSpeech._();
-
-  static final instance = PlatformReaderSpeech._();
-  static const _commands = MethodChannel('litetale/reader_speech');
-  static const _events = EventChannel('litetale/reader_speech/events');
-
-  static bool get supported =>
-      !kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.android ||
-          defaultTargetPlatform == TargetPlatform.iOS);
-
-  @override
-  late final Stream<ReaderSpeechEvent> events = _events
-      .receiveBroadcastStream()
-      .where(
-        (event) =>
-            event is Map && event['id'] is String && event['type'] is String,
-      )
-      .map((event) {
-        final values = event as Map;
-        return (
-          id: values['id'] as String,
-          type: values['type'] as String,
-          start: values['start'] as int?,
-          message: values['message'] as String?,
-        );
-      });
-
-  @override
-  Future<ReaderSpeechInfo> initialize() async {
-    final info = await _commands.invokeMapMethod<String, Object?>('voices');
-    return (
-      limit: info?['limit'] as int? ?? 1000,
-      voices: [
-        for (final voice in (info?['voices'] as List? ?? const []))
-          (
-            id: voice['id'] as String,
-            name: voice['name'] as String,
-            language: voice['language'] as String,
-            network: voice['network'] == true,
-            quality: voice['quality'] as int? ?? 0,
-          ),
-      ],
-    );
-  }
-
-  @override
-  Future<void> speak(String id, String text, double rate, String? voice) =>
-      _commands.invokeMethod<void>('speak', {
-        'id': id,
-        'text': text,
-        'rate': rate,
-        if (voice != null) 'voice': voice,
-      });
-
-  @override
-  Future<bool> pause(String id) async =>
-      await _commands.invokeMethod<bool>('pause', id) ?? false;
-
-  @override
-  Future<bool> resume(String id) async =>
-      await _commands.invokeMethod<bool>('resume', id) ?? false;
-
-  @override
-  Future<void> stop(String id) => _commands.invokeMethod<void>('stop', id);
 }
 
 typedef ReaderSpeechChunk = ({String text, int offset, int paragraph});
@@ -178,11 +112,11 @@ class ReaderSpeechPlan {
 
 bool _lowSurrogate(int unit) => unit >= 0xDC00 && unit <= 0xDFFF;
 
-/// Owns the cursor for one reader route. Old speech events carry the native
+/// Owns the cursor for one reader route. Old speech events carry the
 /// utterance identity and cannot advance a new chapter or a resumed segment.
 class ReaderSpeechController extends ChangeNotifier {
-  ReaderSpeechController({ReaderSpeechEngine? engine})
-    : _engine = engine ?? PlatformReaderSpeech.instance;
+  ReaderSpeechController({required ReaderSpeechEngine engine})
+    : _engine = engine;
 
   static final _active = ValueNotifier<ReaderSpeechController?>(null);
   static Listenable get playbackChanges => _active;
@@ -190,7 +124,7 @@ class ReaderSpeechController extends ChangeNotifier {
   static int _utteranceSequence = 0;
   static double _preferredRate = 1;
 
-  ReaderSpeechEngine _engine;
+  final ReaderSpeechEngine _engine;
   StreamSubscription<ReaderSpeechEvent>? _subscription;
   List<ReaderSpeechChunk> _segments = const [];
   List<ReaderSpeechParagraph> paragraphs = const [];
@@ -239,16 +173,10 @@ class ReaderSpeechController extends ChangeNotifier {
     );
   }
 
-  void selectEngine(ReaderSpeechEngine engine, String? selectedVoice) {
-    if (identical(engine, _engine) && voice == selectedVoice) return;
+  void selectVoice(String selectedVoice) {
+    if (voice == selectedVoice) return;
     final autoplay = playing;
     suspend();
-    if (!identical(engine, _engine)) {
-      unawaited(_subscription?.cancel());
-      _subscription = null;
-      _engine = engine;
-      _initialized = false;
-    }
     voice = selectedVoice;
     notifyListeners();
     if (autoplay) unawaited(play());

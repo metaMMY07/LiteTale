@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_edge_tts/flutter_edge_tts.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
 import 'package:wild/pages/novel/line_height_cubit.dart';
@@ -17,14 +20,76 @@ import 'package:wild/services/reader_listening_chapter.dart';
 import 'package:wild/services/reader_mark_text.dart';
 import 'package:wild/services/reader_speech.dart';
 import 'package:wild/services/reading_progress.dart';
+import 'package:wild/settings/settings_widgets.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' as sources;
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
+import 'package:wild/theme/ios_glass_theme.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/reader_controls.dart';
+import 'package:wild/widgets/reader_listening_voice_panel.dart';
 import 'package:wild/widgets/reader_speech_scope.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  test(
+    'removed voice preferences resolve to the default online voice',
+    () async {
+      addTearDown(() => FlutterSecureStorage.setMockInitialValues({}));
+      for (final source in ['custom', 'system']) {
+        FlutterSecureStorage.setMockInitialValues({
+          'litetale.listening.voice.v1': jsonEncode({
+            'voice': {'source': source, 'id': 'old-voice', 'name': '旧音色'},
+          }),
+        });
+        expect(await ListeningVoice.load(), same(ListeningVoice.female));
+      }
+      await ListeningVoice.male.save();
+      expect(await ListeningVoice.load(), same(ListeningVoice.male));
+    },
+  );
+
+  test('online playback advances through successive completed clips', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'litetale-tts-test-',
+    );
+    final player = _AudioPlayer();
+    final engine = OnlineReaderSpeech(
+      createPlayer: () => player,
+      temporaryDirectory: () async => directory,
+      synthesize:
+          (_, text, __) async => EdgeTtsSynthesisResult(
+            audioBytes: Uint8List.fromList(utf8.encode(text)),
+            metadata: const [],
+            requestId: 'test',
+          ),
+    );
+    final speech = ReaderSpeechController(engine: engine);
+    addTearDown(() async {
+      speech.dispose();
+      await engine.dispose();
+      await directory.delete();
+    });
+    speech.loadPlan(ReaderSpeechPlan('第一段。\n第二段。', 240), 0);
+    await speech.play();
+    expect(player.playCount, 1);
+    final second = player.plays.firstWhere((value) => value == 2);
+    player.completeClip();
+    await second.timeout(const Duration(seconds: 2));
+    await Future<void>.delayed(Duration.zero);
+    expect(speech.playing, isTrue);
+    expect(speech.paragraphIndex, 1);
+    expect(player.playing, isTrue);
+    final finished = engine.events.firstWhere((event) => event.type == 'done');
+    player.completeClip();
+    await finished;
+    expect(speech.finished, isTrue);
+    expect(speech.playing, isFalse);
+    expect(player.playCount, 2);
+  });
+
   test('spoken EPUB offsets map back to independently spaced DOM text', () {
     const text = '章节标题\n第一段文字。\n　第二段继续向前阅读，直到末尾。';
     const dom = '章节标题  第一段文字。第二段继续向前阅读，  直到末尾。';
@@ -120,7 +185,7 @@ void main() {
   });
 
   test('switching chapters discards pending engine initialization', () async {
-    final first = Completer<ReaderSpeechInfo>();
+    final first = Completer<void>();
     final engine = _SpeechEngine()..initialization = first.future;
     final speech = ReaderSpeechController(engine: engine);
     addTearDown(engine.close);
@@ -130,7 +195,7 @@ void main() {
     final pending = speech.play();
     engine.initialization = null;
     speech.loadPlan(ReaderSpeechPlan('新章节', 240), 0);
-    first.complete(_SpeechEngine.info);
+    first.complete();
     await pending;
     await speech.play();
     expect(engine.calls.single.text, '新章节');
@@ -140,6 +205,100 @@ void main() {
     expect(speech.ready, isFalse);
     expect(ReaderSpeechController.isAnyPlaying, isFalse);
   });
+
+  testWidgets(
+    'iOS uses solid grouped rows and shows online voices directly',
+    (tester) async {
+      ListeningVoice? chosen;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: iosGlassTheme(Brightness.dark),
+          home: Scaffold(
+            body: Builder(
+              builder:
+                  (context) => TextButton(
+                    onPressed: () async {
+                      chosen = await showListeningVoicePanel(
+                        context,
+                        ListeningVoice.female,
+                        (_) async {},
+                      );
+                    },
+                    child: const Text('打开音色'),
+                  ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('打开音色'));
+      await tester.pumpAndSettle();
+      expect(find.byType(IosSettingsSection), findsOneWidget);
+      expect(find.byType(AppleGlassSurface), findsNothing);
+      expect(find.text('在线音色'), findsOneWidget);
+      expect(find.text('系统音色'), findsNothing);
+      expect(find.text('自定义'), findsNothing);
+      expect(find.text(ListeningVoice.female.name), findsOneWidget);
+      await tester.tap(find.text(ListeningVoice.male.name));
+      await tester.pumpAndSettle();
+      expect(chosen, same(ListeningVoice.male));
+    },
+    variant: const TargetPlatformVariant({TargetPlatform.iOS}),
+  );
+
+  testWidgets(
+    'listening controls fill thirty percent and use the platform palette',
+    (tester) async {
+      tester.view.physicalSize = const Size(402, 874);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final engine = _SpeechEngine();
+      addTearDown(engine.close);
+      final ios = usesAppleGlass;
+      final theme =
+          ios
+              ? iosGlassTheme(Brightness.dark, accent: Colors.redAccent)
+              : ThemeData(
+                colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+              );
+      await tester.pumpWidget(
+        MultiBlocProvider(
+          providers: [
+            BlocProvider(create: (_) => ThemeCubit()),
+            BlocProvider(create: (_) => FontSettingsCubit()),
+            BlocProvider(create: (_) => FontSizeCubit()),
+            BlocProvider(create: (_) => LineHeightCubit()),
+            BlocProvider(create: (_) => ParagraphSpacingCubit()),
+          ],
+          child: MaterialApp(
+            theme: theme,
+            home: ReaderListeningPage(
+              speechEngine: engine,
+              request: const ReaderListeningRequest(
+                chapter: _chapter,
+                volumes: [],
+                info: _book,
+                offset: 0,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final controls = find.byKey(const ValueKey('reader-listening-controls'));
+      expect(tester.getSize(controls).height, greaterThanOrEqualTo(874 * .30));
+      final palette = Theme.of(tester.element(controls)).colorScheme;
+      expect(
+        palette.primary,
+        ios ? palette.onSurface : theme.colorScheme.primary,
+      );
+      expect(find.byType(AppleGlassSurface), findsNothing);
+    },
+    variant: const TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+    }),
+  );
 
   testWidgets(
     'reader hands over listening only after its controls and route exit',
@@ -230,25 +389,8 @@ void main() {
       final previous = sources.bookSources[SourceId.lnovel]!;
       sources.bookSources[SourceId.lnovel] = source;
       addTearDown(() => sources.bookSources[SourceId.lnovel] = previous);
-      const commands = MethodChannel('litetale/reader_speech');
-      const events = MethodChannel('litetale/reader_speech/events');
-      final messenger = tester.binding.defaultBinaryMessenger;
-      final calls = <MethodCall>[];
-      messenger.setMockMethodCallHandler(commands, (call) async {
-        calls.add(call);
-        return call.method == 'voices' ? {'limit': 1000, 'voices': []} : null;
-      });
-      messenger.setMockMethodCallHandler(events, (_) async => null);
-      FlutterSecureStorage.setMockInitialValues({
-        'litetale.listening.voice.v1': jsonEncode({
-          'voice': ListeningVoice.system.toJson(),
-        }),
-      });
-      addTearDown(() {
-        messenger.setMockMethodCallHandler(commands, null);
-        messenger.setMockMethodCallHandler(events, null);
-        FlutterSecureStorage.setMockInitialValues({});
-      });
+      final engine = _SpeechEngine();
+      addTearDown(engine.close);
 
       final writes = <ReadingProgress>[];
       final progress = ReadingProgressQueue(
@@ -276,6 +418,7 @@ void main() {
                               builder:
                                   (_) => ReaderListeningPage(
                                     progress: progress,
+                                    speechEngine: engine,
                                     onPosition:
                                         (progress) => detailPosition = progress,
                                     request: const ReaderListeningRequest(
@@ -319,50 +462,27 @@ void main() {
       expect(find.byTooltip('播放'), findsNothing);
       await tester.pumpAndSettle();
       expect(find.byTooltip('播放'), findsOneWidget);
-      await tester.tap(find.text('第二个段落。'));
+      await tester.tap(find.text('第一个段落。'));
       await tester.pumpAndSettle();
-      final args =
-          calls.singleWhere((call) => call.method == 'speak').arguments as Map;
-      expect(args['text'], '第二个段落。');
-      await messenger.handlePlatformMessage(
-        events.name,
-        const StandardMethodCodec().encodeSuccessEnvelope({
-          'id': args['id'],
-          'type': 'started',
-        }),
-        (_) {},
-      );
-      await tester.pump();
+      expect(engine.calls.single.text, '第一个段落。');
+      engine.emit(engine.calls.single.id, 'done');
+      await tester.pumpAndSettle();
+      final second = engine.calls.last;
+      expect(second.text, '第二个段落。');
       expect(find.text('第 2/2段'), findsOneWidget);
       await tester.tapAt(const Offset(748, 300));
       await tester.pump();
       expect(find.byTooltip('暂停'), findsOneWidget);
-      await messenger.handlePlatformMessage(
-        events.name,
-        const StandardMethodCodec().encodeSuccessEnvelope({
-          'id': args['id'],
-          'type': 'done',
-        }),
-        (_) {},
-      );
+      engine.emit(second.id, 'done');
       await tester.pumpAndSettle();
       expect(find.byTooltip('播放'), findsOneWidget);
       expect(source.requests, isEmpty);
       await tester.tap(find.text('下一章'));
       await tester.pumpAndSettle();
       expect(source.requests, ['3']);
-      final speak =
-          calls.where((call) => call.method == 'speak').last.arguments as Map;
-      expect(speak['text'], _ListeningSource.second);
-      await messenger.handlePlatformMessage(
-        events.name,
-        const StandardMethodCodec().encodeSuccessEnvelope({
-          'id': speak['id'],
-          'type': 'range',
-          'start': 3,
-        }),
-        (_) {},
-      );
+      final speak = engine.calls.last;
+      expect(speak.text, _ListeningSource.second);
+      engine.emit(speak.id, 'range', start: 3);
       await tester.pump();
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
@@ -371,12 +491,7 @@ void main() {
       expect(writes.single.characters, 3);
       expect(writes.single.page, scrollReaderProgressPage);
       expect(detailPosition, same(writes.single));
-      expect(
-        calls.any(
-          (call) => call.method == 'stop' && call.arguments == speak['id'],
-        ),
-        isTrue,
-      );
+      expect(engine.stopped, contains(speak.id));
     },
   );
 }
@@ -420,19 +535,18 @@ const _book = NovelInfo(
 );
 
 class _SpeechEngine implements ReaderSpeechEngine {
-  static const ReaderSpeechInfo info = (limit: 1000, voices: []);
   final _events = StreamController<ReaderSpeechEvent>.broadcast(sync: true);
   final calls = <({String id, String text})>[];
   final stopped = <String>[];
   bool nativePause = false;
   Future<bool>? resumeResponse;
-  Future<ReaderSpeechInfo>? initialization;
+  Future<void>? initialization;
 
   @override
   Stream<ReaderSpeechEvent> get events => _events.stream;
 
   @override
-  Future<ReaderSpeechInfo> initialize() => initialization ?? Future.value(info);
+  Future<void> initialize() => initialization ?? Future.value();
 
   @override
   Future<void> speak(String id, String text, double rate, String? voice) async {
@@ -453,4 +567,77 @@ class _SpeechEngine implements ReaderSpeechEngine {
   }
 
   Future<void> close() => _events.close();
+}
+
+class _AudioPlayer extends Fake implements AudioPlayer {
+  final _states = StreamController<PlayerState>.broadcast(sync: true);
+  final _plays = StreamController<int>.broadcast(sync: true);
+  Completer<void>? _completion;
+  int playCount = 0;
+  Stream<int> get plays => _plays.stream;
+
+  @override
+  bool playing = false;
+  @override
+  ProcessingState processingState = ProcessingState.idle;
+  @override
+  Stream<PlayerState> get playerStateStream => _states.stream;
+  @override
+  Stream<Duration> get positionStream => const Stream.empty();
+  @override
+  Stream<PlayerException> get errorStream => const Stream.empty();
+
+  @override
+  Future<Duration?> setFilePath(
+    String filePath, {
+    Duration? initialPosition,
+    bool preload = true,
+    dynamic tag,
+  }) async {
+    processingState = ProcessingState.ready;
+    _publish();
+    return const Duration(seconds: 1);
+  }
+
+  @override
+  Future<void> play() async {
+    _plays.add(++playCount);
+    if (playing) return;
+    playing = true;
+    final completion = _completion = Completer<void>();
+    _publish();
+    await completion.future;
+  }
+
+  void completeClip() {
+    processingState = ProcessingState.completed;
+    _publish();
+    _finishCommand();
+  }
+
+  void _publish() => _states.add(PlayerState(playing, processingState));
+
+  void _finishCommand() {
+    _completion?.complete();
+    _completion = null;
+  }
+
+  @override
+  Future<void> pause() async {
+    playing = false;
+    _publish();
+    _finishCommand();
+  }
+
+  @override
+  Future<void> stop() => pause();
+
+  @override
+  Future<void> setSpeed(double speed) async {}
+
+  @override
+  Future<void> dispose() async {
+    await _states.close();
+    await _plays.close();
+  }
 }

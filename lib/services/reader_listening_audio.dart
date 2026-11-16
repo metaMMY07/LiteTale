@@ -1,181 +1,89 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_edge_tts/flutter_edge_tts.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:wild/services/read_request.dart';
 import 'package:wild/services/reader_speech.dart';
 
-enum ListeningVoiceSource { online, custom, system }
-
-enum ListeningVoiceAuth { none, azure, bearer }
-
 class ListeningVoice {
-  const ListeningVoice(
-    this.source,
-    this.name, {
-    this.id,
-    this.language = 'zh-CN',
-  });
+  const ListeningVoice(this.id, this.name, {this.language = 'zh-CN'});
 
-  final ListeningVoiceSource source;
-  final String name, language;
-  final String? id;
+  final String id, name, language;
 
   static const female = ListeningVoice(
-    ListeningVoiceSource.online,
+    'zh-CN-XiaoxiaoNeural',
     'LiteTale 默认音色（女）',
-    id: 'zh-CN-XiaoxiaoNeural',
   );
-  static const male = ListeningVoice(
-    ListeningVoiceSource.online,
-    'LiteTale 默认音色（男）',
-    id: 'zh-CN-YunxiNeural',
-  );
-  static const system = ListeningVoice(ListeningVoiceSource.system, '系统中文音色');
-
-  bool matches(ListeningVoice other) =>
-      source == other.source && id == other.id;
-
-  Map<String, Object?> toJson() => {
-    'source': source.name,
-    'name': name,
-    'id': id,
-    'language': language,
-  };
-
-  factory ListeningVoice.fromJson(Map<String, dynamic> json) => ListeningVoice(
-    ListeningVoiceSource.values.byName(json['source'] as String),
-    json['name'] as String,
-    id: json['id'] as String?,
-    language: json['language'] as String,
-  );
-}
-
-class ListeningVoiceEndpoint {
-  const ListeningVoiceEndpoint({
-    required this.url,
-    required this.name,
-    required this.id,
-    required this.language,
-    required this.auth,
-    required this.credential,
-  });
-
-  final Uri url;
-  final String name, id, language, credential;
-  final ListeningVoiceAuth auth;
-
-  ListeningVoice get voice => ListeningVoice(
-    ListeningVoiceSource.custom,
-    name,
-    id: id,
-    language: language,
-  );
-
-  static Uri? parseUrl(String value) {
-    final url = Uri.tryParse(value.trim());
-    return url != null &&
-            url.scheme == 'https' &&
-            url.host.isNotEmpty &&
-            url.userInfo.isEmpty &&
-            !url.hasFragment
-        ? url
-        : null;
-  }
-
-  Map<String, Object?> toJson() => {
-    'url': url.toString(),
-    'name': name,
-    'id': id,
-    'language': language,
-    'auth': auth.name,
-    'credential': credential,
-  };
-
-  factory ListeningVoiceEndpoint.fromJson(Map<String, dynamic> json) =>
-      ListeningVoiceEndpoint(
-        url: parseUrl(json['url'] as String)!,
-        name: json['name'] as String,
-        id: json['id'] as String,
-        language: json['language'] as String,
-        auth: ListeningVoiceAuth.values.byName(json['auth'] as String),
-        credential: json['credential'] as String,
-      );
-}
-
-class ListeningVoiceSettings {
-  const ListeningVoiceSettings(this.voice, {this.endpoint});
-
-  final ListeningVoice voice;
-  final ListeningVoiceEndpoint? endpoint;
+  static const male = ListeningVoice('zh-CN-YunxiNeural', 'LiteTale 默认音色（男）');
   static const _storage = FlutterSecureStorage();
   static const _key = 'litetale.listening.voice.v1';
   static Future<void> _writes = Future.value();
 
-  static Future<ListeningVoiceSettings> load() async {
+  static Future<ListeningVoice> load() async {
     try {
       await _writes;
       final saved = await _storage.read(key: _key);
       if (saved != null) {
         final json = jsonDecode(saved) as Map<String, dynamic>;
-        final voice = ListeningVoice.fromJson(
-          json['voice'] as Map<String, dynamic>,
-        );
-        final endpoint = json['endpoint'];
-        final config =
-            endpoint is Map<String, dynamic>
-                ? ListeningVoiceEndpoint.fromJson(endpoint)
-                : null;
-        if (voice.source != ListeningVoiceSource.custom || config != null) {
-          return ListeningVoiceSettings(voice, endpoint: config);
+        final voice = json['voice'] as Map<String, dynamic>;
+        final id = voice['id'];
+        if (voice['source'] == 'online' && id is String && id.isNotEmpty) {
+          if (id == female.id) return female;
+          if (id == male.id) return male;
+          return ListeningVoice(
+            id,
+            voice['name'] as String,
+            language: voice['language'] as String,
+          );
         }
       }
     } catch (_) {
       // Settings from an older install or unavailable keychain are optional.
     }
-    return const ListeningVoiceSettings(ListeningVoice.female);
+    return female;
   }
 
   Future<void> save() {
     final value = jsonEncode({
-      'voice': voice.toJson(),
-      'endpoint': endpoint?.toJson(),
+      'voice': {
+        'source': 'online',
+        'id': id,
+        'name': name,
+        'language': language,
+      },
     });
     final next = _writes.then((_) => _storage.write(key: _key, value: value));
     _writes = next.catchError((Object _) {});
     return next;
   }
 
-  static bool isChinese(String language) => const {
+  static bool _isChinese(String language) => const {
     'zh',
     'cmn',
     'chi',
     'zho',
   }.contains(language.toLowerCase().split(RegExp('[-_]')).first);
 
-  static Future<List<ListeningVoice>> onlineVoices() async {
-    final client = FlutterEdgeTts(voice: ListeningVoice.female.id!);
+  static Future<List<ListeningVoice>> fetchOnline() async {
+    final client = FlutterEdgeTts(voice: female.id);
     try {
       final voices = await client.getVoices().timeout(
         const Duration(seconds: 12),
       );
       return [
         for (final voice in voices)
-          if (isChinese(voice.locale) &&
+          if (_isChinese(voice.locale) &&
               voice.shortName.isNotEmpty &&
-              voice.shortName != ListeningVoice.female.id &&
-              voice.shortName != ListeningVoice.male.id)
+              voice.shortName != female.id &&
+              voice.shortName != male.id)
             ListeningVoice(
-              ListeningVoiceSource.online,
+              voice.shortName,
               '${voice.shortName.split('-').last.replaceFirst('Neural', '')} · ${voice.locale} · ${voice.gender == 'Female' ? '女声' : '男声'}',
-              id: voice.shortName,
               language: voice.locale,
             ),
       ];
@@ -193,14 +101,27 @@ typedef _VoiceClip = ({Uint8List bytes, List<_WordOffset> words});
 /// Each command and playback callback belongs to one utterance ID.
 class OnlineReaderSpeech
     implements ReaderSpeechEngine, ReaderSpeechPrefetch, ReaderSpeechLiveRate {
-  OnlineReaderSpeech({this.endpoint});
+  OnlineReaderSpeech({
+    AudioPlayer Function() createPlayer = AudioPlayer.new,
+    Future<Directory> Function() temporaryDirectory = getTemporaryDirectory,
+    Future<EdgeTtsSynthesisResult> Function(String, String, ReadRequest)
+        synthesize =
+        _synthesizeWithEdge,
+  }) : _createPlayer = createPlayer,
+       _temporaryDirectory = temporaryDirectory,
+       _synthesize = synthesize;
 
-  final ListeningVoiceEndpoint? endpoint;
+  final AudioPlayer Function() _createPlayer;
+  final Future<Directory> Function() _temporaryDirectory;
+  final Future<EdgeTtsSynthesisResult> Function(String, String, ReadRequest)
+  _synthesize;
   final _events = StreamController<ReaderSpeechEvent>.broadcast();
   final _ready = <_ClipKey, _VoiceClip>{};
   final _requests = <_ClipKey, (ReadRequest, Future<_VoiceClip>)>{};
   AudioPlayer? _player;
   StreamSubscription<Duration>? _position;
+  StreamSubscription<PlayerState>? _playerState;
+  StreamSubscription<PlayerException>? _playerError;
   File? _file;
   String? _id;
   int _playRevision = 0;
@@ -215,13 +136,10 @@ class OnlineReaderSpeech
   Stream<ReaderSpeechEvent> get events => _events.stream;
 
   @override
-  Future<ReaderSpeechInfo> initialize() async => (
-    limit: 240,
-    voices: const <ReaderSpeechVoice>[],
-  );
+  Future<void> initialize() async {}
 
   _ClipKey _key(String text, String? voice) => (
-    voice ?? ListeningVoice.female.id!,
+    voice ?? ListeningVoice.female.id,
     text,
   );
 
@@ -247,14 +165,32 @@ class OnlineReaderSpeech
   }
 
   Future<_VoiceClip> _generate(_ClipKey key, ReadRequest request) async {
-    if (endpoint case final config?) {
-      return (
-        bytes: await _custom(key.$2, config, request),
-        words: const <_WordOffset>[],
-      );
+    final result = await _synthesize(key.$1, key.$2, request);
+    final offsets = <_WordOffset>[];
+    var searchFrom = 0;
+    for (final item in result.metadata) {
+      final word = item.data.text?.text;
+      if (item.type != 'WordBoundary' || word == null || word.isEmpty) {
+        continue;
+      }
+      final start = key.$2.indexOf(word, searchFrom);
+      if (start < 0) continue;
+      offsets.add((
+        time: Duration(microseconds: item.data.offset ~/ 10),
+        start: start,
+      ));
+      searchFrom = start + word.length;
     }
+    return (bytes: result.audioBytes, words: offsets);
+  }
+
+  static Future<EdgeTtsSynthesisResult> _synthesizeWithEdge(
+    String voice,
+    String text,
+    ReadRequest request,
+  ) async {
     final client = FlutterEdgeTts(
-      voice: key.$1,
+      voice: voice,
       outputFormat: EdgeTtsOutputFormat.audio24Khz48KbitrateMonoMp3,
       connectionTimeout: const Duration(seconds: 10),
       enableWordBoundary: true,
@@ -267,25 +203,7 @@ class OnlineReaderSpeech
             .catchError((Object _) {});
     final detach = request.onCancel((_) => unawaited(close()));
     try {
-      final result = await request
-          .wait(client.synthesize(key.$2))
-          .timeout(_timeout);
-      final offsets = <_WordOffset>[];
-      var searchFrom = 0;
-      for (final item in result.metadata) {
-        final word = item.data.text?.text;
-        if (item.type != 'WordBoundary' || word == null || word.isEmpty) {
-          continue;
-        }
-        final start = key.$2.indexOf(word, searchFrom);
-        if (start < 0) continue;
-        offsets.add((
-          time: Duration(microseconds: item.data.offset ~/ 10),
-          start: start,
-        ));
-        searchFrom = start + word.length;
-      }
-      return (bytes: result.audioBytes, words: offsets);
+      return await request.wait(client.synthesize(text)).timeout(_timeout);
     } catch (_) {
       request.check();
       throw PlatformException(
@@ -295,57 +213,6 @@ class OnlineReaderSpeech
     } finally {
       detach();
       unawaited(close());
-    }
-  }
-
-  Future<Uint8List> _custom(
-    String text,
-    ListeningVoiceEndpoint config,
-    ReadRequest request,
-  ) async {
-    final client = http.Client();
-    final detach = request.onCancel((_) => client.close());
-    const xml = HtmlEscape(HtmlEscapeMode.attribute);
-    final command =
-        http.Request('POST', config.url)
-          ..followRedirects = false
-          ..headers.addAll({
-            'Content-Type': 'application/ssml+xml; charset=utf-8',
-            'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
-            'User-Agent': 'LiteTale',
-            if (config.auth == ListeningVoiceAuth.azure)
-              'Ocp-Apim-Subscription-Key': config.credential,
-            if (config.auth == ListeningVoiceAuth.bearer)
-              'Authorization': 'Bearer ${config.credential}',
-          })
-          ..body =
-              '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
-              'xml:lang="${xml.convert(config.language)}"><voice name="${xml.convert(config.id)}">'
-              '${xml.convert(text)}</voice></speak>';
-    try {
-      return await request
-          .wait(() async {
-            final response = await client.send(command);
-            if (response.statusCode != 200) {
-              throw PlatformException(
-                code: 'tts_http',
-                message: '语音接口返回 HTTP ${response.statusCode}',
-              );
-            }
-            final body = BytesBuilder(copy: false);
-            await for (final bytes in response.stream) {
-              request.check();
-              if (body.length + bytes.length > _maxBytes) {
-                throw PlatformException(code: 'tts_audio', message: '接口返回音频过大');
-              }
-              body.add(bytes);
-            }
-            return body.takeBytes();
-          }())
-          .timeout(_timeout);
-    } finally {
-      detach();
-      client.close();
     }
   }
 
@@ -379,7 +246,7 @@ class OnlineReaderSpeech
     _cancelRequests(except: key);
     final clip = await _audio(key);
     if (id != _id) return;
-    final directory = await getTemporaryDirectory();
+    final directory = await _temporaryDirectory();
     final file = File(
       '${directory.path}/litetale-tts-${DateTime.now().microsecondsSinceEpoch}.mp3',
     );
@@ -387,7 +254,9 @@ class OnlineReaderSpeech
       await file.writeAsBytes(clip.bytes);
       await _command(() async {
         if (id != _id) return;
-        final player = _player ??= AudioPlayer();
+        final player = _player ??= _createPlayer();
+        await player.pause();
+        if (id != _id) return;
         await player.setFilePath(file.path).timeout(const Duration(seconds: 8));
         final old = _file;
         _file = file;
@@ -445,24 +314,42 @@ class OnlineReaderSpeech
   }
 
   void _play(String id, AudioPlayer player) {
-    final revision = ++_playRevision;
-    unawaited(
-      player.play().then<void>(
-        (_) {
-          if (!_paused && revision == _playRevision) {
-            _emit(
-              id,
-              player.processingState == ProcessingState.completed
-                  ? 'done'
-                  : 'interrupted',
-            );
-          }
-        },
-        onError: (Object _) {
-          if (revision == _playRevision) _emit(id, 'error');
-        },
-      ),
-    );
+    _stopObservingPlayback();
+    final revision = _playRevision;
+    bool current() =>
+        !_closed && !_paused && id == _id && revision == _playRevision;
+    void settle(String type) {
+      if (!current()) return;
+      _stopObservingPlayback();
+      _emit(id, type);
+    }
+
+    // A completed player can retain its playing flag. The play Future can
+    // resolve while another clip is playing, so only the state can end a clip.
+    var wasPlaying = player.playing;
+    _playerState = player.playerStateStream.listen((state) {
+      if (!current()) return;
+      if (state.processingState == ProcessingState.completed) {
+        if (player.processingState == ProcessingState.completed &&
+            (state.playing || wasPlaying)) {
+          settle('done');
+        }
+      } else if (state.playing) {
+        wasPlaying = true;
+      } else if (wasPlaying && !player.playing) {
+        settle('interrupted');
+      }
+    });
+    _playerError = player.errorStream.listen((_) => settle('error'));
+    unawaited(player.play().catchError((Object _) => settle('error')));
+  }
+
+  void _stopObservingPlayback() {
+    _playRevision++;
+    unawaited(_playerState?.cancel());
+    unawaited(_playerError?.cancel());
+    _playerState = null;
+    _playerError = null;
   }
 
   void _emit(String id, String type, {int? start}) {
@@ -478,7 +365,7 @@ class OnlineReaderSpeech
       return false;
     }
     _paused = true;
-    _playRevision++;
+    _stopObservingPlayback();
     await _command(() async {
       if (id == _id) await _player?.pause();
     });
@@ -508,7 +395,7 @@ class OnlineReaderSpeech
     if (id != _id) return;
     _id = null;
     _loaded = false;
-    _playRevision++;
+    _stopObservingPlayback();
     unawaited(_position?.cancel());
     _position = null;
     _cancelRequests();

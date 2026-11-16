@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:wild/theme/ios_glass_theme.dart' show iosGroupedCardShape;
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/theme/ios_system_colors.dart';
 import 'package:wild/theme/material_you.dart';
@@ -251,13 +252,7 @@ class AppButton extends StatelessWidget {
       ),
     );
     if (_kind == _ButtonKind.text) return button;
-    return AppleGlassSurface(
-      tint:
-          _kind == _ButtonKind.filled || _kind == _ButtonKind.elevated
-              ? colors.primary.withValues(alpha: .12)
-              : null,
-      child: button,
-    );
+    return AppleGlassSurface(child: button);
   }
 }
 
@@ -398,6 +393,7 @@ class AppSlider extends StatelessWidget {
     this.interactionRevision,
     this.activeColor,
     this.inactiveColor,
+    this.useGlass = true,
   });
   final double value, min, max;
   final int? divisions;
@@ -406,9 +402,10 @@ class AppSlider extends StatelessWidget {
   final VoidCallback? onChangeCancel;
   final Object? interactionRevision;
   final Color? activeColor, inactiveColor;
+  final bool useGlass;
   @override
   Widget build(BuildContext context) =>
-      usesAppleGlass
+      usesAppleGlass && useGlass
           ? AppleGlassSlider(
             value: value.clamp(min, max),
             min: min,
@@ -421,7 +418,7 @@ class AppSlider extends StatelessWidget {
             interactionRevision: interactionRevision,
             activeColor: activeColor ?? Theme.of(context).colorScheme.primary,
           )
-          : Slider(
+          : Slider.adaptive(
             value: value,
             min: min,
             max: max,
@@ -989,6 +986,7 @@ Future<T?> showAppBottomSheet<T>({
   bool enableDrag = true,
   bool? showDragHandle,
   BoxConstraints? constraints,
+  bool useGlass = true,
 }) {
   if (!usesAppleGlass) {
     return showModalBottomSheet<T>(
@@ -1025,12 +1023,30 @@ Future<T?> showAppBottomSheet<T>({
                         MediaQuery.sizeOf(sheetContext).height *
                         (isScrollControlled ? .92 : .6),
                   ),
-              child: AppleGlassSurface(
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: SafeArea(top: false, child: builder(sheetContext)),
-                ),
-              ),
+              child:
+                  useGlass
+                      ? AppleGlassSurface(
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: SafeArea(
+                            top: false,
+                            child: builder(sheetContext),
+                          ),
+                        ),
+                      )
+                      : Material(
+                        color:
+                            backgroundColor ??
+                            Theme.of(
+                              sheetContext,
+                            ).colorScheme.surfaceContainerLowest,
+                        shape: iosGroupedCardShape,
+                        clipBehavior: Clip.antiAlias,
+                        child: SafeArea(
+                          top: false,
+                          child: builder(sheetContext),
+                        ),
+                      ),
             ),
           ),
         ),

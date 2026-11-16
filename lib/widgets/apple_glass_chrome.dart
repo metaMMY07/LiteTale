@@ -82,6 +82,10 @@ class AppleGlassSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!usesAppleGlass) return child;
     final surface = Theme.of(context).colorScheme.surface;
+    final materialTint =
+        tint == null
+            ? null
+            : HSLColor.fromColor(tint!).withSaturation(0).toColor();
     final content = Stack(
       children: [
         Positioned.fill(
@@ -89,13 +93,13 @@ class AppleGlassSurface extends StatelessWidget {
             parameters: {
               'kind': 'surface',
               if (capsule) 'capsule': true,
-              if (tint != null) 'tint': tint!.toARGB32(),
+              if (materialTint != null) 'tint': materialTint.toARGB32(),
               'dark': Theme.of(context).brightness == Brightness.dark,
             },
             onAction: (_, _) {},
             attachmentFallback: ColoredBox(
               color: Color.alphaBlend(
-                tint ?? Colors.transparent,
+                materialTint ?? Colors.transparent,
                 surface,
               ).withValues(alpha: .86),
             ),
