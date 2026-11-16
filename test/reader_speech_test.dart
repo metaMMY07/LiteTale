@@ -9,6 +9,7 @@ import 'package:flutter_edge_tts/flutter_edge_tts.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
 import 'package:wild/pages/novel/line_height_cubit.dart';
@@ -26,10 +27,12 @@ import 'package:wild/sources/source_api.dart' as sources;
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/theme/ios_glass_theme.dart';
+import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/reader_controls.dart';
 import 'package:wild/widgets/reader_listening_voice_panel.dart';
 import 'package:wild/widgets/reader_speech_scope.dart';
+import 'package:wild/widgets/wavy_slider_track_shape.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -246,20 +249,21 @@ void main() {
   );
 
   testWidgets(
-    'listening controls fill thirty percent and use the platform palette',
+    'listening controls reserve their viewport and use the platform scrubber',
     (tester) async {
       tester.view.physicalSize = const Size(402, 874);
       tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
+      tester.view.padding = const FakeViewPadding(top: 47, bottom: 34);
+      addTearDown(tester.view.reset);
       final engine = _SpeechEngine();
       addTearDown(engine.close);
       final ios = usesAppleGlass;
       final theme =
           ios
               ? iosGlassTheme(Brightness.dark, accent: Colors.redAccent)
-              : ThemeData(
-                colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+              : materialYouTheme(
+                Brightness.light,
+                seedColor: Colors.deepPurple,
               );
       await tester.pumpWidget(
         MultiBlocProvider(
@@ -274,6 +278,7 @@ void main() {
             theme: theme,
             home: ReaderListeningPage(
               speechEngine: engine,
+              progress: ReadingProgressQueue(write: (_) async {}),
               request: const ReaderListeningRequest(
                 chapter: _chapter,
                 volumes: [],
@@ -286,13 +291,46 @@ void main() {
       );
       await tester.pumpAndSettle();
       final controls = find.byKey(const ValueKey('reader-listening-controls'));
-      expect(tester.getSize(controls).height, greaterThanOrEqualTo(874 * .30));
+      final panel = tester.getRect(controls);
+      final body = tester.getRect(find.byType(ScrollablePositionedList));
+      expect(panel.height, greaterThanOrEqualTo(874 * .30));
+      expect(body.bottom, closeTo(panel.top, .01));
+      expect(panel.bottom, lessThanOrEqualTo(874 - 34));
       final palette = Theme.of(tester.element(controls)).colorScheme;
       expect(
         palette.primary,
         ios ? palette.onSurface : theme.colorScheme.primary,
       );
       expect(find.byType(AppleGlassSurface), findsNothing);
+      if (ios) {
+        final slider = tester.widget<AppleGlassSlider>(
+          find.byType(AppleGlassSlider),
+        );
+        expect(slider.activeColor, palette.onSurface);
+      } else {
+        final slider = find.byType(Slider);
+        expect(
+          SliderTheme.of(tester.element(slider)).trackShape,
+          isA<WavySliderTrackShape>(),
+        );
+        final play = tester.widget<FilledButton>(
+          find.ancestor(
+            of: find.text('播放'),
+            matching: find.byWidgetPredicate(
+              (widget) => widget is FilledButton,
+            ),
+          ),
+        );
+        expect(play.style!.shape!.resolve({}), isA<StadiumBorder>());
+        await tester.tap(find.byTooltip('下一段'));
+        await tester.pumpAndSettle();
+        expect(find.text('第 2/2段'), findsOneWidget);
+        final track = tester.getRect(slider);
+        await tester.tapAt(Offset(track.left + 24, track.center.dy));
+        await tester.pumpAndSettle();
+        expect(find.text('第 1/2段'), findsOneWidget);
+        expect(engine.calls, isEmpty);
+      }
     },
     variant: const TargetPlatformVariant({
       TargetPlatform.android,

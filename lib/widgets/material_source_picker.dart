@@ -32,12 +32,14 @@ class MaterialSourcePicker extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return Material(
-      color: materialSurface(colors, colors.surfaceContainerHighest, .12),
-      borderRadius: BorderRadius.circular(20),
+      color: colors.primaryContainer,
+      borderRadius: BorderRadius.circular(materialCardRadius),
       clipBehavior: Clip.antiAlias,
       child: ListTile(
         key: const ValueKey('source-picker-button'),
         minVerticalPadding: 12,
+        textColor: colors.onPrimaryContainer,
+        iconColor: colors.onPrimaryContainer,
         leading: const Icon(Icons.local_library_outlined),
         title: Text('当前书源', style: Theme.of(context).textTheme.labelMedium),
         subtitle: Text(

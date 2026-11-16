@@ -1,7 +1,8 @@
 import 'dart:math' as math;
-import 'dart:ui' show ImageFilter, lerpDouble;
+import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
+import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/fluid_navigation_glyph.dart';
 
 const _iconSlotTop = 10.0;
@@ -99,79 +100,75 @@ class _FluidNavigationBarState extends State<FluidNavigationBar>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final isLight = theme.brightness == Brightness.light;
-    final labelStyle = theme.textTheme.labelMedium;
-    return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: (isLight ? colors.surfaceContainerHigh : colors.surface)
-                .withValues(alpha: .72),
-            border: Border(
-              top: BorderSide(
-                color: colors.outline.withValues(alpha: isLight ? .28 : .34),
-              ),
+    return ColoredBox(
+      color: theme.scaffoldBackgroundColor,
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+        child: Align(
+          heightFactor: 1,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 680),
+            child: Material(
+              color:
+                  theme.navigationBarTheme.backgroundColor ??
+                  materialRaisedSurface(colors),
+              shape: const StadiumBorder(),
+              clipBehavior: Clip.antiAlias,
+              child: _navigationContent(context, theme),
             ),
-          ),
-          child: _navigationContent(
-            colors: colors,
-            isLight: isLight,
-            labelStyle: labelStyle,
           ),
         ),
       ),
     );
   }
 
-  Widget _navigationContent({
-    required ColorScheme colors,
-    required bool isLight,
-    required TextStyle? labelStyle,
-  }) {
-    final selectedInk = isLight ? colors.onPrimary : colors.onPrimaryContainer;
-    return SafeArea(
-      top: false,
-      child: SizedBox(
-        height: 78,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final count = widget.destinations.length;
-            if (count == 0) return const SizedBox.shrink();
-            final itemWidth = constraints.maxWidth / count;
-            return Stack(
-              children: [
-                Positioned.fill(
-                  child: RepaintBoundary(
-                    child: CustomPaint(
-                      painter: _FluidIndicatorPainter(
-                        animation: _indicator,
-                        plan: _plan,
-                        count: count,
-                        color:
-                            isLight ? colors.primary : colors.primaryContainer,
-                      ),
+  Widget _navigationContent(BuildContext context, ThemeData theme) {
+    final colors = theme.colorScheme;
+    final labelStyle = theme.textTheme.labelMedium;
+    final fontSize = MediaQuery.textScalerOf(
+      context,
+    ).scale(labelStyle?.fontSize ?? 12);
+    return SizedBox(
+      height: math.max(78, _iconSlotTop + _iconSlotHeight + fontSize * 1.4 + 4),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final count = widget.destinations.length;
+          if (count == 0) return const SizedBox.shrink();
+          final itemWidth = constraints.maxWidth / count;
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    painter: _FluidIndicatorPainter(
+                      animation: _indicator,
+                      plan: _plan,
+                      count: count,
+                      color:
+                          theme.navigationBarTheme.indicatorColor ??
+                          colors.secondaryContainer,
                     ),
                   ),
                 ),
-                Row(
-                  children: [
-                    for (var index = 0; index < count; index++)
-                      Expanded(
-                        child: _destination(
-                          index,
-                          itemWidth,
-                          colors,
-                          selectedInk,
-                          labelStyle,
-                        ),
+              ),
+              Row(
+                children: [
+                  for (var index = 0; index < count; index++)
+                    Expanded(
+                      child: _destination(
+                        index,
+                        itemWidth,
+                        colors,
+                        colors.onSecondaryContainer,
+                        labelStyle,
                       ),
-                  ],
-                ),
-              ],
-            );
-          },
-        ),
+                    ),
+                ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -195,7 +192,14 @@ class _FluidNavigationBarState extends State<FluidNavigationBar>
         color: Colors.transparent,
         child: InkWell(
           splashFactory: NoSplash.splashFactory,
-          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+          customBorder: const StadiumBorder(),
+          overlayColor: WidgetStateProperty.resolveWith(
+            (states) =>
+                states.contains(WidgetState.focused) ||
+                        states.contains(WidgetState.pressed)
+                    ? colors.onSurface.withValues(alpha: .10)
+                    : Colors.transparent,
+          ),
           onTap: () => widget.onDestinationSelected(index),
           child: Column(
             children: [
@@ -230,6 +234,8 @@ class _FluidNavigationBarState extends State<FluidNavigationBar>
               ),
               Text(
                 item.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: labelStyle?.copyWith(
                   color: selected ? colors.onSurface : idleInk,
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,

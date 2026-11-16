@@ -167,7 +167,7 @@ void main() {
   });
 
   for (final brightness in Brightness.values) {
-    androidTest('bottom bar retains glass and 78dp actions in $brightness', (
+    androidTest('tonal bottom bar keeps its 78dp actions in $brightness', (
       tester,
     ) async {
       var index = 0;
@@ -213,24 +213,21 @@ void main() {
       final bar = find.byType(FluidNavigationBar);
       expect(
         find.descendant(of: bar, matching: find.byType(BackdropFilter)),
-        findsOneWidget,
+        findsNothing,
       );
-      final surface = tester.widget<DecoratedBox>(
-        find
-            .descendant(
-              of: bar,
-              matching: find.byWidgetPredicate(
-                (widget) =>
-                    widget is DecoratedBox &&
-                    widget.decoration is BoxDecoration &&
-                    (widget.decoration as BoxDecoration).color != null,
-              ),
-            )
-            .first,
+      final surface = tester.widget<Material>(
+        find.descendant(
+          of: bar,
+          matching: find.byWidgetPredicate(
+            (widget) => widget is Material && widget.shape is StadiumBorder,
+          ),
+        ),
       );
-      final opacity = (surface.decoration as BoxDecoration).color!.a;
-      expect(opacity, greaterThan(0));
-      expect(opacity, lessThan(1));
+      expect(
+        surface.color,
+        materialRaisedSurface(materialYouTheme(brightness).colorScheme),
+      );
+      expect(surface.color!.a, 1);
       for (final label in ['发现', '书架', '历史', '我的']) {
         final action = find.ancestor(
           of: find.text(label),
@@ -282,7 +279,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('分类'));
+      await tester.tap(find.byTooltip('分类'));
       await tester.pumpAndSettle();
       final item = tester.getRect(
         find.byWidgetPredicate(

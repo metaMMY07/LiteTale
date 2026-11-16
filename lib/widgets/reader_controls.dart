@@ -4,6 +4,7 @@ import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/material_control_motion.dart';
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/reader_speech_scope.dart';
+import 'package:wild/widgets/wavy_slider_track_shape.dart';
 
 /// Moves the reader controls over the paper without resizing the viewport.
 class ReaderMenuMotion extends StatefulWidget {
@@ -278,6 +279,7 @@ class ReaderPageScrubber extends StatefulWidget {
     this.active = true,
     this.embedded = false,
     this.unit = '',
+    this.wavy = false,
   });
   final int index, count;
   final Object revision;
@@ -286,6 +288,7 @@ class ReaderPageScrubber extends StatefulWidget {
   final bool active;
   final bool embedded;
   final String unit;
+  final bool wavy;
   @override
   State<ReaderPageScrubber> createState() => _ReaderPageScrubberState();
 }
@@ -319,6 +322,36 @@ class _ReaderPageScrubberState extends State<ReaderPageScrubber> {
       0.0,
       last.toDouble(),
     );
+    Widget slider = AppSlider(
+      key: const ValueKey('reader-page-scrubber'),
+      min: 0,
+      max: last > 0 ? last.toDouble() : 1,
+      interactionRevision: _interactionRevision,
+      value: value,
+      onChangeCancel: () => setState(_resetDrag),
+      onChangeStart: (_) => _dragging = canScrub,
+      onChanged: canScrub ? (v) => setState(() => _draft = v) : null,
+      onChangeEnd: (v) {
+        final valid = widget.active && _dragging;
+        setState(_resetDrag);
+        if (valid) widget.onSeek(v.round().clamp(0, last));
+      },
+    );
+    if (widget.wavy) {
+      final colors = Theme.of(context).colorScheme;
+      slider = SliderTheme(
+        data: SliderTheme.of(context).copyWith(
+          // Flutter 3.29 still defaults to the older circular handle.
+          // ignore: deprecated_member_use
+          year2023: false,
+          activeTrackColor: colors.primary,
+          inactiveTrackColor: colors.secondaryContainer,
+          trackShape: const WavySliderTrackShape(),
+          trackHeight: 4,
+        ),
+        child: slider,
+      );
+    }
     final content = Padding(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
       child: Column(
@@ -326,22 +359,7 @@ class _ReaderPageScrubberState extends State<ReaderPageScrubber> {
         children: [
           Semantics(
             label: widget.unit == '段' ? '跳转段落' : '${widget.label}跳转书页',
-            child: AppSlider(
-              key: const ValueKey('reader-page-scrubber'),
-              useGlass: !widget.embedded,
-              min: 0,
-              max: last > 0 ? last.toDouble() : 1,
-              interactionRevision: _interactionRevision,
-              value: value,
-              onChangeCancel: () => setState(_resetDrag),
-              onChangeStart: (_) => _dragging = canScrub,
-              onChanged: canScrub ? (v) => setState(() => _draft = v) : null,
-              onChangeEnd: (v) {
-                final valid = widget.active && _dragging;
-                setState(_resetDrag);
-                if (valid) widget.onSeek(v.round().clamp(0, last));
-              },
-            ),
+            child: slider,
           ),
           Text(
             '${widget.label} ${value.round() + 1}/${widget.count.clamp(1, 1 << 30)}${widget.unit}',

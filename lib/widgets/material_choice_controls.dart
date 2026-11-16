@@ -36,45 +36,36 @@ class MaterialChoiceBar<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Material(
-      color: materialSurface(colors, colors.surfaceContainerHigh, .08),
-      borderRadius: BorderRadius.circular(24),
-      child: Padding(
-        padding: const EdgeInsets.all(4),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final minimumWidth =
-                64 * MediaQuery.textScalerOf(context).scale(14) / 14;
-            final scroll =
-                constraints.hasBoundedWidth &&
-                constraints.maxWidth <
-                    minimumWidth * segments.length + 4 * (segments.length - 1);
-            final expand = constraints.hasBoundedWidth && !scroll;
-            final row = Row(
-              mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
-              children: [
-                for (var i = 0; i < segments.length; i++) ...[
-                  if (i > 0) const SizedBox(width: 4),
-                  if (expand)
-                    Expanded(child: _choice(context, segments[i]))
-                  else
-                    ConstrainedBox(
-                      constraints: BoxConstraints(minWidth: minimumWidth),
-                      child: _choice(context, segments[i]),
-                    ),
-                ],
-              ],
-            );
-            return scroll
-                ? SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: row,
-                )
-                : row;
-          },
-        ),
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final minimumWidth =
+            64 * MediaQuery.textScalerOf(context).scale(14) / 14;
+        final scroll =
+            constraints.hasBoundedWidth &&
+            constraints.maxWidth <
+                minimumWidth * segments.length + 6 * (segments.length - 1);
+        final expand = constraints.hasBoundedWidth && !scroll;
+        final row = Row(
+          mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+          spacing: 6,
+          children: [
+            for (final segment in segments)
+              if (expand)
+                Expanded(child: _choice(context, segment))
+              else
+                ConstrainedBox(
+                  constraints: BoxConstraints(minWidth: minimumWidth),
+                  child: _choice(context, segment),
+                ),
+          ],
+        );
+        return scroll
+            ? SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: row,
+            )
+            : row;
+      },
     );
   }
 
@@ -90,16 +81,16 @@ class MaterialChoiceBar<T> extends StatelessWidget {
     final foreground =
         style?.foregroundColor?.resolve(states) ??
         (enabled
-            ? (isSelected
-                ? colors.onSecondaryContainer
-                : colors.onSurfaceVariant)
+            ? (isSelected ? colors.onPrimary : colors.onSurfaceVariant)
             : colors.onSurface.withValues(alpha: .38));
     final background =
         style?.backgroundColor?.resolve(states) ??
-        (isSelected ? colors.secondaryContainer : Colors.transparent);
-    final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(20),
-    );
+        (!enabled
+            ? colors.surfaceContainer
+            : isSelected
+            ? colors.primary
+            : materialRaisedSurface(colors));
+    final shape = style?.shape?.resolve(states) ?? const StadiumBorder();
     Widget content = Semantics(
       button: true,
       selected: isSelected,

@@ -54,6 +54,32 @@ void main() {
               : (background + 0.05) / (foreground + 0.05);
       expect(contrast, greaterThan(4.5));
     });
+    test('missing wallpaper container tones are supplied in $brightness', () {
+      final wallpaper =
+          brightness == Brightness.light
+              ? const ColorScheme.light(
+                primary: Colors.indigo,
+                secondary: Colors.teal,
+              )
+              : const ColorScheme.dark(
+                primary: Colors.indigoAccent,
+                secondary: Colors.tealAccent,
+              );
+      final theme = materialYouTheme(brightness, dynamicScheme: wallpaper);
+      final colors = theme.colorScheme;
+      expect(colors.primary, wallpaper.primary);
+      expect(colors.secondary, wallpaper.secondary);
+      expect(colors.surface, wallpaper.surface);
+      expect({
+        colors.surfaceContainerLowest,
+        colors.surfaceContainerLow,
+        colors.surfaceContainer,
+        colors.surfaceContainerHigh,
+        colors.surfaceContainerHighest,
+      }, hasLength(5));
+      expect(theme.scaffoldBackgroundColor, colors.surfaceContainerLow);
+      expect(theme.cardTheme.color, isNot(theme.scaffoldBackgroundColor));
+    });
   }
   for (final size in [const Size(320, 640), const Size(640, 360)]) {
     for (final brightness in Brightness.values) {

@@ -181,7 +181,7 @@ class _ReaderDraggableSheetState extends State<ReaderDraggableSheet> {
                               widget.snapToPages
                                   ? Theme.of(
                                     context,
-                                  ).colorScheme.surfaceContainerHigh
+                                  ).colorScheme.surfaceContainerLow
                                   : Colors.transparent,
                           child: SizedBox(
                             width: double.infinity,

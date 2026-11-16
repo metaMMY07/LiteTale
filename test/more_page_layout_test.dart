@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/pages/auth_cubit.dart';
 import 'package:wild/pages/home/more_page.dart';
 import 'package:wild/pages/update_cubit.dart';
+import 'package:wild/settings/settings_widgets.dart';
 import 'package:wild/theme/material_you.dart';
 
 void main() {
@@ -52,7 +53,7 @@ void main() {
 
       final navigationCard = find.byKey(const ValueKey('more-navigation-card'));
       expect(navigationCard, findsOneWidget);
-      expect(find.byType(Card), findsNWidgets(2));
+      expect(tester.widget(navigationCard), isA<SettingsTileGroup>());
       final expectedHorizontalPadding = size.width < 600 ? 20.0 : 32.0;
       final navigationRect = tester.getRect(navigationCard);
       expect(navigationRect.width, size.width - expectedHorizontalPadding * 2);

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
+import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/apple_reader_panel.dart';
 import 'package:wild/widgets/reader_draggable_sheet.dart';
@@ -284,8 +285,12 @@ class _ReaderChapterPanelState extends State<ReaderChapterPanel> {
                           color:
                               selected
                                   ? colors.secondaryContainer
+                                  : widget.fullScreen
+                                  ? materialRaisedSurface(colors)
                                   : Colors.transparent,
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(
+                            widget.fullScreen ? 16 : 12,
+                          ),
                           clipBehavior: Clip.antiAlias,
                           child: ListTile(
                             key: ValueKey('reader-chapter-$index'),

@@ -495,23 +495,20 @@ void main() {
     },
   );
 
-  test(
-    'Android 1.0.0 color roles are restored without replacing selected seed',
-    () {
-      final theme = materialYouTheme(Brightness.dark, seedColor: Colors.teal);
-      expect(theme.scaffoldBackgroundColor, theme.colorScheme.surface);
-      expect(theme.cardTheme.color, theme.colorScheme.surfaceContainerLow);
-      expect(
-        theme.searchBarTheme.backgroundColor?.resolve({}),
-        theme.colorScheme.surfaceContainerHighest,
-      );
-      expect(
-        theme.colorScheme,
-        ColorScheme.fromSeed(
-          seedColor: Colors.teal,
-          brightness: Brightness.dark,
-        ),
-      );
-    },
-  );
+  test('Android uses layered surfaces without replacing the selected seed', () {
+    final theme = materialYouTheme(Brightness.dark, seedColor: Colors.teal);
+    expect(
+      theme.scaffoldBackgroundColor,
+      theme.colorScheme.surfaceContainerLow,
+    );
+    expect(theme.cardTheme.color, theme.colorScheme.surfaceContainerHigh);
+    expect(
+      theme.searchBarTheme.backgroundColor?.resolve({}),
+      theme.colorScheme.secondaryContainer,
+    );
+    expect(
+      theme.colorScheme,
+      ColorScheme.fromSeed(seedColor: Colors.teal, brightness: Brightness.dark),
+    );
+  });
 }

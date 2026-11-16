@@ -393,7 +393,6 @@ class AppSlider extends StatelessWidget {
     this.interactionRevision,
     this.activeColor,
     this.inactiveColor,
-    this.useGlass = true,
   });
   final double value, min, max;
   final int? divisions;
@@ -402,10 +401,9 @@ class AppSlider extends StatelessWidget {
   final VoidCallback? onChangeCancel;
   final Object? interactionRevision;
   final Color? activeColor, inactiveColor;
-  final bool useGlass;
   @override
   Widget build(BuildContext context) =>
-      usesAppleGlass && useGlass
+      usesAppleGlass
           ? AppleGlassSlider(
             value: value.clamp(min, max),
             min: min,

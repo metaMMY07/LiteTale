@@ -173,6 +173,7 @@ class _ListeningVoicePanelState extends State<_ListeningVoicePanel> {
                 onTap: select,
               )
               : ListTile(
+                selected: selected,
                 leading: const Icon(Icons.graphic_eq),
                 title: Text(voice.name),
                 trailing: actions,

@@ -165,6 +165,7 @@ class _HistoryItem extends StatelessWidget {
 
     return AppleGlassCard(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      clipBehavior: usesMaterialYou ? Clip.antiAlias : Clip.none,
       child: InkWell(
         onTap: () async {
           BookDetailHint.remember(

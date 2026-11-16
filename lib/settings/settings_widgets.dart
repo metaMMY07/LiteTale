@@ -193,11 +193,13 @@ class SettingsTileGroup extends StatelessWidget {
         if (usesMaterialYou)
           ClipRRect(
             borderRadius: BorderRadius.vertical(
-              top: Radius.circular(i == 0 ? 24 : 6),
-              bottom: Radius.circular(i == children.length - 1 ? 24 : 6),
+              top: Radius.circular(i == 0 ? materialCardRadius : 6),
+              bottom: Radius.circular(
+                i == children.length - 1 ? materialCardRadius : 6,
+              ),
             ),
             child: Material(
-              color: Theme.of(context).colorScheme.surfaceContainerHigh,
+              color: materialRaisedSurface(Theme.of(context).colorScheme),
               child: children[i],
             ),
           )

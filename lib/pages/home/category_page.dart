@@ -198,6 +198,7 @@ class _CategoryPageState extends State<CategoryPage> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Column(
       children: [
         // Top bar with view mode and category selector
@@ -277,13 +278,7 @@ class _CategoryPageState extends State<CategoryPage> {
                               decoration: BoxDecoration(
                                 color:
                                     usesMaterialYou
-                                        ? materialSurface(
-                                          Theme.of(context).colorScheme,
-                                          Theme.of(
-                                            context,
-                                          ).colorScheme.surfaceContainerHigh,
-                                          .08,
-                                        )
+                                        ? colors.secondaryContainer
                                         : null,
                                 border:
                                     usesMaterialYou
@@ -292,7 +287,7 @@ class _CategoryPageState extends State<CategoryPage> {
                                           color: Theme.of(context).dividerColor,
                                         ),
                                 borderRadius: BorderRadius.circular(
-                                  usesMaterialYou ? 20 : 8,
+                                  usesMaterialYou ? 28 : 8,
                                 ),
                               ),
                               child: Row(
@@ -306,10 +301,10 @@ class _CategoryPageState extends State<CategoryPage> {
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                         color:
-                                            _selectedTag != null
-                                                ? Theme.of(
-                                                  context,
-                                                ).colorScheme.primary
+                                            usesMaterialYou
+                                                ? colors.onSecondaryContainer
+                                                : _selectedTag != null
+                                                ? colors.primary
                                                 : null,
                                         fontWeight:
                                             _selectedTag != null

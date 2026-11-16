@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:material_new_shapes/material_new_shapes.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
 import 'package:wild/services/read_request.dart';
@@ -15,6 +16,7 @@ import 'package:wild/settings/settings_widgets.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
+import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/apple_reader_panel.dart';
 import 'package:wild/widgets/platform_controls.dart';
@@ -59,10 +61,9 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
     vsync: this,
     duration: readerPanelSlideDuration,
   );
-  late final _slide = Tween(
-    begin: const Offset(0, 1),
-    end: Offset.zero,
-  ).chain(CurveTween(curve: readerPanelSlideCurve)).animate(_menu);
+  late final _menuReveal = _menu.drive(
+    CurveTween(curve: readerPanelSlideCurve),
+  );
   late final _online =
       widget.speechEngine == null ? OnlineReaderSpeech() : null;
   late final _speech = ReaderSpeechController(
@@ -435,13 +436,20 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
-                for (final entry in options.entries)
-                  ListTile(
-                    title: Text(entry.value),
-                    trailing:
-                        entry.key == selected ? const Icon(Icons.check) : null,
-                    onTap: () => Navigator.of(context).pop(entry.key),
-                  ),
+                SettingsTileGroup(
+                  children: [
+                    for (final entry in options.entries)
+                      ListTile(
+                        title: Text(entry.value),
+                        selected: entry.key == selected,
+                        trailing:
+                            entry.key == selected
+                                ? const Icon(Icons.check)
+                                : null,
+                        onTap: () => Navigator.of(context).pop(entry.key),
+                      ),
+                  ],
+                ),
               ],
             ],
           ),
@@ -551,10 +559,6 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
   }
 
   Widget _buildPage(BuildContext context) {
-    final menuHeight =
-        (MediaQuery.sizeOf(context).height * .30)
-            .clamp(180.0, 320.0)
-            .toDouble();
     final paper = context.watch<ThemeCubit>().state;
     final dark = switch (paper.themeMode) {
       ReaderThemeMode.dark => true,
@@ -577,56 +581,79 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
       },
       child: Scaffold(
         backgroundColor: background,
-        body: Stack(
-          children: [
-            Positioned.fill(child: _body(context, textStyle, menuHeight)),
-            if (_showMenu)
-              Positioned(
-                left: 16,
-                top: 0,
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child:
-                        usesAppleGlass
-                            ? SettingsCard(
-                              color: Theme.of(context).colorScheme.surface,
-                              margin: EdgeInsets.zero,
-                              child: AppIconButton(
-                                tooltip: '退出听书',
-                                onPressed: () => Navigator.of(context).pop(),
-                                icon: const Icon(CupertinoIcons.chevron_back),
-                              ),
-                            )
-                            : ReaderRoundAction(
-                              label: '退出听书',
-                              onPressed: () => Navigator.of(context).pop(),
-                              icon: Icons.arrow_back,
-                            ),
+        body: LayoutBuilder(
+          builder: (context, bounds) {
+            final height = bounds.maxHeight;
+            final menuHeight = (height * .30).clamp(180.0, 320.0);
+            return Stack(
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(child: _body(context, textStyle)),
+                    if (_showMenu)
+                      SizeTransition(
+                        sizeFactor: _menuReveal,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxHeight: height * .7),
+                          child: _controls(context, menuHeight),
+                        ),
+                      ),
+                  ],
+                ),
+                if (_showMenu)
+                  Positioned(
+                    left: 16,
+                    top: 0,
+                    child: SafeArea(
+                      bottom: false,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: _exitButton(context),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-            if (_showMenu)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: SlideTransition(
-                  position: _slide,
-                  child: _controls(context, menuHeight),
-                ),
-              ),
-          ],
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
-  Widget _body(BuildContext context, TextStyle style, double menuHeight) {
+  Widget _exitButton(BuildContext context) {
+    void exit() => Navigator.of(context).pop();
+    return usesAppleGlass
+        ? SettingsCard(
+          color: Theme.of(context).colorScheme.surface,
+          margin: EdgeInsets.zero,
+          child: AppIconButton(
+            tooltip: '退出听书',
+            onPressed: exit,
+            icon: const Icon(CupertinoIcons.chevron_back),
+          ),
+        )
+        : ReaderRoundAction(
+          label: '退出听书',
+          onPressed: exit,
+          icon: Icons.arrow_back,
+        );
+  }
+
+  Widget _body(BuildContext context, TextStyle style) {
     final paragraphs = _speech.paragraphs;
     final spacing = context.watch<ParagraphSpacingCubit>().state;
     final insets = MediaQuery.paddingOf(context);
+    final colors = Theme.of(context).colorScheme;
+    final highlight =
+        usesMaterialYou
+            ? colors.primaryContainer
+            : style.color!.withValues(alpha: .09);
+    final playingStyle =
+        usesMaterialYou
+            ? style.copyWith(color: colors.onPrimaryContainer)
+            : style;
+    final corners = BorderRadius.circular(usesMaterialYou ? 18 : 10);
     return ScrollablePositionedList.builder(
       key: ValueKey((_chapter.aid, _chapter.cid)),
       itemScrollController: _list,
@@ -636,7 +663,7 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
         18,
         insets.top + 64,
         18,
-        insets.bottom + menuHeight + 28,
+        (_showMenu ? 0 : insets.bottom) + 24,
       ),
       itemCount: paragraphs.length + 1,
       itemBuilder: (context, index) {
@@ -650,13 +677,10 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
                   button: true,
                   selected: selected == index,
                   child: Material(
-                    color:
-                        selected == index
-                            ? style.color!.withValues(alpha: .09)
-                            : Colors.transparent,
-                    borderRadius: BorderRadius.circular(10),
+                    color: selected == index ? highlight : Colors.transparent,
+                    borderRadius: corners,
                     child: InkWell(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: corners,
                       onTap:
                           _loading || !_showMenu || !_valid
                               ? null
@@ -666,7 +690,10 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
                           horizontal: 6,
                           vertical: 3,
                         ),
-                        child: Text(paragraphs[index].text, style: style),
+                        child: Text(
+                          paragraphs[index].text,
+                          style: selected == index ? playingStyle : style,
+                        ),
                       ),
                     ),
                   ),
@@ -711,16 +738,61 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
   }
 
   Widget _controls(BuildContext context, double menuHeight) {
-    final content = Container(
+    final colors = Theme.of(context).colorScheme;
+    final content = LayoutBuilder(
+      builder:
+          (_, bounds) => SingleChildScrollView(
+            primary: false,
+            child: _playerContent(menuHeight.clamp(0.0, bounds.maxHeight)),
+          ),
+    );
+    if (usesAppleGlass) {
+      return SafeArea(
+        top: false,
+        child: SettingsCard(
+          color: colors.surface,
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: content,
+        ),
+      );
+    }
+    return SafeArea(
+      top: false,
+      minimum: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: Material(
+        color: colors.surfaceContainer,
+        borderRadius: BorderRadius.circular(materialPanelRadius),
+        clipBehavior: Clip.antiAlias,
+        child: content,
+      ),
+    );
+  }
+
+  Widget _playerContent(double menuHeight) {
+    return Container(
       key: const ValueKey('reader-listening-controls'),
       constraints: BoxConstraints(minHeight: menuHeight),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: EdgeInsets.symmetric(
+        horizontal: usesMaterialYou ? 16 : 12,
+        vertical: 12,
+      ),
       child: ListenableBuilder(
         listenable: _speech,
         builder: (context, _) {
           final available = _valid && _foreground && _speech.ready && !_loading;
           final index = _speech.paragraphIndex;
           final retryChapter = _retryChapter;
+          final previous =
+              available && index > 0
+                  ? () => _selectParagraph(index - 1, play: _speech.playing)
+                  : null;
+          final next =
+              available && index + 1 < _speech.segmentCount
+                  ? () => _selectParagraph(index + 1, play: _speech.playing)
+                  : null;
+          final play = available ? _togglePlayback : null;
+          final playbackLabel = _speech.playing ? '暂停' : '播放';
+          final sleepLabel = _sleepChoice == 0 ? '定时停止' : '定时已设置';
           return Column(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -728,6 +800,7 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
               if (_speech.ready)
                 ReaderPageScrubber(
                   embedded: true,
+                  wavy: usesMaterialYou,
                   unit: '段',
                   label: '第',
                   index: index,
@@ -760,52 +833,55 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
                     ),
                   ],
                 ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  Flexible(
-                    child: AppButton.text(
-                      onPressed: () => _rate(context),
-                      child: Text('${_rateLabel(_speech.rate)}×'),
+              if (usesMaterialYou) ...[
+                const SizedBox(height: 4),
+                _materialPlayback(context, previous, play, next, playbackLabel),
+                const SizedBox(height: 10),
+                _materialOptions(context, sleepLabel),
+                const SizedBox(height: 4),
+              ] else
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    Flexible(
+                      child: AppButton.text(
+                        onPressed: () => _rate(context),
+                        child: Text('${_rateLabel(_speech.rate)}×'),
+                      ),
                     ),
-                  ),
-                  _icon(
-                    '上一段',
-                    CupertinoIcons.backward_end_fill,
-                    Icons.skip_previous,
-                    available && index > 0
-                        ? () =>
-                            _selectParagraph(index - 1, play: _speech.playing)
-                        : null,
-                  ),
-                  _icon(
-                    _speech.playing ? '暂停' : '播放',
-                    _speech.playing
-                        ? CupertinoIcons.pause_fill
-                        : CupertinoIcons.play_fill,
-                    _speech.playing ? Icons.pause : Icons.play_arrow,
-                    available ? _togglePlayback : null,
-                    size: 38,
-                  ),
-                  _icon(
-                    '下一段',
-                    CupertinoIcons.forward_end_fill,
-                    Icons.skip_next,
-                    available && index + 1 < _speech.segmentCount
-                        ? () =>
-                            _selectParagraph(index + 1, play: _speech.playing)
-                        : null,
-                  ),
-                  _icon(
-                    _sleepChoice == 0 ? '定时停止' : '定时已设置',
-                    _sleepChoice == 0
-                        ? CupertinoIcons.moon
-                        : CupertinoIcons.moon_fill,
-                    _sleepChoice == 0 ? Icons.bedtime_outlined : Icons.bedtime,
-                    () => _sleep(context),
-                  ),
-                ],
-              ),
+                    _icon(
+                      '上一段',
+                      CupertinoIcons.backward_end_fill,
+                      Icons.skip_previous,
+                      previous,
+                    ),
+                    _icon(
+                      playbackLabel,
+                      _speech.playing
+                          ? CupertinoIcons.pause_fill
+                          : CupertinoIcons.play_fill,
+                      _speech.playing ? Icons.pause : Icons.play_arrow,
+                      play,
+                      size: 38,
+                    ),
+                    _icon(
+                      '下一段',
+                      CupertinoIcons.forward_end_fill,
+                      Icons.skip_next,
+                      next,
+                    ),
+                    _icon(
+                      sleepLabel,
+                      _sleepChoice == 0
+                          ? CupertinoIcons.moon
+                          : CupertinoIcons.moon_fill,
+                      _sleepChoice == 0
+                          ? Icons.bedtime_outlined
+                          : Icons.bedtime,
+                      () => _sleep(context),
+                    ),
+                  ],
+                ),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
@@ -837,23 +913,119 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
         },
       ),
     );
-    final colors = Theme.of(context).colorScheme;
-    if (usesAppleGlass) {
-      return SafeArea(
-        top: false,
-        child: SettingsCard(
-          color: colors.surface,
-          margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: content,
+  }
+
+  Widget _materialPlayback(
+    BuildContext context,
+    VoidCallback? previous,
+    VoidCallback? play,
+    VoidCallback? next,
+    String playbackLabel,
+  ) {
+    final theme = Theme.of(context);
+    final skipStyle = IconButton.styleFrom(
+      shape: const _ParagraphSkipBorder(),
+      fixedSize: const Size.square(60),
+      padding: EdgeInsets.zero,
+      backgroundColor: theme.colorScheme.secondaryContainer,
+      foregroundColor: theme.colorScheme.onSecondaryContainer,
+    );
+    return Row(
+      spacing: 8,
+      children: [
+        IconButton.filledTonal(
+          tooltip: '上一段',
+          style: skipStyle,
+          onPressed: previous,
+          icon: const Icon(Icons.skip_previous_rounded),
         ),
-      );
-    }
-    return Material(
-      color: colors.surfaceContainerHigh,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      child: SafeArea(top: false, child: content),
+        Expanded(
+          child: Tooltip(
+            message: playbackLabel,
+            excludeFromSemantics: true,
+            child: FilledButton.icon(
+              onPressed: play,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(0, 64),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                shape: const StadiumBorder(),
+                textStyle: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              icon: Icon(
+                _speech.playing
+                    ? Icons.pause_rounded
+                    : Icons.play_arrow_rounded,
+              ),
+              label: Text(
+                playbackLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        ),
+        IconButton.filledTonal(
+          tooltip: '下一段',
+          style: skipStyle,
+          onPressed: next,
+          icon: const Icon(Icons.skip_next_rounded),
+        ),
+      ],
+    );
+  }
+
+  Widget _materialOptions(BuildContext context, String sleepLabel) {
+    final colors = Theme.of(context).colorScheme;
+    final optionStyle = FilledButton.styleFrom(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      minimumSize: const Size(0, 48),
+      backgroundColor: colors.surfaceContainerHighest,
+      foregroundColor: colors.onSurface,
+    );
+    return Row(
+      spacing: 8,
+      children: [
+        Expanded(
+          child: Tooltip(
+            message: '播放倍速',
+            child: FilledButton.tonalIcon(
+              onPressed: () => _rate(context),
+              style: optionStyle,
+              icon: const Icon(Icons.speed_rounded),
+              label: Text('${_rateLabel(_speech.rate)}×'),
+            ),
+          ),
+        ),
+        Expanded(
+          child: FilledButton.tonalIcon(
+            onPressed: () => _sleep(context),
+            style:
+                _sleepChoice == 0
+                    ? optionStyle
+                    : optionStyle.copyWith(
+                      backgroundColor: WidgetStatePropertyAll(
+                        colors.tertiaryContainer,
+                      ),
+                      foregroundColor: WidgetStatePropertyAll(
+                        colors.onTertiaryContainer,
+                      ),
+                    ),
+            icon: Icon(
+              _sleepChoice == 0 ? Icons.bedtime_outlined : Icons.bedtime,
+            ),
+            label: Text(
+              sleepLabel,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -863,13 +1035,61 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
     IconData android,
     VoidCallback? onPressed, {
     double size = 24,
-  }) => AppIconButton(
-    tooltip: label,
-    onPressed: onPressed,
-    color:
-        usesAppleGlass && onPressed == null
-            ? Theme.of(context).colorScheme.onSurfaceVariant
-            : null,
-    icon: Icon(usesAppleGlass ? ios : android, size: size),
-  );
+  }) {
+    if (usesMaterialYou) {
+      return IconButton.filledTonal(
+        tooltip: label,
+        onPressed: onPressed,
+        style: IconButton.styleFrom(minimumSize: const Size(56, 44)),
+        icon: Icon(android, size: size),
+      );
+    }
+    return AppIconButton(
+      tooltip: label,
+      onPressed: onPressed,
+      color:
+          usesAppleGlass && onPressed == null
+              ? Theme.of(context).colorScheme.onSurfaceVariant
+              : null,
+      icon: Icon(usesAppleGlass ? ios : android, size: size),
+    );
+  }
+}
+
+class _ParagraphSkipBorder extends OutlinedBorder {
+  const _ParagraphSkipBorder({super.side});
+
+  static final _path = MaterialShapes.cookie9Sided.normalized().toPath();
+
+  @override
+  _ParagraphSkipBorder copyWith({BorderSide? side}) =>
+      _ParagraphSkipBorder(side: side ?? this.side);
+
+  @override
+  _ParagraphSkipBorder scale(double t) => copyWith(side: side.scale(t));
+
+  @override
+  Path getOuterPath(Rect rect, {TextDirection? textDirection}) {
+    final size = rect.shortestSide;
+    final transform = Matrix4.diagonal3Values(size, size, 1)..setTranslationRaw(
+      rect.center.dx - size / 2,
+      rect.center.dy - size / 2,
+      0,
+    );
+    return _path.transform(transform.storage);
+  }
+
+  @override
+  Path getInnerPath(Rect rect, {TextDirection? textDirection}) =>
+      getOuterPath(rect.deflate(side.width), textDirection: textDirection);
+
+  @override
+  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
+    if (side.style == BorderStyle.solid) {
+      canvas.drawPath(
+        getOuterPath(rect.deflate(side.width / 2)),
+        side.toPaint(),
+      );
+    }
+  }
 }

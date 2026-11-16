@@ -18,6 +18,7 @@ import 'package:wild/pages/novel/theme_cubit.dart';
 import 'package:wild/pages/novel/top_bar_height_cubit.dart';
 import 'package:wild/settings/settings_widgets.dart'
     show settingsAction, chooseSetting;
+import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/apple_reader_panel.dart';
@@ -408,9 +409,7 @@ class ReaderSettingsPanel extends StatelessWidget {
                         icon: Icons.volume_up_outlined,
                         title: '音量键翻页',
                         description:
-                            volume.isSupported
-                                ? '上键上一页，下键下一页'
-                                : '仅支持 Android',
+                            volume.isSupported ? '上键上一页，下键下一页' : '仅支持 Android',
                         trailing: AppSwitch(
                           key: const ValueKey('reader-volume-turn-setting'),
                           value: volume.state,
@@ -629,8 +628,12 @@ class ReaderSettingGroup extends StatelessWidget {
       color:
           usesAppleGlass
               ? IosSystemColors.color('surface', Theme.of(context).brightness)
+              : usesMaterialYou
+              ? materialRaisedSurface(Theme.of(context).colorScheme)
               : Theme.of(context).colorScheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(usesAppleGlass ? 28 : 24),
+      borderRadius: BorderRadius.circular(
+        usesAppleGlass || usesMaterialYou ? materialCardRadius : 24,
+      ),
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -177,12 +177,10 @@ class _SourceChoices extends StatelessWidget {
                               color:
                                   active
                                       ? colors.secondaryContainer
-                                      : materialSurface(
-                                        colors,
-                                        colors.surfaceContainerHigh,
-                                        .08,
-                                      ),
-                              borderRadius: BorderRadius.circular(20),
+                                      : materialRaisedSurface(colors),
+                              borderRadius: BorderRadius.circular(
+                                materialCardRadius,
+                              ),
                               clipBehavior: Clip.antiAlias,
                               child: tile,
                             ),

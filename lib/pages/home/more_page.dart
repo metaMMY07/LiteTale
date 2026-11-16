@@ -341,7 +341,7 @@ class MorePage extends StatelessWidget {
         phoneInset: 20,
         tabletInset: 32,
         topInset: 12,
-        // The home Scaffold extends beneath its glass navigation bar. Reserve
+        // The home Scaffold extends beneath its navigation bar. Reserve
         // its inherited inset so the final operation can scroll above the bar.
         bottomInset:
             12 +
@@ -355,7 +355,7 @@ class MorePage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  AppleGlassCard.filled(
+                  Card.filled(
                     margin: EdgeInsets.zero,
                     color: colors.primaryContainer,
                     child: Padding(
@@ -382,22 +382,14 @@ class MorePage extends StatelessWidget {
                                   ),
                                 ),
                           ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '收藏喜欢的故事，按自己的节奏阅读。',
-                            style: TextStyle(color: colors.onPrimaryContainer),
-                          ),
                         ],
                       ),
                     ),
                   ),
                   const SizedBox(height: 24),
-                  AppleGlassCard.filled(
+                  SettingsTileGroup(
                     key: const ValueKey('more-navigation-card'),
-                    margin: EdgeInsets.zero,
-                    clipBehavior: Clip.antiAlias,
-                    color: usesMaterialYou ? colors.surfaceContainerLow : null,
-                    child: SettingsTileGroup(children: entries),
+                    children: entries,
                   ),
                 ],
               ),

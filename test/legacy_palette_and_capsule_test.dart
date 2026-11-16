@@ -70,7 +70,7 @@ void main() {
   );
 
   testWidgets(
-    'Android renders the actual 1.0.0 navigation colors in both appearances',
+    'Android paints the tonal navigation indicator in both appearances',
     (tester) async {
       for (final brightness in Brightness.values) {
         final theme = materialYouTheme(
@@ -137,12 +137,9 @@ void main() {
               data.getUint8(offset + 2);
           image.dispose();
         });
-        final expected =
-            brightness == Brightness.light
-                ? theme.colorScheme.primary
-                : theme.colorScheme.primaryContainer;
+        final expected = theme.colorScheme.secondaryContainer;
         expect(argb, expected.toARGB32());
-        expect(find.byType(BackdropFilter), findsOneWidget);
+        expect(find.byType(BackdropFilter), findsNothing);
       }
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),
@@ -166,7 +163,10 @@ void main() {
       ).copyWith(primary: const Color(0xFFCC8844));
       final theme = materialYouTheme(Brightness.dark, dynamicScheme: dynamic);
       expect(theme.colorScheme, same(dynamic));
-      expect(materialSurface(dynamic, dynamic.surface, .08), dynamic.surface);
+      expect(
+        theme.navigationBarTheme.indicatorColor,
+        dynamic.secondaryContainer,
+      );
       await cubit.close();
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),

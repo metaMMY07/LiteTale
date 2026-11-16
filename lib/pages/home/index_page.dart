@@ -103,14 +103,14 @@ class _IndexPageState extends State<IndexPage>
       indicator:
           usesMaterialYou
               ? BoxDecoration(
-                color: colors.secondaryContainer,
+                color: colors.primary,
                 borderRadius: BorderRadius.circular(24),
               )
               : null,
       indicatorSize: usesMaterialYou ? TabBarIndicatorSize.tab : null,
       indicatorPadding:
           usesMaterialYou ? const EdgeInsets.all(4) : EdgeInsets.zero,
-      labelColor: usesMaterialYou ? colors.onSecondaryContainer : null,
+      labelColor: usesMaterialYou ? colors.onPrimary : null,
       unselectedLabelColor: usesMaterialYou ? colors.onSurfaceVariant : null,
       labelStyle:
           usesMaterialYou
@@ -130,8 +130,8 @@ class _IndexPageState extends State<IndexPage>
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
       child: Material(
-        color: materialSurface(colors, colors.surfaceContainerHigh, .08),
-        borderRadius: BorderRadius.circular(28),
+        color: materialRaisedSurface(colors),
+        shape: const StadiumBorder(),
         clipBehavior: Clip.antiAlias,
         child: tabs,
       ),
@@ -201,7 +201,7 @@ class _IndexPageState extends State<IndexPage>
                 title: Text(usesMaterialYou ? '发现' : '轻小说文库'),
                 actions: [
                   if (usesMaterialYou)
-                    AppIconButton(
+                    IconButton.filledTonal(
                       key: _themeButtonKey,
                       icon: Icon(
                         Theme.of(context).brightness == Brightness.dark
@@ -259,9 +259,6 @@ class _IndexPageState extends State<IndexPage>
                                           ? '按目录查找书名'
                                           : '搜索书名、作者',
                                   leading: const Icon(Icons.search_rounded),
-                                  trailing: const [
-                                    Icon(Icons.auto_stories_rounded),
-                                  ],
                                   elevation: const WidgetStatePropertyAll(0),
                                 ),
                               ),
