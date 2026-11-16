@@ -1,33 +1,36 @@
-import 'package:wild/widgets/platform_controls.dart';
-import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/cubits/reader_curl_cubit.dart';
+import 'package:wild/settings/settings_widgets.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart' show usesAppleGlass;
+import 'package:wild/widgets/platform_controls.dart';
 
 class ReaderCurlSetting extends StatelessWidget {
-  const ReaderCurlSetting({super.key});
+  const ReaderCurlSetting({super.key, required this.enabled});
+
+  final bool enabled;
 
   @override
-  Widget build(BuildContext context) =>
-      usesAppleGlass
-          ? const SizedBox.shrink()
-          : BlocBuilder<ReaderCurlCubit, bool>(
-            builder:
-                (context, enabled) => AppSwitchListTile(
-                  title: const Text('仿书翻页'),
-                  subtitle: const Text('在线书源可跟随手指翻动书页；本地 EPUB 使用普通翻页'),
-                  value: enabled,
-                  onChanged: (value) async {
-                    try {
-                      await context.read<ReaderCurlCubit>().setEnabled(value);
-                    } catch (_) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('翻页设置已切换，但未能保存，请重试')),
-                        );
-                      }
-                    }
-                  },
-                ),
-          );
+  Widget build(BuildContext context) {
+    final settings = context.watch<ReaderCurlCubit>();
+    final selected = settings.state.forPlatform(isIos: usesAppleGlass);
+    final choices = ReaderPageEffect.available(isIos: usesAppleGlass);
+    return AppButton.text(
+      onPressed:
+          enabled
+              ? () async {
+                final effect = await chooseSetting(context, '翻页效果', {
+                  for (final effect in choices) effect: effect.label,
+                }, selected);
+                if (effect != null && context.mounted) {
+                  await settingsAction(
+                    context,
+                    () => settings.setEffect(effect),
+                  );
+                }
+              }
+              : null,
+      child: Text(selected.label),
+    );
+  }
 }

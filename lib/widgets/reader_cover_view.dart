@@ -1,15 +1,18 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart';
+import 'package:wild/cubits/reader_curl_cubit.dart';
+import 'package:wild/widgets/reader_paper_turn.dart';
 import 'package:wild/widgets/reader_raster_readiness.dart';
 
-/// Two opaque sheets travel together, matching the supplied reading video.
-/// The historical cover-view API stays compatible with tap/volume controls.
-/// A completed turn alone commits progress; dragging can take over a settle.
+/// Retains adjacent pages for taps, drags, and hardware page turns.
+/// A completed turn commits progress, and dragging can take over a settle.
 class ReaderCoverController {
   ReaderCoverViewState? _view;
   bool get isTurning => _view?._busy ?? false;
-  Future<void> turn(int direction) async => _view?.turn(direction);
+  Future<void> turn(int direction, {double? startY}) async =>
+      _view?.turn(direction, startY: startY);
   void dispose() {
     _view = null;
   }
@@ -29,6 +32,8 @@ class ReaderCoverView extends StatefulWidget {
     this.active = true,
     this.leafCount,
     this.isSpread = false,
+    this.effect = ReaderPageEffect.slide,
+    this.paperColor,
   });
   final ReaderCoverController controller;
   final int index, pageCount;
@@ -40,19 +45,21 @@ class ReaderCoverView extends StatefulWidget {
   final bool active;
   final int? leafCount;
   final bool isSpread;
+  final ReaderPageEffect effect;
+  final Color? paperColor;
   @override
   State<ReaderCoverView> createState() => ReaderCoverViewState();
 }
 
 class ReaderCoverViewState extends State<ReaderCoverView>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-  static const _turnDuration = Duration(milliseconds: 360);
   late final _progress = AnimationController(vsync: this);
   final _papers = <int, Widget>{};
   int _index = 0, _direction = 0, _generation = 0;
-  int? _queued;
+  ({int direction, double? startY})? _queued;
   final _reportedIndices = <int>{};
   double _width = 1, _drag = 0;
+  double _height = 1, _touchY = .5;
   bool _settling = false, _dragging = false;
   bool get _busy => _settling || _dragging || _direction != 0;
   bool get _active =>
@@ -77,6 +84,7 @@ class ReaderCoverViewState extends State<ReaderCoverView>
       widget.controller._view = this;
     }
     if (widget.revision != oldWidget.revision ||
+        widget.effect != oldWidget.effect ||
         (widget.index != oldWidget.index &&
             widget.index != _index &&
             !_reportedIndices.remove(widget.index)) ||
@@ -124,10 +132,10 @@ class ReaderCoverViewState extends State<ReaderCoverView>
     super.dispose();
   }
 
-  Future<void> turn(int direction) async {
+  Future<void> turn(int direction, {double? startY}) async {
     if (!_active || direction.abs() != 1) return;
     if (_busy) {
-      _queued = direction;
+      _queued = (direction: direction, startY: startY);
       return;
     }
     final target = _index + direction;
@@ -136,6 +144,7 @@ class ReaderCoverViewState extends State<ReaderCoverView>
       return;
     }
     setState(() {
+      _touchY = startY == null ? .5 : (startY / _height).clamp(0.0, 1.0);
       _direction = direction;
       _progress.value = 0;
     });
@@ -148,7 +157,8 @@ class ReaderCoverViewState extends State<ReaderCoverView>
     final generation = ++_generation;
     final direction = _direction;
     final reduce = MediaQuery.disableAnimationsOf(context);
-    if (!reduce) {
+    final milliseconds = widget.effect.milliseconds;
+    if (!reduce && milliseconds > 0) {
       try {
         if (velocity != null) {
           // The same spring/tolerance as Flutter's page scrolling, with the
@@ -179,9 +189,10 @@ class ReaderCoverViewState extends State<ReaderCoverView>
               .animateTo(
                 commit ? 1 : 0,
                 duration: Duration(
-                  milliseconds: (_turnDuration.inMilliseconds * distance)
-                      .round()
-                      .clamp(90, _turnDuration.inMilliseconds),
+                  milliseconds: (milliseconds * distance).round().clamp(
+                    90,
+                    milliseconds,
+                  ),
                 ),
                 curve: Curves.easeInOutCubic,
               )
@@ -207,7 +218,9 @@ class ReaderCoverViewState extends State<ReaderCoverView>
     if (commit) _reportPage(_index);
     if (queued != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) unawaited(turn(queued));
+        if (mounted) {
+          unawaited(turn(queued.direction, startY: queued.startY));
+        }
       });
     }
   }
@@ -245,6 +258,12 @@ class ReaderCoverViewState extends State<ReaderCoverView>
     }
   }
 
+  void _cancelDrag() {
+    if (!_dragging) return;
+    _dragging = false;
+    if (!_settling) unawaited(_settle(false, velocity: 0));
+  }
+
   Widget _paper(int index) => _papers.putIfAbsent(
     index,
     () => RepaintBoundary(
@@ -262,7 +281,12 @@ class ReaderCoverViewState extends State<ReaderCoverView>
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       _width = constraints.maxWidth;
+      _height = constraints.maxHeight;
       final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+      final effect =
+          MediaQuery.disableAnimationsOf(context)
+              ? ReaderPageEffect.none
+              : widget.effect;
       _papers.removeWhere(
         (index, _) => (index - _index).abs() > 1 || index >= widget.pageCount,
       );
@@ -272,104 +296,196 @@ class ReaderCoverViewState extends State<ReaderCoverView>
         if (_index + 1 < widget.pageCount) _index + 1,
       ];
       final children = {for (final i in indices) i: _paper(i)};
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        dragStartBehavior: DragStartBehavior.down,
-        onHorizontalDragStart:
-            !_active
-                ? null
-                : (_) {
-                  if (!_active) return;
-                  if (_settling) {
-                    _generation++;
-                    _progress.stop();
-                    _settling = false;
-                    _queued = null;
-                  }
-                  _dragging = true;
-                  _drag = -_direction * _progress.value * _width;
-                },
-        onHorizontalDragUpdate:
-            !_active
-                ? null
-                : (details) {
-                  if (!_active || _settling || !_dragging) return;
-                  _updateDrag(details.delta.dx);
-                },
-        onHorizontalDragCancel: () {
-          if (!_dragging) return;
-          _dragging = false;
-          if (!_settling) unawaited(_settle(false, velocity: 0));
-        },
-        onHorizontalDragEnd:
-            !_active
-                ? null
-                : (details) {
-                  if (!_active || _settling || !_dragging) return;
-                  _dragging = false;
-                  if (_direction == 0) {
-                    if (_drag.abs() > 36) {
-                      widget.onBoundaryTurn?.call(_drag < 0 ? 1 : -1);
+      return Listener(
+        // Flutter can report an already accepted drag's pointer cancellation
+        // through onDragEnd. Cancel before that callback can commit a page.
+        onPointerCancel: (_) => _cancelDrag(),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          dragStartBehavior: DragStartBehavior.down,
+          onHorizontalDragStart:
+              !_active
+                  ? null
+                  : (details) {
+                    if (!_active) return;
+                    if (_settling) {
+                      _generation++;
+                      _progress.stop();
+                      _settling = false;
+                      _queued = null;
                     }
-                    return;
-                  }
-                  final velocity = details.primaryVelocity ?? 0;
-                  final forward = velocity * -_direction;
-                  unawaited(
-                    _settle(
-                      forward > 350 ||
-                          (forward >= -350 && _progress.value > .22),
-                      velocity: forward / _width,
-                    ),
-                  );
-                },
-        child: ClipRect(
-          child: AnimatedBuilder(
-            animation: _progress,
-            builder: (context, _) {
-              final target = _index + _direction;
-              // Both sheets share the same physical-pixel displacement. A
-              // fractional raster edge can otherwise expose a hairline even
-              // without a painted divider or the old cover shadow.
-              final distance =
-                  (_progress.value * _width * pixelRatio).round() / pixelRatio;
-              final offset = -_direction * distance;
-              return Stack(
-                fit: StackFit.expand,
-                children: [
-                  for (final i in indices)
-                    Positioned.fill(
-                      key: ValueKey('cover-sheet-$i'),
-                      child: Offstage(
-                        offstage:
-                            _direction == 0
-                                ? i != _index
-                                : i != _index && i != target,
-                        child: IgnorePointer(
-                          ignoring: _busy || i != _index,
-                          child: Transform.translate(
-                            key: ValueKey('cover-position-$i'),
-                            offset: Offset(
-                              _direction == 0
-                                  ? 0
-                                  : i == _index
-                                  ? offset
-                                  : offset + _direction * _width,
-                              0,
-                            ),
-                            child: children[i] ?? const SizedBox.expand(),
+                    _dragging = true;
+                    _touchY = (details.localPosition.dy / _height).clamp(
+                      0.0,
+                      1.0,
+                    );
+                    _drag = -_direction * _progress.value * _width;
+                  },
+          onHorizontalDragUpdate:
+              !_active
+                  ? null
+                  : (details) {
+                    if (!_active || _settling || !_dragging) return;
+                    _touchY = (details.localPosition.dy / _height).clamp(
+                      0.0,
+                      1.0,
+                    );
+                    _updateDrag(details.delta.dx);
+                  },
+          onHorizontalDragCancel: _cancelDrag,
+          onHorizontalDragEnd:
+              !_active
+                  ? null
+                  : (details) {
+                    if (!_active || _settling || !_dragging) return;
+                    _dragging = false;
+                    if (_direction == 0) {
+                      if (_drag.abs() > 36) {
+                        widget.onBoundaryTurn?.call(_drag < 0 ? 1 : -1);
+                      }
+                      return;
+                    }
+                    final velocity = details.primaryVelocity ?? 0;
+                    final forward = velocity * -_direction;
+                    unawaited(
+                      _settle(
+                        forward > 350 ||
+                            (forward >= -350 && _progress.value > .22),
+                        velocity: forward / _width,
+                      ),
+                    );
+                  },
+          child: ClipRect(
+            child: AnimatedBuilder(
+              animation: _progress,
+              builder: (context, _) {
+                final target = _index + _direction;
+                final turning = _direction != 0;
+                final progress = _progress.value;
+                // Both sheets share the same physical-pixel displacement. A
+                // fractional raster edge can otherwise expose a hairline even
+                // without a painted divider or the old cover shadow.
+                final distance =
+                    (progress * _width * pixelRatio).round() / pixelRatio;
+                final offset = -_direction * distance;
+                final front = math.max(_index, target);
+                final paperTurn =
+                    turning && effect == ReaderPageEffect.paper
+                        ? ReaderPaperTurnFrame(
+                          size: Size(_width, _height),
+                          progress: progress,
+                          touchY: _touchY,
+                          forward: _direction > 0,
+                          spread: widget.isSpread,
+                          paper:
+                              widget.paperColor ??
+                              Theme.of(context).canvasColor,
+                        )
+                        : null;
+                final layers =
+                    paperTurn == null
+                        ? indices
+                        : [...indices.where((i) => i != _index), _index];
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    for (final i in layers)
+                      Positioned.fill(
+                        key: ValueKey('cover-sheet-$i'),
+                        child: Offstage(
+                          offstage:
+                              !turning || effect == ReaderPageEffect.none
+                                  ? i != _index
+                                  : i != _index && i != target,
+                          child: IgnorePointer(
+                            ignoring: _busy || i != _index,
+                            child:
+                                effect == ReaderPageEffect.paper
+                                    ? ReaderPaperTurn(
+                                      frame:
+                                          i == _index || i == target
+                                              ? paperTurn
+                                              : null,
+                                      outgoing: i == _index,
+                                      child: children[i]!,
+                                    )
+                                    : _sheet(
+                                      page: children[i]!,
+                                      index: i,
+                                      effect: effect,
+                                      turning: turning,
+                                      progress: progress,
+                                      front: front,
+                                      offset: offset,
+                                    ),
                           ),
                         ),
                       ),
-                    ),
-                ],
-              );
-            },
+                  ],
+                );
+              },
+            ),
           ),
         ),
       );
     },
   );
+
+  Widget _sheet({
+    required Widget page,
+    required int index,
+    required ReaderPageEffect effect,
+    required bool turning,
+    required double progress,
+    required int front,
+    required double offset,
+  }) {
+    final topSheet = turning && index == front;
+    final dx =
+        !turning
+            ? 0.0
+            : switch (effect) {
+              ReaderPageEffect.cover =>
+                topSheet
+                    ? index == _index
+                        ? offset
+                        : offset + _width
+                    : 0.0,
+              ReaderPageEffect.fade || ReaderPageEffect.none => 0.0,
+              _ => index == _index ? offset : offset + _direction * _width,
+            };
+    if (effect == ReaderPageEffect.fade) {
+      page = Opacity(
+        opacity:
+            !topSheet
+                ? 1
+                : index == _index
+                ? 1 - progress
+                : progress,
+        child: page,
+      );
+    } else if (effect == ReaderPageEffect.cover) {
+      final shadow = topSheet ? math.sin(math.pi * progress) : 0.0;
+      page = DecoratedBox(
+        decoration: BoxDecoration(
+          boxShadow: [
+            if (shadow > 0)
+              BoxShadow(
+                color: Colors.black.withValues(alpha: .16 * shadow),
+                offset: const Offset(-4, 0),
+                blurRadius: 12 * shadow,
+              ),
+          ],
+        ),
+        child: page,
+      );
+    }
+    return Transform.translate(
+      key: ValueKey('cover-position-$index'),
+      offset: Offset(dx, 0),
+      child: page,
+    );
+  }
 }
 
 /// End a fast release as soon as its target edge is visually reached, rather

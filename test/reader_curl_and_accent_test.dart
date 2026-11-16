@@ -8,52 +8,60 @@ import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/widgets/app_color_settings.dart';
 
 void main() {
-  test('custom accent accepts any opaque RGB color and survives restart', () async {
-    var saved = 'system';
-    final cubit = AppAccentCubit(
-      read: () async => saved,
-      write: (value) async => saved = value,
-    );
-    const color = Color(0xFF9A7CE0);
-    await cubit.select(customAccentValue(color));
-    expect(cubit.state, 'custom:#9A7CE0');
-    expect(appAccentSeed(cubit.state), color);
-    final restarted = AppAccentCubit(
-      read: () async => saved,
-      write: (_) async {},
-    );
-    await restarted.load();
-    expect(restarted.state, 'custom:#9A7CE0');
-    await restarted.select('custom:#oops');
-    expect(restarted.state, 'custom:#9A7CE0');
-    await cubit.close();
-    await restarted.close();
-  });
+  test(
+    'custom accent accepts any opaque RGB color and survives restart',
+    () async {
+      var saved = 'system';
+      final cubit = AppAccentCubit(
+        read: () async => saved,
+        write: (value) async => saved = value,
+      );
+      const color = Color(0xFF9A7CE0);
+      await cubit.select(customAccentValue(color));
+      expect(cubit.state, 'custom:#9A7CE0');
+      expect(appAccentSeed(cubit.state), color);
+      final restarted = AppAccentCubit(
+        read: () async => saved,
+        write: (_) async {},
+      );
+      await restarted.load();
+      expect(restarted.state, 'custom:#9A7CE0');
+      await restarted.select('custom:#oops');
+      expect(restarted.state, 'custom:#9A7CE0');
+      await cubit.close();
+      await restarted.close();
+    },
+  );
 
-  test('page curl stays off by default and persists an explicit choice', () async {
+  test('page effect persists and reads the previous curl preference', () async {
     var saved = '';
     final pending = Completer<String>();
     final cubit = ReaderCurlCubit(
       read: () => pending.future,
       write: (value) async => saved = value,
     );
-    expect(cubit.state, isFalse);
+    expect(cubit.state, ReaderPageEffect.slide);
     final loading = cubit.load();
-    await cubit.setEnabled(true);
+    await cubit.setEffect(ReaderPageEffect.paper);
     pending.complete('false');
     await loading;
-    expect(cubit.state, isTrue);
+    expect(cubit.state, ReaderPageEffect.paper);
     final restarted = ReaderCurlCubit(
       read: () async => saved,
       write: (_) async {},
     );
     await restarted.load();
-    expect(restarted.state, isTrue);
+    expect(restarted.state, ReaderPageEffect.paper);
+    saved = 'true';
+    await restarted.load();
+    expect(restarted.state, ReaderPageEffect.nativeCurl);
     await cubit.close();
     await restarted.close();
   });
 
-  testWidgets('custom color can be applied from the settings picker', (tester) async {
+  testWidgets('custom color can be applied from the settings picker', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(420, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);

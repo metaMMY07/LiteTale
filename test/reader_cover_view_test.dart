@@ -2,6 +2,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/widgets/reader_cover_view.dart';
 
 void main() {
@@ -48,6 +49,7 @@ void main() {
     ReaderCoverController controller,
     ValueChanged<int> changed, {
     bool reduced = false,
+    ReaderPageEffect effect = ReaderPageEffect.slide,
   }) => tester.pumpWidget(
     MaterialApp(
       home: MediaQuery(
@@ -59,6 +61,7 @@ void main() {
             controller: controller,
             index: 1,
             pageCount: 4,
+            effect: effect,
             paperDecoration: const BoxDecoration(color: Colors.white),
             onPageChanged: changed,
             pageBuilder: (_, i) => Center(child: Text('paper-$i')),
@@ -67,6 +70,133 @@ void main() {
       ),
     ),
   );
+  testWidgets('cover moves the front sheet while the lower page is still', (
+    tester,
+  ) async {
+    final c = ReaderCoverController();
+    final changes = <int>[];
+    await mount(tester, c, changes.add, effect: ReaderPageEffect.cover);
+    double dx(int index) =>
+        tester
+            .widget<Transform>(find.byKey(ValueKey('cover-position-$index')))
+            .transform
+            .storage[12];
+    final forward = c.turn(1);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 170));
+    expect(dx(1), 0);
+    expect(dx(2), inExclusiveRange(0, 800));
+    expect(changes, isEmpty);
+    await tester.pumpAndSettle();
+    await forward;
+    final back = c.turn(-1);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 170));
+    expect(dx(1), 0);
+    expect(dx(2), inExclusiveRange(0, 800));
+    await tester.pumpAndSettle();
+    await back;
+    expect(changes, [2, 1]);
+  });
+
+  testWidgets('fade blends the front sheet and no animation commits directly', (
+    tester,
+  ) async {
+    final c = ReaderCoverController();
+    final changes = <int>[];
+    await mount(tester, c, changes.add, effect: ReaderPageEffect.fade);
+    final turn = c.turn(1);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+    final incoming = find.byKey(const ValueKey('cover-position-2'));
+    expect(tester.widget<Transform>(incoming).transform.storage[12], 0);
+    expect(
+      tester
+          .widget<Opacity>(
+            find.descendant(of: incoming, matching: find.byType(Opacity)),
+          )
+          .opacity,
+      closeTo(.5, .05),
+    );
+    expect(changes, isEmpty);
+    await tester.pumpAndSettle();
+    await turn;
+    await mount(tester, c, changes.add, effect: ReaderPageEffect.none);
+    await c.turn(-1);
+    expect(c.isTurning, isFalse);
+    expect(changes, [2, 0]);
+  });
+
+  for (final spread in [false, true]) {
+    testWidgets(
+      'paper renders both pages and cancels a drag (spread: $spread)',
+      (tester) async {
+        final c = ReaderCoverController();
+        final changes = <int>[];
+        final capture = GlobalKey();
+        await tester.pumpWidget(
+          MaterialApp(
+            home: RepaintBoundary(
+              key: capture,
+              child: ReaderCoverView(
+                controller: c,
+                index: 0,
+                pageCount: 2,
+                isSpread: spread,
+                effect: ReaderPageEffect.paper,
+                paperColor: Colors.white,
+                paperDecoration: const BoxDecoration(color: Colors.white),
+                onPageChanged: changes.add,
+                pageBuilder:
+                    (_, index) => ColoredBox(
+                      color:
+                          index == 0
+                              ? const Color(0xffca2211)
+                              : const Color(0xff2244bb),
+                    ),
+              ),
+            ),
+          ),
+        );
+        final drag = await tester.startGesture(const Offset(730, 350));
+        await drag.moveBy(const Offset(-230, 0));
+        await tester.pump();
+        final snapshots = tester.widgetList<SnapshotWidget>(
+          find.byType(SnapshotWidget),
+        );
+        expect(
+          snapshots.where((s) => s.controller.allowSnapshotting),
+          hasLength(spread ? 2 : 1),
+        );
+        await tester.runAsync(() async {
+          final boundary =
+              capture.currentContext!.findRenderObject()!
+                  as RenderRepaintBoundary;
+          final frame = await boundary.toImage();
+          try {
+            final pixels =
+                (await frame.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+            int channel(int x, int y, int component) =>
+                pixels.getUint8(4 * (y * frame.width + x) + component);
+            expect(channel(65, 300, 0), greaterThan(channel(65, 300, 2)));
+            expect(channel(740, 300, 2), greaterThan(channel(740, 300, 0)));
+          } finally {
+            frame.dispose();
+          }
+        });
+        await drag.cancel();
+        await tester.pumpAndSettle();
+        expect(changes, isEmpty);
+        expect(c.isTurning, isFalse);
+        final turn = c.turn(1, startY: 430);
+        await tester.pumpAndSettle();
+        await turn;
+        expect(changes, [1]);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('tap slides both adjacent sheets, commits once after settling', (
     tester,
   ) async {

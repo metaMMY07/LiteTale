@@ -22,6 +22,7 @@ import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/apple_reader_panel.dart';
+import 'package:wild/widgets/reader_curl_setting.dart';
 import 'package:wild/widgets/reader_settings_binding.dart';
 import 'package:wild/widgets/reader_draggable_sheet.dart';
 
@@ -41,6 +42,7 @@ Future<bool> showReaderSettingsPanel(
       onLayoutChanged: onLayoutChanged,
       autoScroll: autoScroll,
       includeMarks: includeMarks,
+      localEpub: localEpub,
     );
     final selection = await AppleReaderPanel.show(
       context,
@@ -191,6 +193,7 @@ class ReaderSettingsPanel extends StatelessWidget {
       context,
       onLayoutChanged: onLayoutChanged,
       autoScroll: autoScroll,
+      localEpub: localEpub,
     );
     return AppleReaderSettingsView(
       configuration: binding.snapshot,
@@ -209,7 +212,6 @@ class ReaderSettingsPanel extends StatelessWidget {
     final theme = context.watch<ThemeCubit>();
     final type = context.watch<ReaderTypeCubit>();
     final volume = context.watch<VolumeControlCubit>();
-    final curl = context.watch<ReaderCurlCubit>();
     final paper = context.watch<ReaderBackgroundCubit>();
     final colors = Theme.of(context).colorScheme;
     final background =
@@ -388,21 +390,14 @@ class ReaderSettingsPanel extends StatelessWidget {
                         },
                       ),
                     ),
-                    if (!usesAppleGlass && !localEpub)
+                    if (!localEpub)
                       ReaderSettingRow(
                         icon: Icons.auto_stories_outlined,
-                        title: '仿真翻页',
-                        description: '在线书源的纸张曲面与手势跟随',
-                        trailing: AppSwitch(
-                          value: curl.state,
-                          onChanged:
-                              type.state == ReaderType.html
-                                  ? null
-                                  : (v) => settingsAction(
-                                    context,
-                                    () => curl.setEnabled(v),
-                                  ),
-                        ),
+                          title: '翻页效果',
+                          description: '用于在线书源的分页阅读',
+                          trailing: ReaderCurlSetting(
+                            enabled: type.state == ReaderType.normal,
+                          ),
                       ),
                     if (!usesAppleGlass)
                       ReaderSettingRow(

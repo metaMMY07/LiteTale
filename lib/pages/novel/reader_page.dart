@@ -42,6 +42,7 @@ import 'package:wild/cubits/reader_background_cubit.dart';
 import 'package:wild/widgets/reader_cover_view.dart';
 import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/widgets/page_curl_view.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart' show usesAppleGlass;
 import 'package:wild/settings/settings_preferences.dart';
 import 'package:wild/settings/reading_session_scope.dart';
 import 'dart:async';
@@ -310,10 +311,14 @@ class _ReaderViewState extends State<_ReaderView> {
   /// later source switch in settings cannot re-route this reader's images.
   SourceId get _bookSource => sourceOf(context.read<ReaderCubit>().initialAid);
 
+  ReaderPageEffect _pageEffect(ReaderPageEffect effect) =>
+      _bookSource == SourceId.localEpub
+          ? ReaderPageEffect.slide
+          : effect.forPlatform(isIos: usesAppleGlass);
+
   bool get _curlEnabled =>
-      !Platform.isIOS &&
-      _bookSource != SourceId.localEpub &&
-      context.read<ReaderCurlCubit>().state &&
+      _pageEffect(context.read<ReaderCurlCubit>().state) ==
+          ReaderPageEffect.nativeCurl &&
       !MediaQuery.of(context).disableAnimations;
 
   bool get _isTurning =>
@@ -583,7 +588,7 @@ class _ReaderViewState extends State<_ReaderView> {
     if (_curlEnabled) {
       _curlKey.currentState?.turn(direction, startY: startY);
     } else {
-      _pageController.turn(direction);
+      _pageController.turn(direction, startY: startY);
     }
   }
 
@@ -776,12 +781,11 @@ class _ReaderViewState extends State<_ReaderView> {
                     ),
                   // 阅读内容
                   Positioned.fill(
-                    child: BlocBuilder<ReaderCurlCubit, bool>(
-                      builder: (context, enabled) {
+                    child: BlocBuilder<ReaderCurlCubit, ReaderPageEffect>(
+                      builder: (context, selectedEffect) {
+                        final effect = _pageEffect(selectedEffect);
                         final curlEnabled =
-                            !Platform.isIOS &&
-                            _bookSource != SourceId.localEpub &&
-                            enabled &&
+                            effect == ReaderPageEffect.nativeCurl &&
                             !mediaQuery.disableAnimations;
                         _syncCurlMode(curlEnabled);
                         if (curlEnabled) {
@@ -827,6 +831,8 @@ class _ReaderViewState extends State<_ReaderView> {
                               widget.title,
                             ),
                             paperDecoration: paperDecoration,
+                            effect: effect,
+                            paperColor: backgroundColor,
                             onPageChanged: _onViewChanged,
                             onBoundaryTurn: _handleBoundaryTurn,
                             pageBuilder:

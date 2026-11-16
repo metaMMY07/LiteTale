@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/cubits/reader_background_cubit.dart';
+import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/pages/novel/auto_scroll_config_cubit.dart';
 import 'package:wild/pages/novel/bottom_bar_height_cubit.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
@@ -21,6 +22,7 @@ class ReaderSettingsBinding {
     this.onLayoutChanged,
     this.autoScroll,
     this.includeMarks = false,
+    this.localEpub = false,
   }) : _context = context,
        size = context.read<FontSizeCubit>(),
        line = context.read<LineHeightCubit>(),
@@ -31,6 +33,7 @@ class ReaderSettingsBinding {
        bottom = context.read<BottomBarHeightCubit>(),
        theme = context.read<ThemeCubit>(),
        type = context.read<ReaderTypeCubit>(),
+       pageEffect = context.read<ReaderCurlCubit>(),
        paper = context.read<ReaderBackgroundCubit>();
 
   final BuildContext _context;
@@ -43,11 +46,16 @@ class ReaderSettingsBinding {
   final BottomBarHeightCubit bottom;
   final ThemeCubit theme;
   final ReaderTypeCubit type;
+  final ReaderCurlCubit pageEffect;
   final ReaderBackgroundCubit paper;
   final AutoScrollConfigCubit? autoScroll;
-  final bool includeMarks;
+  final bool includeMarks, localEpub;
   final Future<void> Function()? onLayoutChanged;
   final _pending = <String>{};
+  static final _iosPageEffects = {
+    for (final effect in ReaderPageEffect.available(isIos: true))
+      effect.label: effect,
+  };
 
   Map<String, Object?> snapshot() {
     final colors = Theme.of(_context).colorScheme;
@@ -81,6 +89,7 @@ class ReaderSettingsBinding {
       String description,
       Object value, {
       List<String>? choices,
+      bool enabled = true,
     }) => {
       'id': id,
       'kind': kind,
@@ -89,6 +98,7 @@ class ReaderSettingsBinding {
       'description': description,
       'value': value,
       if (choices != null) 'choices': choices,
+      if (!enabled) 'enabled': false,
     };
     return {
       'title': '阅读设置',
@@ -182,6 +192,17 @@ class ReaderSettingsBinding {
               type.state == ReaderType.normal ? '分页' : '滚动',
               choices: ['分页', '滚动'],
             ),
+            if (!localEpub)
+              row(
+                'pageEffect',
+                'choice',
+                'book.pages',
+                '翻页效果',
+                '用于在线书源的分页阅读',
+                pageEffect.state.forPlatform(isIos: true).label,
+                choices: _iosPageEffects.keys.toList(),
+                enabled: type.state == ReaderType.normal,
+              ),
           ],
         },
         {
@@ -340,6 +361,8 @@ class ReaderSettingsBinding {
           await type.updateType(
             value == '分页' ? ReaderType.normal : ReaderType.html,
           );
+        case 'pageEffect':
+          await pageEffect.setEffect(_iosPageEffects[value]!);
         case 'theme':
           await theme.setThemeMode(
             value == '浅色'
@@ -369,7 +392,7 @@ class ReaderSettingsBinding {
         case 'interval':
           await autoScroll!.updateScrollInterval((value as double).round());
       }
-      if (id != 'mode' && _context.mounted) {
+      if (id != 'mode' && id != 'pageEffect' && _context.mounted) {
         await onLayoutChanged?.call();
       }
     } catch (e) {

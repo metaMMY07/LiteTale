@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
+import 'package:wild/pages/novel/reader_type_cubit.dart';
 import 'package:wild/widgets/apple_reader_panel.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/book_details_view.dart';
@@ -53,6 +55,7 @@ void main() {
         ),
       ),
     );
+    await binding.pageEffect.setEffect(ReaderPageEffect.nativeCurl);
     final rows =
         (binding.snapshot()['sections'] as List)
             .cast<Map>()
@@ -65,10 +68,14 @@ void main() {
     );
     expect(rows.map((r) => r['id']).toSet().length, rows.length);
     expect(rows.every((r) => (r['description'] as String).isNotEmpty), true);
+    final turnRow = rows.singleWhere((r) => r['id'] == 'pageEffect');
+    expect(turnRow['value'], '平移');
+    expect(turnRow['choices'], ['平移', '纸页翻动', '覆盖', '渐隐', '无动画']);
     for (final event in [
       {'id': 'size', 'value': double.nan},
       {'id': 'size', 'value': '24'},
       {'id': 'mode', 'value': 'unsupported'},
+      {'id': 'pageEffect', 'value': '原有仿真'},
       {'id': 'volume', 'value': 1},
       {'id': 'lightBackground', 'value': -1},
       {'id': 'missing', 'value': 24},
@@ -76,6 +83,13 @@ void main() {
       expect(await binding.change(event), isEmpty);
     }
     expect(size.values, isEmpty);
+    expect(layouts, 0);
+    final effect = await binding.change({'id': 'pageEffect', 'value': '纸页翻动'});
+    expect(effect['configuration'], isA<Map>());
+    expect(binding.pageEffect.state, ReaderPageEffect.paper);
+    await binding.type.updateType(ReaderType.html);
+    expect(await binding.change({'id': 'pageEffect', 'value': '覆盖'}), isEmpty);
+    expect(binding.pageEffect.state, ReaderPageEffect.paper);
     expect(layouts, 0);
     final reply = await binding.change({'id': 'size', 'value': 100});
     expect(size.values, [40]);

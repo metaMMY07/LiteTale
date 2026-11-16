@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/cubits/font_settings_cubit.dart';
+import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/pages/novel/html_reader_page.dart';
 import 'package:wild/pages/novel/reader_cubit.dart';
 import 'package:wild/pages/novel/reader_page.dart';
@@ -36,7 +37,7 @@ void main() {
   const image = '<!--image-->test://illustration<!--image-->';
 
   testWidgets(
-    'iOS portrait reader turns forward from the upper right',
+    'iOS uses the shared paper effect and keeps its portrait tap zones',
     (tester) async {
       tester.view.physicalSize = const Size(400, 800);
       tester.view.devicePixelRatio = 1;
@@ -73,10 +74,24 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      final cubit =
-          tester.element(find.byType(ReaderCoverView)).read<ReaderCubit>();
+      final context = tester.element(find.byType(ReaderCoverView));
+      final cubit = context.read<ReaderCubit>();
+      final pageEffect = context.read<ReaderCurlCubit>();
       ReaderLoaded loaded() => cubit.state as ReaderLoaded;
       expect(loaded().currentPageIndex, 1);
+
+      await pageEffect.setEffect(ReaderPageEffect.nativeCurl);
+      await tester.pump();
+      expect(
+        tester.widget<ReaderCoverView>(find.byType(ReaderCoverView)).effect,
+        ReaderPageEffect.slide,
+      );
+      await pageEffect.setEffect(ReaderPageEffect.paper);
+      await tester.pump();
+      expect(
+        tester.widget<ReaderCoverView>(find.byType(ReaderCoverView)).effect,
+        ReaderPageEffect.paper,
+      );
 
       await tester.tapAt(const Offset(350, 120));
       await tester.pumpAndSettle();
