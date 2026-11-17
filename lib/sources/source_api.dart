@@ -18,7 +18,7 @@ import 'local_epub_source.dart';
 import 'huanmeng_source.dart';
 import 'esj_source.dart';
 import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, TargetPlatform;
+    show defaultTargetPlatform, TargetPlatform, ValueNotifier;
 import 'package:wild/services/huanmeng_http_transport.dart';
 import 'package:wild/services/epub/local_epub_library.dart';
 import 'package:wild/services/reading_progress.dart';
@@ -29,6 +29,7 @@ import 'package:wild/services/bounded_detail_cache.dart';
 import 'package:wild/services/read_diagnostics.dart';
 import 'package:wild/services/read_request.dart';
 import 'package:wild/services/read_result_cache.dart';
+import 'package:wild/models/bookshelf_unread.dart';
 import 'package:wild/models/source_comment.dart';
 import 'package:wild/services/book_comments_repository.dart';
 import 'comment_parsers.dart' show commentText;
@@ -61,14 +62,14 @@ export 'package:wild/src/rust/api/wenku8.dart'
         logout;
 
 final _wenkuBrowser = Wenku8BrowserSession.instance;
-int _wenkuSessionGeneration = 0;
+final wenku8ShelfRevision = ValueNotifier<int>(0);
 
 void invalidateWenku8ReadingCache() {
-  _wenkuSessionGeneration++;
   _wenkuBrowser.invalidateBookshelfSnapshot();
   final source = bookSources[SourceId.wenku8];
   if (source is Wenku8Source) source._reads.clear();
   _detailCache.removeWhere((key, _) => sourceOf(key.$1) == SourceId.wenku8);
+  wenku8ShelfRevision.value++;
 }
 
 Future<void> cleanAllWebCache() async {
@@ -83,7 +84,7 @@ int readerSessionGeneration(String aid) =>
         : sourceOf(aid) == SourceId.lightNovelShelf
         ? ShelfSession.instance.generation
         : sourceOf(aid) == SourceId.wenku8
-        ? _wenkuSessionGeneration + _wenkuBrowser.readingSessionRevision
+        ? wenku8ShelfRevision.value + _wenkuBrowser.readingSessionRevision
         : sourceOf(aid) == SourceId.bili
         ? sourceRevision.value
         : sourceOf(aid).isRule
@@ -502,11 +503,8 @@ final _chapterCache = ReadResultCache<(String, String, int), SourceChapter>(
   cacheable: (chapter) => chapter.content.trim().isNotEmpty,
 );
 final _chapterFonts = <String, String?>{};
-final _shelfCovers = <String, String>{};
 String coverForBook(String aid) =>
-    _detailCache.peek((aid, readerSessionGeneration(aid)))?.info.imgUrl ??
-    _shelfCovers[aid] ??
-    '';
+    _detailCache.peek((aid, readerSessionGeneration(aid)))?.info.imgUrl ?? '';
 String? chapterFont(String aid, String cid) => _chapterFonts['$aid/$cid'];
 Future<void> _writes = Future.value();
 
@@ -838,52 +836,141 @@ Future<void> _serial(Future<void> Function() work) {
   return next;
 }
 
-Future<List<Bookcase>> bookcaseList() async =>
-    activeSource.value == SourceId.wenku8
-        ? _wenkuBrowser.nativeOrBrowser(
-          w8.bookcaseList,
-          _wenkuBrowser.bookcaseList,
-        )
-        : [
-          Bookcase(
-            id: _caseId(activeSource.value),
-            title: '${activeSource.value.label}收藏',
-          ),
-        ];
+Future<List<Bookcase>> bookcaseList({SourceId? source}) async {
+  final selected = source ?? activeSource.value;
+  return selected == SourceId.wenku8
+      ? _wenkuBrowser.nativeOrBrowser(
+        w8.bookcaseList,
+        _wenkuBrowser.bookcaseList,
+      )
+      : [Bookcase(id: _caseId(selected), title: '${selected.label}收藏')];
+}
+
+typedef LocalShelfEntry = ({BookcaseItem book, String coverUrl});
+
+Iterable<SourceId> get localShelfSources => SourceId.values.where(
+  (source) =>
+      source != SourceId.wenku8 &&
+      source != SourceId.localEpub &&
+      bookSources.containsKey(source),
+);
+
+Future<List<LocalShelfEntry>> loadLocalShelf(SourceId source) async {
+  final entries = await _jsonList(_shelfKeyFor(source));
+  final books = <LocalShelfEntry>[];
+  final seen = <String>{};
+  for (final entry in entries) {
+    final id = entry['id'], title = entry['title'];
+    if (id is! String || title is! String || id.isEmpty) continue;
+    try {
+      if (sourceOf(id) != source || !seen.add(id)) continue;
+    } on FormatException {
+      continue;
+    }
+    books.add((
+      book: BookcaseItem(
+        aid: id,
+        bid: id,
+        title: title,
+        author: entry['author'] as String? ?? '',
+        cid: entry['cid'] as String? ?? '',
+        chapterName: entry['chapter'] as String? ?? '',
+      ),
+      coverUrl: entry['cover'] as String? ?? '',
+    ));
+  }
+  return List.unmodifiable(books);
+}
+
+final _wenku8ShelfId = RegExp(r'^\d{1,12}$');
+
+Future<BookcaseDto> wenku8BookInCase({required String caseId}) async {
+  if (!_wenku8ShelfId.hasMatch(caseId)) {
+    throw const FormatException('文库8书架分组无效。');
+  }
+  final content = await _wenkuBrowser.nativeOrBrowser(
+    () => w8.bookInCase(caseId: caseId),
+    () => _wenkuBrowser.bookInCase(caseId),
+  );
+  final seen = <String>{};
+  return BookcaseDto(
+    tip: content.tip,
+    items: List.unmodifiable(
+      content.items.where(
+        (book) =>
+            _wenku8ShelfId.hasMatch(book.aid) &&
+            _wenku8ShelfId.hasMatch(book.bid) &&
+            seen.add(book.aid),
+      ),
+    ),
+  );
+}
+
 Future<BookcaseDto> bookInCase({required String caseId}) async {
-  final source =
+  final localSource =
       SourceId.values
           .where((s) => s != SourceId.wenku8 && _caseId(s) == caseId)
           .firstOrNull;
-  if (source == null && caseId.startsWith('rule:')) {
+  if (localSource == null && caseId.startsWith('rule:')) {
     throw StateError('此书源已移除，请重新导入相同书源。');
   }
-  if (source == null) {
-    return _wenkuBrowser.nativeOrBrowser(
-      () => w8.bookInCase(caseId: caseId),
-      () => _wenkuBrowser.bookInCase(caseId),
-    );
+  if (localSource == null) {
+    return wenku8BookInCase(caseId: caseId);
   }
-  final entries = await _jsonList(_shelfKeyFor(source));
-  for (final book in entries) {
-    _shelfCovers[book['id'] as String] = book['cover'] as String? ?? '';
-  }
+  final entries = await loadLocalShelf(localSource);
   return BookcaseDto(
     tip: '收藏保存在本机，阅读记录独立保存',
-    items:
-        entries
-            .map(
-              (b) => BookcaseItem(
-                aid: b['id'],
-                bid: b['id'],
-                title: b['title'],
-                author: b['author'],
-                cid: b['cid'],
-                chapterName: b['chapter'],
-              ),
-            )
-            .toList(),
+    items: entries.map((entry) => entry.book).toList(),
   );
+}
+
+/// Only read progress for books with a directory in the existing bounded cache.
+/// A shelf refresh never fetches a book's detail or chapter list.
+Future<Map<String, int>> loadShelfUnreadCounts(Iterable<String> bookIds) async {
+  final catalogs = <String, (int, SourceBookDetail)>{};
+  for (final id in bookIds.toSet()) {
+    final source = sourceOf(id);
+    if (source.isRule || source == SourceId.localEpub) continue;
+    final generation = readerSessionGeneration(id);
+    final detail = _detailCache.peek((id, generation));
+    if (detail != null) catalogs[id] = (generation, detail);
+  }
+  if (catalogs.isEmpty) return const {};
+  final progress = ReadingProgressQueue.instance;
+  try {
+    await progress.flush().timeout(const Duration(seconds: 2));
+  } on TimeoutException {
+    return const {};
+  }
+  final clock = Stopwatch()..start();
+  const budget = Duration(seconds: 2);
+  final counts = <String, int>{};
+  for (final entry in catalogs.entries) {
+    final remaining = budget - clock.elapsed;
+    if (remaining <= Duration.zero) break;
+    final (generation, detail) = entry.value;
+    final id = entry.key;
+    if (generation != readerSessionGeneration(id) ||
+        progress.errorFor(id) != null) {
+      continue;
+    }
+    try {
+      final history = await w8.novelHistoryById(novelId: id).timeout(remaining);
+      if (generation != readerSessionGeneration(id) ||
+          !identical(_detailCache.peek((id, generation)), detail)) {
+        continue;
+      }
+      final count = unreadChapters(detail.volumes, id, history?.chapterId);
+      if (count != null && count > 0) counts[id] = count;
+    } catch (_) {
+      // Unavailable progress is different from a book with no progress.
+    }
+  }
+  return counts..removeWhere((id, _) {
+    final (generation, detail) = catalogs[id]!;
+    return generation != readerSessionGeneration(id) ||
+        !identical(_detailCache.peek((id, generation)), detail);
+  });
 }
 
 Future<void> addBookshelf({required String aid}) async {
@@ -956,7 +1043,6 @@ Future<void> removeLocalEpub(String bookId) async {
   } finally {
     _detailCache.removeWhere((key, _) => key.$1 == bookId);
     _chapterFonts.removeWhere((key, _) => key.startsWith('$bookId/'));
-    _shelfCovers.remove(bookId);
     ReaderPaginationCache.instance.evictBook(bookId);
   }
 }
@@ -965,6 +1051,5 @@ void invalidateLocalEpubPresentation(String bookId) {
   if (sourceOf(bookId) != SourceId.localEpub) return;
   _detailCache.removeWhere((key, _) => key.$1 == bookId);
   _chapterFonts.removeWhere((key, _) => key.startsWith('$bookId/'));
-  _shelfCovers.remove(bookId);
   ReaderPaginationCache.instance.evictBook(bookId);
 }

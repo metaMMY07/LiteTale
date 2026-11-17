@@ -17,6 +17,11 @@ class BookshelfState {
   final Set<String> selectedBids; // 选中的书籍 bid 集合
   final bool isSelecting; // 是否处于多选模式
   final bool isRefreshing;
+  final bool wenku8Enabled;
+  final Map<SourceId, List<LocalShelfEntry>> localBooks;
+  final bool isLoadingLocalBooks;
+  final bool localReadFailed;
+  final Map<String, int> unreadCounts;
 
   BookshelfState({
     required this.tip,
@@ -28,6 +33,11 @@ class BookshelfState {
     this.selectedBids = const {},
     this.isSelecting = false,
     this.isRefreshing = false,
+    this.wenku8Enabled = false,
+    this.localBooks = const {},
+    this.isLoadingLocalBooks = false,
+    this.localReadFailed = false,
+    this.unreadCounts = const {},
   });
 
   BookshelfState copyWith({
@@ -40,17 +50,29 @@ class BookshelfState {
     Set<String>? selectedBids,
     bool? isSelecting,
     bool? isRefreshing,
+    Map<SourceId, List<LocalShelfEntry>>? localBooks,
+    bool? isLoadingLocalBooks,
+    bool? localReadFailed,
+    Map<String, int>? unreadCounts,
   }) {
     return BookshelfState(
       tip: tip ?? this.tip,
       status: status ?? this.status,
       bookcases: bookcases ?? this.bookcases,
-      currentCaseId: currentCaseId ?? this.currentCaseId,
+      currentCaseId:
+          bookcases?.isEmpty == true
+              ? null
+              : currentCaseId ?? this.currentCaseId,
       bookcaseContents: bookcaseContents ?? this.bookcaseContents,
       errorMessage: errorMessage,
       selectedBids: selectedBids ?? this.selectedBids,
       isSelecting: isSelecting ?? this.isSelecting,
       isRefreshing: isRefreshing ?? this.isRefreshing,
+      wenku8Enabled: wenku8Enabled,
+      localBooks: localBooks ?? this.localBooks,
+      isLoadingLocalBooks: isLoadingLocalBooks ?? this.isLoadingLocalBooks,
+      localReadFailed: localReadFailed ?? this.localReadFailed,
+      unreadCounts: unreadCounts ?? this.unreadCounts,
     );
   }
 
@@ -59,31 +81,28 @@ class BookshelfState {
     return bookcaseContents[currentCaseId];
   }
 
-  bool isBookInBookshelf(String aid) {
-    for (final books in bookcaseContents.values) {
-      if (books.any((book) => book.aid == aid)) {
-        return true;
+  Iterable<BookcaseItem> get wenku8Books sync* {
+    final seen = <String>{};
+    for (final group in bookcases) {
+      for (final book in bookcaseContents[group.id] ?? const <BookcaseItem>[]) {
+        if (seen.add(book.aid)) yield book;
       }
     }
-    return false;
   }
 
+  bool isBookInBookshelf(String aid) => getBookBid(aid) != null;
+
   String? getBookBid(String aid) {
+    final source = sourceOf(aid);
+    if (source != SourceId.wenku8) {
+      for (final entry in localBooks[source] ?? const <LocalShelfEntry>[]) {
+        if (entry.book.aid == aid) return entry.book.bid;
+      }
+      return null;
+    }
     for (final books in bookcaseContents.values) {
-      final book = books.firstWhere(
-        (book) => book.aid == aid,
-        orElse:
-            () => BookcaseItem(
-              aid: '',
-              bid: '',
-              title: '',
-              author: '',
-              cid: '',
-              chapterName: '',
-            ),
-      );
-      if (book.bid.isNotEmpty) {
-        return book.bid;
+      for (final book in books) {
+        if (book.aid == aid && book.bid.isNotEmpty) return book.bid;
       }
     }
     return null;
@@ -97,16 +116,16 @@ class BookshelfCubit extends Cubit<BookshelfState> {
     Future<List<Bookcase>> Function()? loadCases,
     Future<BookcaseDto> Function({required String caseId})? loadCase,
     Object Function()? scope,
+    Iterable<SourceId> Function()? localSources,
+    Future<List<LocalShelfEntry>> Function(SourceId)? loadLocal,
+    Future<Map<String, int>> Function(Iterable<String>)? loadUnread,
     this.requestTimeout = const Duration(seconds: 40),
-  }) : _loadCases = loadCases ?? bookcaseList,
-       _loadCase = loadCase ?? bookInCase,
-       _scope =
-           scope ??
-           (() => (
-             activeSource.value,
-             sourceRevision.value,
-             readerSessionGeneration('1'),
-           )),
+  }) : _loadCases = loadCases ?? (() => bookcaseList(source: SourceId.wenku8)),
+       _loadCase = loadCase ?? wenku8BookInCase,
+       _scope = scope ?? (() => readerSessionGeneration('1')),
+       _localSources = localSources ?? (() => localShelfSources),
+       _loadLocal = loadLocal ?? loadLocalShelf,
+       _loadUnread = loadUnread ?? loadShelfUnreadCounts,
        super(
          BookshelfState(
            tip: '',
@@ -119,24 +138,176 @@ class BookshelfCubit extends Cubit<BookshelfState> {
   final Future<List<Bookcase>> Function() _loadCases;
   final Future<BookcaseDto> Function({required String caseId}) _loadCase;
   final Object Function() _scope;
+  final Iterable<SourceId> Function() _localSources;
+  final Future<List<LocalShelfEntry>> Function(SourceId) _loadLocal;
+  final Future<Map<String, int>> Function(Iterable<String>) _loadUnread;
   final Duration requestTimeout;
   Object? _loadedScope;
   Future<void>? _refresh;
   final _caseLoads = <String, Future<BookcaseDto>>{};
   int _request = 0;
-  void resetForGuest() {
+  bool _wenku8Enabled = true;
+  Future<void>? _localRefresh;
+  int? _localRevision;
+  int _localRequest = 0;
+  Future<void>? _unreadRefresh;
+  bool _unreadDirty = false;
+
+  void setWenku8Enabled(bool enabled) {
+    if (isClosed ||
+        (_wenku8Enabled == enabled && state.wenku8Enabled == enabled)) {
+      return;
+    }
+    _wenku8Enabled = enabled;
+    invalidateWenku8();
+  }
+
+  void invalidateWenku8() {
+    if (isClosed) return;
     _request++;
     _refresh = null;
     _caseLoads.clear();
     _loadedScope = null;
     emit(
       BookshelfState(
-        tip: '请在设置中登录文库8',
-        status: BookshelfStatus.success,
+        tip: '',
+        status: BookshelfStatus.initial,
         bookcases: const [],
         bookcaseContents: const {},
+        wenku8Enabled: _wenku8Enabled,
+        localBooks: state.localBooks,
+        isLoadingLocalBooks: state.isLoadingLocalBooks,
+        localReadFailed: state.localReadFailed,
+        unreadCounts: {
+          for (final entry in state.unreadCounts.entries)
+            if (sourceOf(entry.key) != SourceId.wenku8) entry.key: entry.value,
+        },
       ),
     );
+  }
+
+  Future<void> loadLocalShelves({bool refresh = false}) {
+    if (isClosed) return Future.value();
+    final revision = sourceRevision.value;
+    final sources = _localSources().toSet();
+    if (_localRevision != revision) {
+      _localRequest++;
+      _localRefresh = null;
+      _localRevision = revision;
+      emit(
+        state.copyWith(
+          localBooks: {
+            for (final entry in state.localBooks.entries)
+              if (sources.contains(entry.key)) entry.key: entry.value,
+          },
+          errorMessage: state.errorMessage,
+          unreadCounts: const {},
+        ),
+      );
+    } else {
+      if (_localRefresh case final pending?) return pending;
+      if (!refresh) return Future.value();
+    }
+    final request = _localRequest;
+    late final Future<void> pending;
+    pending = _refreshLocalShelves(sources, revision, request).whenComplete(() {
+      if (identical(_localRefresh, pending)) _localRefresh = null;
+    });
+    _localRefresh = pending;
+    return pending;
+  }
+
+  Future<void> _refreshLocalShelves(
+    Set<SourceId> sources,
+    int revision,
+    int request,
+  ) async {
+    bool current() =>
+        !isClosed &&
+        revision == sourceRevision.value &&
+        request == _localRequest;
+
+    emit(
+      state.copyWith(
+        isLoadingLocalBooks: true,
+        errorMessage: state.errorMessage,
+      ),
+    );
+    final books = Map<SourceId, List<LocalShelfEntry>>.of(state.localBooks);
+    final clock = Stopwatch()..start();
+    var failed = false;
+    for (final source in sources) {
+      final remaining = requestTimeout - clock.elapsed;
+      if (!current()) return;
+      if (remaining <= Duration.zero) {
+        failed = true;
+        break;
+      }
+      try {
+        const perSource = Duration(seconds: 2);
+        books[source] = await _loadLocal(
+          source,
+        ).timeout(remaining < perSource ? remaining : perSource);
+      } catch (_) {
+        failed = true;
+      }
+    }
+    if (!current()) return;
+    emit(
+      state.copyWith(
+        localBooks: Map.unmodifiable(books),
+        isLoadingLocalBooks: false,
+        localReadFailed: failed,
+        errorMessage: state.errorMessage,
+      ),
+    );
+    unawaited(refreshUnreadCounts());
+  }
+
+  Future<void> refreshUnreadCounts() {
+    if (isClosed) return Future.value();
+    _unreadDirty = true;
+    return _unreadRefresh ??= _refreshUnreadCounts();
+  }
+
+  Future<void> _refreshUnreadCounts() async {
+    await Future<void>.value();
+    try {
+      while (_unreadDirty && !isClosed) {
+        _unreadDirty = false;
+        final request = _request,
+            localRequest = _localRequest,
+            scope = _scope();
+        final ids = {
+          for (final book in state.wenku8Books) book.aid,
+          for (final entries in state.localBooks.values)
+            for (final entry in entries) entry.book.aid,
+        };
+        Map<String, int> counts;
+        try {
+          counts = ids.isEmpty ? const {} : await _loadUnread(ids);
+        } catch (_) {
+          counts = const {};
+        }
+        if (!_current(request, scope) ||
+            localRequest != _localRequest ||
+            _unreadDirty) {
+          continue;
+        }
+        emit(
+          state.copyWith(
+            unreadCounts: Map.unmodifiable({
+              for (final entry in counts.entries)
+                if (ids.contains(entry.key) && entry.value > 0)
+                  entry.key: entry.value,
+            }),
+            errorMessage: state.errorMessage,
+          ),
+        );
+      }
+    } finally {
+      _unreadRefresh = null;
+    }
   }
 
   bool _current(int request, Object scope) =>
@@ -153,21 +324,11 @@ class BookshelfCubit extends Cubit<BookshelfState> {
   });
 
   Future<void> loadBookcases() {
-    if (isClosed) return Future.value();
+    if (isClosed || !_wenku8Enabled) return Future.value();
     final scope = _scope();
     if (_loadedScope != scope) {
-      _request++;
+      invalidateWenku8();
       _loadedScope = scope;
-      _refresh = null;
-      _caseLoads.clear();
-      emit(
-        BookshelfState(
-          tip: '',
-          status: BookshelfStatus.initial,
-          bookcases: const [],
-          bookcaseContents: const {},
-        ),
-      );
     }
     if (_refresh case final pending?) return pending;
     final request = _request;
@@ -206,15 +367,22 @@ class BookshelfCubit extends Cubit<BookshelfState> {
       final (bookcases, id, content) = snapshot;
       if (bookcases.isEmpty) {
         emit(
-          BookshelfState(
+          state.copyWith(
             tip: '',
             status: BookshelfStatus.success,
             bookcases: const [],
             bookcaseContents: const {},
+            isRefreshing: false,
+            isSelecting: false,
+            selectedBids: const {},
           ),
         );
+        unawaited(refreshUnreadCounts());
         return;
       }
+      final current = state.currentCaseId;
+      final selected =
+          bookcases.any((group) => group.id == current) ? current! : id!;
       final contents = <String, List<BookcaseItem>>{
         for (final entry in state.bookcaseContents.entries)
           if (bookcases.any((b) => b.id == entry.key)) entry.key: entry.value,
@@ -222,14 +390,15 @@ class BookshelfCubit extends Cubit<BookshelfState> {
       };
       emit(
         state.copyWith(
-          tip: content.tip,
+          tip: selected == id ? content.tip : state.tip,
           status: BookshelfStatus.success,
           bookcases: bookcases,
-          currentCaseId: id,
+          currentCaseId: selected,
           bookcaseContents: contents,
-          isRefreshing: false,
+          isRefreshing: _caseLoads.containsKey(selected),
         ),
       );
+      unawaited(refreshUnreadCounts());
     } catch (e) {
       accepting = false;
       if (!_current(request, scope)) return;
@@ -246,41 +415,17 @@ class BookshelfCubit extends Cubit<BookshelfState> {
               ? BookshelfStatus.error
               : BookshelfStatus.success,
       isRefreshing: false,
-      errorMessage:
-          activeSource.value == SourceId.wenku8
-              ? wenku8ReadErrorMessage(error)
-              : '书架暂时无法加载，请稍后重试。',
+      errorMessage: wenku8ReadErrorMessage(error),
     ),
   );
-
-  /// WebView 成功取得書架資料後呼叫
-  void loadFromWebViewData(
-    List<Bookcase> bookcases,
-    Map<String, BookcaseDto> bookcaseContents,
-  ) {
-    final tip =
-        bookcaseContents.values.isNotEmpty
-            ? bookcaseContents.values.last.tip
-            : '';
-    final contents = bookcaseContents.map((k, v) => MapEntry(k, v.items));
-    emit(
-      state.copyWith(
-        tip: tip,
-        status: BookshelfStatus.success,
-        bookcases: bookcases,
-        currentCaseId: bookcases.isNotEmpty ? bookcases.first.id : null,
-        bookcaseContents: contents,
-      ),
-    );
-  }
-
-  void setError(String message) {
-    emit(state.copyWith(status: BookshelfStatus.error, errorMessage: message));
-  }
 
   Future<void> selectBookcase(String caseId) async {
     if (isClosed || !state.bookcases.any((b) => b.id == caseId)) return;
     final request = _request, scope = _scope();
+    if (_loadedScope != scope) {
+      await loadBookcases();
+      return;
+    }
     emit(
       state.copyWith(
         currentCaseId: caseId,
@@ -291,15 +436,20 @@ class BookshelfCubit extends Cubit<BookshelfState> {
     );
     try {
       final content = await _case(caseId);
-      if (!_current(request, scope)) return;
+      if (!_current(request, scope) ||
+          !state.bookcases.any((group) => group.id == caseId)) {
+        return;
+      }
+      final selected = state.currentCaseId == caseId;
       emit(
         state.copyWith(
           bookcaseContents: {...state.bookcaseContents, caseId: content.items},
-          isRefreshing:
-              state.currentCaseId == caseId ? false : state.isRefreshing,
-          tip: content.tip,
+          isRefreshing: selected ? false : state.isRefreshing,
+          tip: selected ? content.tip : state.tip,
+          errorMessage: selected ? null : state.errorMessage,
         ),
       );
+      unawaited(refreshUnreadCounts());
     } catch (error) {
       if (_current(request, scope) && state.currentCaseId == caseId) {
         _readFailed(error);
@@ -327,7 +477,11 @@ class BookshelfCubit extends Cubit<BookshelfState> {
   }
 
   Future<void> moveSelectedBooks(String toBookcaseId) async {
-    if (state.selectedBids.isEmpty || state.currentCaseId == null) return;
+    if (!_wenku8Enabled ||
+        state.selectedBids.isEmpty ||
+        state.currentCaseId == null) {
+      return;
+    }
 
     final bidsToMove = Set<String>.from(state.selectedBids);
     final fromId = state.currentCaseId!;
@@ -356,10 +510,14 @@ class BookshelfCubit extends Cubit<BookshelfState> {
     final newContents = Map<String, List<BookcaseItem>>.from(
       state.bookcaseContents,
     );
-    newContents[fromId] =
-        (newContents[fromId] ?? [])
-            .where((b) => !bidsToMove.contains(b.bid))
-            .toList();
+    final affected =
+        toBookcaseId == '-1' ? newContents.keys.toList() : [fromId];
+    for (final id in affected) {
+      newContents[id] =
+          (newContents[id] ?? [])
+              .where((b) => !bidsToMove.contains(b.bid))
+              .toList();
+    }
     emit(
       state.copyWith(
         bookcaseContents: newContents,
@@ -367,12 +525,19 @@ class BookshelfCubit extends Cubit<BookshelfState> {
         isSelecting: false,
       ),
     );
+    unawaited(refreshUnreadCounts());
 
     // 背景刷新伺服器資料（失敗不影響已更新的 UI）
     unawaited(_refreshBookcasesInBackground());
   }
 
   Future<void> addToBookshelf(String aid) async {
+    if (sourceOf(aid) != SourceId.wenku8) {
+      await addBookshelf(aid: aid);
+      await _reloadLocalBooks();
+      return;
+    }
+    if (!_wenku8Enabled) throw StateError('请先登录文库8');
     final request = _request, scope = _scope();
     try {
       await addBookshelf(aid: aid);
@@ -396,6 +561,25 @@ class BookshelfCubit extends Cubit<BookshelfState> {
   Future<void> removeFromBookshelf(String aid) async {
     final bid = state.getBookBid(aid);
     if (bid == null) return;
+    final source = sourceOf(aid);
+    if (source != SourceId.wenku8) {
+      await deleteBookcase(bid: bid);
+      if (isClosed) return;
+      if (state.localBooks[source] case final books?) {
+        emit(
+          state.copyWith(
+            localBooks: {
+              ...state.localBooks,
+              source: books.where((item) => item.book.aid != aid).toList(),
+            },
+            errorMessage: state.errorMessage,
+          ),
+        );
+      }
+      await _reloadLocalBooks();
+      return;
+    }
+    if (!_wenku8Enabled) return;
     final request = _request, scope = _scope();
 
     try {
@@ -419,6 +603,7 @@ class BookshelfCubit extends Cubit<BookshelfState> {
       newContents[entry.key] = entry.value.where((b) => b.bid != bid).toList();
     }
     emit(state.copyWith(bookcaseContents: newContents));
+    unawaited(refreshUnreadCounts());
 
     // 背景刷新伺服器資料（失敗不影響已更新的 UI）
     unawaited(_refreshBookcasesInBackground());
@@ -427,5 +612,11 @@ class BookshelfCubit extends Cubit<BookshelfState> {
   /// 背景靜默刷新書架，失敗時不改變 UI 狀態
   Future<void> _refreshBookcasesInBackground() async {
     await loadBookcases();
+  }
+
+  Future<void> _reloadLocalBooks() {
+    _localRequest++;
+    _localRefresh = null;
+    return loadLocalShelves(refresh: true);
   }
 }

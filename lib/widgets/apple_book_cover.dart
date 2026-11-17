@@ -12,19 +12,21 @@ class AppleBookCover extends StatelessWidget {
     this.onTap,
     this.author,
     this.showAuthor = false,
+    this.coverBadge,
   });
   final String title, url;
   final SourceId source;
   final VoidCallback? onTap;
   final String? author;
   final bool showAuthor;
+  final Widget? coverBadge;
   @override
   Widget build(BuildContext context) {
     final scaler = MediaQuery.textScalerOf(context);
     final captionHeight =
         scaler.scale(14) * 1.3 * 2 +
         10 +
-        (!showAuthor ? 0 : scaler.scale(12) * 1.3 + 4);
+        (!showAuthor ? 0 : (scaler.scale(12) * 1.3).ceilToDouble() + 4);
     return InkWell(
       borderRadius: BorderRadius.circular(16),
       onTap: onTap,
@@ -36,18 +38,27 @@ class AppleBookCover extends StatelessWidget {
               key: const ValueKey('book-cover-frame'),
               borderRadius: BorderRadius.circular(16),
               child: LayoutBuilder(
-                builder:
-                    (context, box) => BookCoverImage(
-                      url: url,
-                      source: source,
-                      width: double.infinity,
-                      height: double.infinity,
-                      fit: BoxFit.cover,
-                      cacheWidth:
-                          (box.maxWidth *
-                                  MediaQuery.devicePixelRatioOf(context))
-                              .ceil(),
-                    ),
+                builder: (context, box) {
+                  final cover = BookCoverImage(
+                    url: url,
+                    source: source,
+                    width: double.infinity,
+                    height: double.infinity,
+                    fit: BoxFit.cover,
+                    cacheWidth:
+                        (box.maxWidth * MediaQuery.devicePixelRatioOf(context))
+                            .ceil(),
+                  );
+                  final badge = coverBadge;
+                  if (badge == null) return cover;
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      cover,
+                      Positioned(top: 0, left: 0, child: badge),
+                    ],
+                  );
+                },
               ),
             ),
           ),

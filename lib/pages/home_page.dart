@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/book_source.dart';
@@ -29,13 +31,14 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int _currentIndex = 0;
   late final HistoryCubit _historyCubit;
+  late final StreamSubscription<AuthState> _authSubscription;
   late List<Widget> _tabPages = _createTabPages();
 
   List<Widget> _createTabPages() {
     final sourceKey = '${activeSource.value}:${sourceRevision.value}';
     return [
       IndexPage(key: ValueKey('index:$sourceKey')),
-      BookshelfPage(key: ValueKey('shelf:$sourceKey')),
+      const BookshelfPage(),
       HistoryPage(key: ValueKey('history:$sourceKey')),
       MorePage(key: ValueKey(activeSource.value)),
     ];
@@ -49,6 +52,10 @@ class _HomePageState extends State<HomePage> {
     _historyCubit = HistoryCubit()..load();
     // 加载书架数据
     _loadBookshelf();
+    _authSubscription = context.read<AuthCubit>().stream.listen((_) {
+      if (mounted) _loadBookshelf();
+    });
+    wenku8ShelfRevision.addListener(_wenku8ScopeChanged);
     activeSource.addListener(_sourceChanged);
     sourceRevision.addListener(_sourceChanged);
     // 自动签到
@@ -87,6 +94,8 @@ class _HomePageState extends State<HomePage> {
     widget.tabSelection?.removeListener(_selectExternalTab);
     activeSource.removeListener(_sourceChanged);
     sourceRevision.removeListener(_sourceChanged);
+    wenku8ShelfRevision.removeListener(_wenku8ScopeChanged);
+    unawaited(_authSubscription.cancel());
     _historyCubit.close();
     super.dispose();
   }
@@ -109,12 +118,19 @@ class _HomePageState extends State<HomePage> {
 
   void _loadBookshelf() {
     final shelf = context.read<BookshelfCubit>();
-    if (activeSource.value == SourceId.wenku8 &&
-        context.read<AuthCubit>().state.status != AuthStatus.authenticated) {
-      shelf.resetForGuest();
-    } else {
-      shelf.loadBookcases();
+    final enabled =
+        context.read<AuthCubit>().state.status == AuthStatus.authenticated;
+    shelf.setWenku8Enabled(enabled);
+    unawaited(shelf.loadLocalShelves());
+    if (enabled &&
+        (activeSource.value == SourceId.wenku8 || _currentIndex == 1) &&
+        shelf.state.status == BookshelfStatus.initial) {
+      unawaited(shelf.loadBookcases());
     }
+  }
+
+  void _wenku8ScopeChanged() {
+    if (mounted) context.read<BookshelfCubit>().invalidateWenku8();
   }
 
   void _sourceChanged() {
@@ -134,6 +150,10 @@ class _HomePageState extends State<HomePage> {
       if (index == 2) {
         _historyCubit.load(keepContent: true);
       }
+    }
+    if (index == 1) {
+      _loadBookshelf();
+      unawaited(context.read<BookshelfCubit>().refreshUnreadCounts());
     }
   }
 

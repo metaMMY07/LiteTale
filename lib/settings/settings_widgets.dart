@@ -463,18 +463,21 @@ Future<T?> chooseSetting<T>(
         contentPadding: const EdgeInsets.symmetric(vertical: 16),
         content: SizedBox(
           width: 360,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final entry in options.entries)
-                  AppRadioListTile<T>(
-                    title: Text(entry.value),
-                    value: entry.key,
-                    groupValue: selected,
-                    onChanged: (v) => Navigator.pop(context, v),
-                  ),
-              ],
+          child: Material(
+            type: MaterialType.transparency,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final entry in options.entries)
+                    AppRadioListTile<T>(
+                      title: Text(entry.value),
+                      value: entry.key,
+                      groupValue: selected,
+                      onChanged: (v) => Navigator.pop(context, v),
+                    ),
+                ],
+              ),
             ),
           ),
         ),

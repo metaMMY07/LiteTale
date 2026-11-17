@@ -20,6 +20,7 @@ class NovelCard extends StatelessWidget {
   final EdgeInsetsGeometry? padding;
   final bool showAuthor;
   final SourceId source;
+  final Widget? coverBadge;
 
   const NovelCard({
     super.key,
@@ -34,6 +35,7 @@ class NovelCard extends StatelessWidget {
     this.elevation = 0.5,
     this.padding,
     this.showAuthor = true,
+    this.coverBadge,
     required this.source,
   });
 
@@ -114,12 +116,23 @@ class NovelCard extends StatelessWidget {
         author: showAuthor ? author : null,
         showAuthor: showAuthor,
         onTap: onTap,
+        coverBadge: coverBadge,
       );
     }
     final cardRadius =
         borderRadius ?? BorderRadius.circular(usesMaterialYou ? 16 : 4);
     final logicalCoverWidth =
         width != null && width!.isFinite && width! > 0 ? width! : 220.0;
+    final cover = BookCoverImage(
+      url: coverUrl,
+      source: source,
+      fit: fit,
+      width: width ?? double.infinity,
+      height: height,
+      cacheWidth:
+          (logicalCoverWidth * MediaQuery.devicePixelRatioOf(context)).ceil(),
+    );
+    final badge = coverBadge;
     return Card(
       clipBehavior: Clip.antiAlias,
       elevation: elevation,
@@ -131,16 +144,16 @@ class NovelCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: BookCoverImage(
-                url: coverUrl,
-                source: source,
-                fit: fit,
-                width: width ?? double.infinity,
-                height: height,
-                cacheWidth:
-                    (logicalCoverWidth * MediaQuery.devicePixelRatioOf(context))
-                        .ceil(),
-              ),
+              child:
+                  badge == null
+                      ? cover
+                      : Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          cover,
+                          Positioned(top: 0, left: 0, child: badge),
+                        ],
+                      ),
             ),
             Padding(
               padding: padding ?? EdgeInsets.all(usesMaterialYou ? 10 : 4),
