@@ -346,6 +346,83 @@ class AppleGlassBottomBar extends StatelessWidget {
   );
 }
 
+class AppleGlassAction {
+  const AppleGlassAction({
+    required this.id,
+    required this.label,
+    required this.symbol,
+    required this.fallbackIcon,
+    this.onPressed,
+  });
+
+  final String id, label, symbol;
+  final IconData fallbackIcon;
+  final VoidCallback? onPressed;
+}
+
+/// A single neutral glass capsule with system symbols and native hit targets.
+class AppleGlassActions extends StatelessWidget {
+  const AppleGlassActions({super.key, required this.actions});
+
+  final List<AppleGlassAction> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final fallback = DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Row(
+        children: [
+          for (final action in actions)
+            Expanded(
+              child: IconButton(
+                tooltip: action.label,
+                padding: EdgeInsets.zero,
+                color: colors.onSurface,
+                iconSize: 20,
+                onPressed: action.onPressed,
+                icon: Icon(action.fallbackIcon),
+              ),
+            ),
+        ],
+      ),
+    );
+    return SizedBox(
+      width: actions.length * 44.0,
+      height: 44,
+      child: _AppleChrome(
+        parameters: {
+          'kind': 'actions',
+          'capsule': true,
+          'dark': Theme.of(context).brightness == Brightness.dark,
+          'actions': [
+            for (final action in actions)
+              {
+                'id': action.id,
+                'label': action.label,
+                'symbol': action.symbol,
+                'enabled': action.onPressed != null,
+              },
+          ],
+        },
+        onAction: (id, _) {
+          for (final action in actions) {
+            if (id == action.id) {
+              action.onPressed?.call();
+              return;
+            }
+          }
+        },
+        fallback: fallback,
+        attachmentFallback: fallback,
+      ),
+    );
+  }
+}
+
 class AppleGlassToolbar extends StatelessWidget {
   const AppleGlassToolbar({
     super.key,
@@ -920,8 +997,8 @@ class _AppleChromeState extends State<_AppleChrome> {
   Widget build(BuildContext context) {
     final current = _route?.isCurrent != false;
     final onstage = TickerMode.of(context) && _route?.offstage != true;
-    final interactive =
-        current && onstage && IosPageArrival.chromeAtRestOf(context);
+    final atRest = IosPageArrival.chromeAtRestOf(context);
+    final interactive = current && onstage && atRest;
     if (kIsWeb || !Platform.isIOS) {
       return Offstage(
         offstage: !onstage,

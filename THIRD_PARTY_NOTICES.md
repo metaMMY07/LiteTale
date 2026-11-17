@@ -36,6 +36,10 @@ Android 集成测试包含上述字体的少量字符 WOFF2 子集，仅用于�
 
 加载指示器使用 [`material_new_shapes`](https://pub.dev/packages/material_new_shapes) 1.0.0 的 Flutter 多边形与 Morph 几何实现，许可为 MIT；版权归 2025 Agbama Gifted，许可文本见 [LICENSES/material_new_shapes-MIT.txt](LICENSES/material_new_shapes-MIT.txt)。形状顺序参考 AndroidX Material 3 的公开实现，应用中的加载组件由本项目实现。
 
+## 书架图标
+
+iOS 书架使用 [Tabler Icons v3.30.0](https://github.com/tabler/tabler-icons/tree/v3.30.0) 的文件夹、书本、勾选及首页轮廓。版权归 2020–2024 Paweł Kuna，许可文本见 [LICENSES/tabler-icons-MIT.txt](LICENSES/tabler-icons-MIT.txt)。
+
 ## 听书
 
 在线音色使用 Moosphan 维护的 Flutter Edge TTS，固定提交为 `a06632a85255916ffacb21543a36c77026a2f950`。该库以 MIT 许可发布，其中源自 rany2/edge-tts 的实现按 LGPL-3.0-or-later 使用。依赖源码保留原版权和许可。 [Flutter Edge TTS 许可声明](https://github.com/Moosphan/flutter_edge_tts/blob/a06632a85255916ffacb21543a36c77026a2f950/NOTICE)

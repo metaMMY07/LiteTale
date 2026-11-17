@@ -1,11 +1,15 @@
 import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:wild/services/bookshelf_organization.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/utils/wenku8_network_error.dart';
 
 enum BookshelfStatus { initial, loading, success, error, cloudflareChallenge }
+
+typedef Wenku8ShelfAction = ({String from, String to, List<String> bids});
+typedef ConfirmWenku8ShelfAction = Future<bool> Function(Wenku8ShelfAction);
 
 class BookshelfState {
   final String tip;
@@ -14,8 +18,6 @@ class BookshelfState {
   final String? currentCaseId;
   final Map<String, List<BookcaseItem>> bookcaseContents;
   final String? errorMessage;
-  final Set<String> selectedBids; // 选中的书籍 bid 集合
-  final bool isSelecting; // 是否处于多选模式
   final bool isRefreshing;
   final bool wenku8Enabled;
   final Map<SourceId, List<LocalShelfEntry>> localBooks;
@@ -30,8 +32,6 @@ class BookshelfState {
     this.currentCaseId,
     required this.bookcaseContents,
     this.errorMessage,
-    this.selectedBids = const {},
-    this.isSelecting = false,
     this.isRefreshing = false,
     this.wenku8Enabled = false,
     this.localBooks = const {},
@@ -47,8 +47,6 @@ class BookshelfState {
     String? currentCaseId,
     Map<String, List<BookcaseItem>>? bookcaseContents,
     String? errorMessage,
-    Set<String>? selectedBids,
-    bool? isSelecting,
     bool? isRefreshing,
     Map<SourceId, List<LocalShelfEntry>>? localBooks,
     bool? isLoadingLocalBooks,
@@ -65,8 +63,6 @@ class BookshelfState {
               : currentCaseId ?? this.currentCaseId,
       bookcaseContents: bookcaseContents ?? this.bookcaseContents,
       errorMessage: errorMessage,
-      selectedBids: selectedBids ?? this.selectedBids,
-      isSelecting: isSelecting ?? this.isSelecting,
       isRefreshing: isRefreshing ?? this.isRefreshing,
       wenku8Enabled: wenku8Enabled,
       localBooks: localBooks ?? this.localBooks,
@@ -107,8 +103,6 @@ class BookshelfState {
     }
     return null;
   }
-
-  bool isBookSelected(String bid) => selectedBids.contains(bid);
 }
 
 class BookshelfCubit extends Cubit<BookshelfState> {
@@ -119,6 +113,9 @@ class BookshelfCubit extends Cubit<BookshelfState> {
     Iterable<SourceId> Function()? localSources,
     Future<List<LocalShelfEntry>> Function(SourceId)? loadLocal,
     Future<Map<String, int>> Function(Iterable<String>)? loadUnread,
+    Future<void> Function(SourceId, Set<String>)? deleteLocal,
+    Future<void> Function(Wenku8ShelfAction)? writeRemote,
+    BookshelfOrganization? organization,
     this.requestTimeout = const Duration(seconds: 40),
   }) : _loadCases = loadCases ?? (() => bookcaseList(source: SourceId.wenku8)),
        _loadCase = loadCase ?? wenku8BookInCase,
@@ -126,6 +123,9 @@ class BookshelfCubit extends Cubit<BookshelfState> {
        _localSources = localSources ?? (() => localShelfSources),
        _loadLocal = loadLocal ?? loadLocalShelf,
        _loadUnread = loadUnread ?? loadShelfUnreadCounts,
+       _deleteLocal = deleteLocal ?? deleteLocalShelfBooks,
+       _writeRemote = writeRemote ?? _writeWenku8,
+       organization = organization ?? BookshelfOrganization(),
        super(
          BookshelfState(
            tip: '',
@@ -141,6 +141,10 @@ class BookshelfCubit extends Cubit<BookshelfState> {
   final Iterable<SourceId> Function() _localSources;
   final Future<List<LocalShelfEntry>> Function(SourceId) _loadLocal;
   final Future<Map<String, int>> Function(Iterable<String>) _loadUnread;
+  final Future<void> Function(SourceId, Set<String>) _deleteLocal;
+  final Future<void> Function(Wenku8ShelfAction) _writeRemote;
+  final BookshelfOrganization organization;
+  Object get wenku8Scope => _scope();
   final Duration requestTimeout;
   Object? _loadedScope;
   Future<void>? _refresh;
@@ -373,8 +377,6 @@ class BookshelfCubit extends Cubit<BookshelfState> {
             bookcases: const [],
             bookcaseContents: const {},
             isRefreshing: false,
-            isSelecting: false,
-            selectedBids: const {},
           ),
         );
         unawaited(refreshUnreadCounts());
@@ -426,14 +428,7 @@ class BookshelfCubit extends Cubit<BookshelfState> {
       await loadBookcases();
       return;
     }
-    emit(
-      state.copyWith(
-        currentCaseId: caseId,
-        isRefreshing: true,
-        selectedBids: {},
-        isSelecting: false,
-      ),
-    );
+    emit(state.copyWith(currentCaseId: caseId, isRefreshing: true));
     try {
       final content = await _case(caseId);
       if (!_current(request, scope) ||
@@ -457,78 +452,161 @@ class BookshelfCubit extends Cubit<BookshelfState> {
     }
   }
 
-  void toggleSelectMode() {
-    emit(
-      state.copyWith(
-        isSelecting: !state.isSelecting,
-        selectedBids: state.isSelecting ? {} : state.selectedBids,
-      ),
-    );
-  }
+  static Future<void> _writeWenku8(Wenku8ShelfAction action) => moveBookcase(
+    bidList: action.bids,
+    fromBookcaseId: action.from,
+    toBookcaseId: action.to,
+  );
 
-  void toggleBookSelection(String bid) {
-    final newSelectedBids = Set<String>.from(state.selectedBids);
-    if (newSelectedBids.contains(bid)) {
-      newSelectedBids.remove(bid);
-    } else {
-      newSelectedBids.add(bid);
+  Future<bool> _submitWenku8(
+    Wenku8ShelfAction action,
+    int request,
+    Object scope,
+    ConfirmWenku8ShelfAction? confirm,
+  ) async {
+    if (!_wenku8Enabled || _loadedScope != scope || !_current(request, scope)) {
+      return false;
     }
-    emit(state.copyWith(selectedBids: newSelectedBids));
-  }
-
-  Future<void> moveSelectedBooks(String toBookcaseId) async {
-    if (!_wenku8Enabled ||
-        state.selectedBids.isEmpty ||
-        state.currentCaseId == null) {
-      return;
-    }
-
-    final bidsToMove = Set<String>.from(state.selectedBids);
-    final fromId = state.currentCaseId!;
-    final request = _request, scope = _scope();
-
     try {
-      await moveBookcase(
-        bidList: bidsToMove.toList(),
-        fromBookcaseId: fromId,
-        toBookcaseId: toBookcaseId,
-      );
-    } catch (e) {
-      if (!_current(request, scope)) return;
-      if (shouldUseWenku8WebViewFallback(e)) {
-        rethrow; // 讓 UI 層用 WebView 重試
+      await _writeRemote(action);
+    } catch (error) {
+      if (!_current(request, scope)) return false;
+      if (confirm == null ||
+          !shouldUseWenku8WebViewFallback(error) ||
+          !await confirm(action)) {
+        if (_current(request, scope)) _readFailed(error);
+        return false;
       }
-      _readFailed(e);
-      return;
     }
-    if (!_current(request, scope)) return;
+    return _current(request, scope);
+  }
+
+  Future<Set<String>> moveWenku8Books(
+    Set<String> ids, {
+    required String from,
+    required String to,
+    ConfirmWenku8ShelfAction? confirm,
+  }) async {
+    if (from == to || !state.bookcases.any((group) => group.id == to)) {
+      return const {};
+    }
+    final books =
+        (state.bookcaseContents[from] ?? const <BookcaseItem>[])
+            .where((book) => ids.contains(book.aid))
+            .toList();
+    if (books.isEmpty || books.length != ids.length) return const {};
+    final request = _request, scope = _scope();
+    if (!await _submitWenku8(
+      (from: from, to: to, bids: books.map((book) => book.bid).toList()),
+      request,
+      scope,
+      confirm,
+    )) {
+      return const {};
+    }
+    final contents = {
+      ...state.bookcaseContents,
+      from:
+          state.bookcaseContents[from]!
+              .where((book) => !ids.contains(book.aid))
+              .toList(),
+      if (state.bookcaseContents[to] case final destination?)
+        to: [...destination.where((book) => !ids.contains(book.aid)), ...books],
+    };
+    _acceptWenku8Write(contents);
+    return ids;
+  }
+
+  Future<Set<String>> removeShelfBooks(
+    Set<String> ids, {
+    ConfirmWenku8ShelfAction? confirm,
+  }) async {
+    final request = _request, scope = _scope();
+    final revision = sourceRevision.value;
+    final local = <SourceId, Set<String>>{};
+    final remote = <String>{};
+    for (final id in ids) {
+      if (!state.isBookInBookshelf(id)) continue;
+      final source = sourceOf(id);
+      if (source == SourceId.wenku8) {
+        remote.add(id);
+      } else {
+        (local[source] ??= {}).add(id);
+      }
+    }
+
+    final removed = <String>{};
+    for (final entry in local.entries) {
+      if (isClosed || sourceRevision.value != revision) break;
+      try {
+        await _deleteLocal(entry.key, entry.value);
+        removed.addAll(entry.value);
+      } catch (_) {
+        // Other sources can still complete. Failed items remain selected.
+      }
+    }
+    if (removed.isNotEmpty && !isClosed) {
+      _hideLocalBooks(removed);
+      unawaited(_reloadLocalBooks());
+    }
+
+    final remoteRemoved = <String>{};
+    final groups = {
+      if (state.currentCaseId case final current?) current,
+      for (final group in state.bookcases) group.id,
+    };
+    for (final id in groups) {
+      if (remote.isEmpty || !_current(request, scope)) break;
+      final books =
+          (state.bookcaseContents[id] ?? const <BookcaseItem>[])
+              .where((book) => remote.contains(book.aid))
+              .toList();
+      if (books.isEmpty) continue;
+      final bookIds = books.map((book) => book.aid);
+      remote.removeAll(bookIds);
+      if (await _submitWenku8(
+        (from: id, to: '-1', bids: books.map((book) => book.bid).toList()),
+        request,
+        scope,
+        confirm,
+      )) {
+        remoteRemoved.addAll(bookIds);
+      }
+    }
+    if (remoteRemoved.isNotEmpty && _current(request, scope)) {
+      _acceptWenku8Write({
+        for (final entry in state.bookcaseContents.entries)
+          entry.key:
+              entry.value
+                  .where((book) => !remoteRemoved.contains(book.aid))
+                  .toList(),
+      });
+    }
+    return removed..addAll(remoteRemoved);
+  }
+
+  void _acceptWenku8Write(Map<String, List<BookcaseItem>> contents) {
     _request++;
     _refresh = null;
     _caseLoads.clear();
+    emit(state.copyWith(bookcaseContents: contents));
+    unawaited(refreshUnreadCounts());
+    unawaited(loadBookcases());
+  }
 
-    // 寫入成功 → 樂觀更新本地狀態，無需等伺服器回傳
-    final newContents = Map<String, List<BookcaseItem>>.from(
-      state.bookcaseContents,
-    );
-    final affected =
-        toBookcaseId == '-1' ? newContents.keys.toList() : [fromId];
-    for (final id in affected) {
-      newContents[id] =
-          (newContents[id] ?? [])
-              .where((b) => !bidsToMove.contains(b.bid))
-              .toList();
-    }
+  void _hideLocalBooks(Set<String> removed) {
     emit(
       state.copyWith(
-        bookcaseContents: newContents,
-        selectedBids: {},
-        isSelecting: false,
+        localBooks: {
+          for (final entry in state.localBooks.entries)
+            entry.key:
+                entry.value
+                    .where((item) => !removed.contains(item.book.aid))
+                    .toList(),
+        },
+        errorMessage: state.errorMessage,
       ),
     );
-    unawaited(refreshUnreadCounts());
-
-    // 背景刷新伺服器資料（失敗不影響已更新的 UI）
-    unawaited(_refreshBookcasesInBackground());
   }
 
   Future<void> addToBookshelf(String aid) async {
@@ -563,19 +641,10 @@ class BookshelfCubit extends Cubit<BookshelfState> {
     if (bid == null) return;
     final source = sourceOf(aid);
     if (source != SourceId.wenku8) {
-      await deleteBookcase(bid: bid);
+      await _deleteLocal(source, {aid});
       if (isClosed) return;
-      if (state.localBooks[source] case final books?) {
-        emit(
-          state.copyWith(
-            localBooks: {
-              ...state.localBooks,
-              source: books.where((item) => item.book.aid != aid).toList(),
-            },
-            errorMessage: state.errorMessage,
-          ),
-        );
-      }
+      _hideLocalBooks({aid});
+      unawaited(_forgetOrganization(aid));
       await _reloadLocalBooks();
       return;
     }
@@ -593,30 +662,30 @@ class BookshelfCubit extends Cubit<BookshelfState> {
       return;
     }
     if (!_current(request, scope)) return;
-    _request++;
-    _refresh = null;
-    _caseLoads.clear();
-
-    // 寫入成功 → 樂觀從本地狀態移除
-    final newContents = <String, List<BookcaseItem>>{};
-    for (final entry in state.bookcaseContents.entries) {
-      newContents[entry.key] = entry.value.where((b) => b.bid != bid).toList();
-    }
-    emit(state.copyWith(bookcaseContents: newContents));
-    unawaited(refreshUnreadCounts());
-
-    // 背景刷新伺服器資料（失敗不影響已更新的 UI）
-    unawaited(_refreshBookcasesInBackground());
+    _acceptWenku8Write({
+      for (final entry in state.bookcaseContents.entries)
+        entry.key: entry.value.where((book) => book.aid != aid).toList(),
+    });
+    unawaited(_forgetOrganization(aid));
   }
 
-  /// 背景靜默刷新書架，失敗時不改變 UI 狀態
-  Future<void> _refreshBookcasesInBackground() async {
-    await loadBookcases();
+  Future<void> _forgetOrganization(String aid) async {
+    try {
+      await organization.removeItems(books: {aid});
+    } catch (_) {
+      // The source has already removed the favorite.
+    }
   }
 
   Future<void> _reloadLocalBooks() {
     _localRequest++;
     _localRefresh = null;
     return loadLocalShelves(refresh: true);
+  }
+
+  @override
+  Future<void> close() {
+    organization.dispose();
+    return super.close();
   }
 }

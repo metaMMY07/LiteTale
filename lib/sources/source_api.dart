@@ -1001,10 +1001,19 @@ Future<void> deleteBookcase({required String bid}) async {
     return;
   }
   if (sourceOf(bid) == SourceId.wenku8) return w8.deleteBookcase(bid: bid);
-  final shelfKey = _shelfKeyFor(sourceOf(bid));
-  await _serial(() async {
+  return deleteLocalShelfBooks(sourceOf(bid), {bid});
+}
+
+Future<void> deleteLocalShelfBooks(SourceId source, Set<String> ids) {
+  if (source == SourceId.wenku8 ||
+      source == SourceId.localEpub ||
+      ids.any((id) => sourceOf(id) != source)) {
+    throw ArgumentError('收藏与书源不匹配');
+  }
+  final shelfKey = _shelfKeyFor(source);
+  return _serial(() async {
     final items = await _jsonList(shelfKey);
-    items.removeWhere((b) => b['id'] == bid);
+    items.removeWhere((b) => ids.contains(b['id']));
     await db.saveProperty(key: shelfKey, value: jsonEncode(items));
   });
 }

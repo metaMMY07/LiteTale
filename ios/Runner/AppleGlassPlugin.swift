@@ -38,6 +38,7 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
   private var surface: UIVisualEffectView?
   private var surfaceTint: UInt32?
   private var surfaceCapsule = false
+  private var actionBar: UIStackView?
   private var menuButton: UIButton?
   private var menuItems: [[String: String]] = []
   private var applyingSelection = false
@@ -73,7 +74,7 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       // A thumb image or thumbTintColor would override the system material.
       slider = control
       addSubview(control)
-    } else if kind == "surface" {
+    } else if kind == "surface" || kind == "actions" {
       surfaceCapsule = config["capsule"] as? Bool ?? false
       let effect: UIVisualEffect
       if #available(iOS 26.0, *) { effect = UIGlassEffect(style: .regular) }
@@ -82,6 +83,12 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       view.isUserInteractionEnabled = false
       surface = view; addSubview(view)
       layer.cornerRadius = 20; clipsToBounds = true
+      if kind == "actions" {
+        let stack = UIStackView()
+        stack.distribution = .fillEqually
+        actionBar = stack
+        addSubview(stack)
+      }
     } else if kind == "menu" {
       let button = UIButton(type: .system)
       prepare(button, symbol: "line.3.horizontal.decrease", title: "分类")
@@ -209,6 +216,7 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       return
     }
     if let surface {
+      if let actionBar { updateActions(actionBar, config: config) }
       surfaceCapsule = config["capsule"] as? Bool ?? false
       setNeedsLayout()
       let argb = (config["tint"] as? NSNumber)?.uint32Value
@@ -295,6 +303,36 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     }
   }
 
+  private func updateActions(_ stack: UIStackView, config: [String: Any]) {
+    let actions = config["actions"] as? [[String: Any]] ?? []
+    while stack.arrangedSubviews.count > actions.count {
+      guard let view = stack.arrangedSubviews.last else { break }
+      stack.removeArrangedSubview(view)
+      view.removeFromSuperview()
+    }
+    while stack.arrangedSubviews.count < actions.count {
+      let button = UIButton(type: .system)
+      button.tintColor = .label
+      button.addTarget(self, action: #selector(activateAction(_:)), for: .touchUpInside)
+      stack.addArrangedSubview(button)
+    }
+    let symbolStyle = UIImage.SymbolConfiguration(pointSize: 19, weight: .regular)
+    for (view, action) in zip(stack.arrangedSubviews, actions) {
+      guard let button = view as? UIButton else { continue }
+      button.accessibilityIdentifier = action["id"] as? String
+      button.accessibilityLabel = action["label"] as? String
+      button.isEnabled = action["enabled"] as? Bool ?? false
+      if let symbol = action["symbol"] as? String {
+        button.setImage(UIImage(systemName: symbol, withConfiguration: symbolStyle), for: .normal)
+      }
+    }
+  }
+
+  @objc private func activateAction(_ button: UIButton) {
+    guard button.isEnabled, let id = button.accessibilityIdentifier else { return }
+    channel.invokeMethod("action", arguments: ["action": id])
+  }
+
   override func didMoveToWindow() {
     super.didMoveToWindow()
     if window != nil, let tabs, tabs.parent == nil, let parentController {
@@ -307,6 +345,7 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     super.layoutSubviews()
     if let surface {
       surface.frame = bounds
+      actionBar?.frame = bounds
       if surfaceCapsule {
         // Match Flutter's StadiumBorder on both the glass and its host. An
         // outer clip alone leaves the material using its rectangular outline.

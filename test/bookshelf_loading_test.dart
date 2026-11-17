@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,13 +9,15 @@ import 'package:wild/pages/home/bookshelf_page.dart';
 import 'package:wild/pages/home/history_cubit.dart';
 import 'package:wild/pages/home/history_page.dart';
 import 'package:wild/pages/novel/reader_route.dart';
+import 'package:wild/services/bookshelf_organization.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' show LocalShelfEntry;
 import 'package:wild/sources/source_api.dart' as api;
 import 'package:wild/src/rust/api/wenku8.dart' show ReadingHistory;
 import 'package:wild/src/rust/frb_generated.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
-import 'package:wild/widgets/novel_card.dart';
+import 'package:wild/widgets/bookshelf_tile.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
 
 const groups = [
   Bookcase(id: '0', title: '全部'),
@@ -177,19 +180,22 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      final first = find.widgetWithText(NovelCard, '百科书目');
-      final second = find.widgetWithText(NovelCard, '幻梦书目');
+      final first = find.widgetWithText(BookshelfTile, '百科书目');
+      final second = find.widgetWithText(BookshelfTile, '幻梦书目');
       expect(first, findsOneWidget);
       expect(second, findsOneWidget);
       expect(
         find.descendant(of: first, matching: find.text('5')),
         findsOneWidget,
       );
-      expect(tester.widget<NovelCard>(second).coverBadge, isNull);
+      expect(tester.widget<BookshelfTile>(second).unreadCount, isNull);
 
-      await tester.tap(find.text('全部书源'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('轻小说百科').hitTestable());
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('bookshelf-sources')),
+          matching: find.text('轻小说百科'),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(first, findsOneWidget);
       expect(second, findsNothing);
@@ -202,6 +208,218 @@ void main() {
       TargetPlatform.iOS,
       TargetPlatform.android,
     }),
+  );
+
+  testWidgets(
+    'both shelf scopes can create folders, move books, reorder and remove folders',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      var storage = '';
+      final organization = BookshelfOrganization(
+        read: () async => storage,
+        write: (value) async => storage = value,
+      );
+      final cubit = BookshelfCubit(
+        organization: organization,
+        localSources: () => [SourceId.lnovel, SourceId.huanmeng],
+        loadLocal:
+            (source) async =>
+                source == SourceId.lnovel
+                    ? [localBook('lnv:1', '百科书目')]
+                    : [localBook('hm:1', '幻梦书目')],
+        loadUnread: (_) async => {},
+      )..setWenku8Enabled(false);
+      addTearDown(cubit.close);
+      await organization.load();
+      await cubit.loadLocalShelves();
+      await tester.pumpWidget(
+        BlocProvider.value(
+          value: cubit,
+          child: const MaterialApp(home: BookshelfPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        expect(
+          tester
+              .widget<AppleGlassActions>(find.byType(AppleGlassActions))
+              .actions
+              .map((action) => action.symbol),
+          ['folder.badge.plus', 'square.and.pencil'],
+        );
+      }
+      Finder tile(String title) => find.widgetWithText(BookshelfTile, title);
+      Future<void> press(Finder finder) async {
+        await tester.tap(finder);
+        await tester.pumpAndSettle();
+      }
+
+      Future<void> button(String label) => press(find.byTooltip(label));
+      Future<void> folder(String name) async {
+        await button('新建文件夹');
+        await tester.enterText(find.byType(TextField), name);
+        await tester.pump();
+        await press(find.text('创建文件夹'));
+      }
+
+      await folder('共读');
+      expect(
+        tester.getTopLeft(tile('共读')).dy,
+        tester.getTopLeft(tile('幻梦书目')).dy,
+      );
+      await button('编辑书架');
+      await press(tile('百科书目'));
+      await press(tile('幻梦书目'));
+      expect(tester.widget<BookshelfTile>(tile('百科书目')).selected, isTrue);
+      await button('移动所选书籍');
+      expect(find.text('移动 2 本书'), findsOneWidget);
+      await press(find.widgetWithText(ListTile, '共读'));
+      expect(tile('百科书目'), findsNothing);
+      expect(
+        tester
+            .widget<BookshelfFolderCover>(find.byType(BookshelfFolderCover))
+            .previews,
+        hasLength(2),
+      );
+      await button('退出编辑');
+      await press(tile('共读'));
+      expect(tile('幻梦书目'), findsOneWidget);
+      await button('重命名文件夹');
+      await tester.enterText(find.byType(TextField), '共读续');
+      await tester.pump();
+      await press(find.text('确认重命名'));
+      expect(find.text('共读续'), findsOneWidget);
+      await button('编辑书架');
+      await press(tile('百科书目'));
+      await button('移动所选书籍');
+      await press(find.widgetWithText(ListTile, '书架根目录'));
+      expect(tile('百科书目'), findsNothing);
+      tester.state<NavigatorState>(find.byType(Navigator)).pop();
+      await tester.pumpAndSettle();
+
+      await press(
+        find.descendant(
+          of: find.byKey(const ValueKey('bookshelf-sources')),
+          matching: find.text('轻小说百科'),
+        ),
+      );
+      await folder('百科分组');
+      await button('编辑书架');
+      await button('切换到拖动排序');
+      final target = tester.getCenter(tile('百科分组'));
+      final gesture = await tester.startGesture(tester.getCenter(tile('百科书目')));
+      await tester.pump(const Duration(milliseconds: 650));
+      await gesture.moveTo(target);
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(
+        organization.rootKeys(['lnv:1'], source: SourceId.lnovel).first,
+        'lnv:1',
+      );
+      await button('切换到多选');
+      await press(tile('百科书目'));
+      await button('移动所选书籍');
+      await press(find.widgetWithText(ListTile, '百科分组'));
+      await press(tile('百科分组'));
+      await button('删除所选项目');
+      await press(find.text('删除'));
+      expect(tile('百科分组'), findsNothing);
+      expect(tile('百科书目'), findsOneWidget);
+      expect(storage, contains('共读续'));
+    },
+    variant: const TargetPlatformVariant({
+      TargetPlatform.iOS,
+      TargetPlatform.android,
+    }),
+  );
+
+  test(
+    'folder data persists and a filtered reorder preserves hidden slots',
+    () async {
+      var raw = '';
+      BookshelfOrganization open() => BookshelfOrganization(
+        read: () async => raw,
+        write: (value) async => raw = value,
+      );
+      final organizer = open();
+      addTearDown(organizer.dispose);
+      const books = ['lnv:1', 'hm:1', 'lnv:2'];
+      await organizer.reorder(
+        ['lnv:2', 'lnv:1'],
+        folderId: null,
+        allRootKeys: books,
+      );
+      expect(organizer.rootKeys(books), ['lnv:2', 'hm:1', 'lnv:1']);
+      await organizer.createFolder('百科', source: SourceId.lnovel);
+      final folder = organizer.folders.single.id;
+      await expectLater(
+        organizer.moveBooks({'hm:1'}, folderId: folder),
+        throwsStateError,
+      );
+      await organizer.moveBooks({'lnv:1', 'lnv:2'}, folderId: folder);
+      final restored = open();
+      addTearDown(restored.dispose);
+      await restored.load();
+      expect(restored.folder(folder)?.books, ['lnv:1', 'lnv:2']);
+      expect(restored.rootKeys(['hm:1'], source: SourceId.huanmeng), ['hm:1']);
+      await restored.removeItems(folderIds: {folder});
+      expect(restored.rootKeys(books).toSet(), books.toSet());
+    },
+  );
+
+  test(
+    'mixed removal uses one write per source and retains failed books',
+    () async {
+      final local = {
+        SourceId.lnovel: [localBook('lnv:1', 'A'), localBook('lnv:2', 'B')],
+        SourceId.huanmeng: [localBook('hm:1', 'C')],
+      };
+      final localWrites = <(SourceId, Set<String>)>[];
+      final remoteWrites = <Wenku8ShelfAction>[];
+      var wenku8 = content;
+      final cubit = BookshelfCubit(
+        scope: () => 0,
+        localSources: () => local.keys,
+        loadLocal: (source) async => local[source]!,
+        loadCases: () async => groups,
+        loadCase: ({required caseId}) async => wenku8,
+        loadUnread: (_) async => {},
+        deleteLocal: (source, ids) async {
+          localWrites.add((source, ids));
+          if (source == SourceId.huanmeng) throw StateError('fixture failure');
+          local[source] =
+              local[source]!.where((e) => !ids.contains(e.book.aid)).toList();
+        },
+        writeRemote: (action) async {
+          remoteWrites.add(action);
+          wenku8 = const BookcaseDto(tip: '', items: []);
+        },
+      );
+      addTearDown(cubit.close);
+      await cubit.loadLocalShelves();
+      await cubit.loadBookcases();
+      await cubit.selectBookcase('2');
+      final removed = await cubit.removeShelfBooks({
+        'lnv:1',
+        'lnv:2',
+        'hm:1',
+        '1',
+      });
+      expect(removed, {'lnv:1', 'lnv:2', '1'});
+      expect(localWrites, hasLength(2));
+      expect(localWrites.first.$2, {'lnv:1', 'lnv:2'});
+      expect(remoteWrites.single.from, '2');
+      expect(remoteWrites.single.to, '-1');
+      expect(remoteWrites.single.bids, ['10']);
+      expect(cubit.state.getBookBid('hm:1'), 'hm:1');
+      expect(cubit.state.getBookBid('lnv:1'), isNull);
+      expect(cubit.state.getBookBid('1'), isNull);
+    },
   );
 
   test('unread count uses catalog order and an exact chapter anchor', () {

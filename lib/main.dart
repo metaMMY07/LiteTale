@@ -75,6 +75,11 @@ final darkTheme = ThemeData(
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks([
+      'Tabler Icons',
+    ], await rootBundle.loadString('LICENSES/tabler-icons-MIT.txt'));
+  });
   if (supportsLocalEpub) {
     LicenseRegistry.addLicense(() async* {
       yield LicenseEntryWithLineBreaks([
