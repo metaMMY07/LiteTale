@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,6 +17,8 @@ import 'package:wild/src/rust/frb_generated.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
 import 'package:wild/widgets/bookshelf_tile.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:wild/widgets/novel_card.dart';
+import 'package:wild/widgets/platform_controls.dart';
 
 const groups = [
   Bookcase(id: '0', title: '全部'),
@@ -180,22 +181,27 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      final first = find.widgetWithText(BookshelfTile, '百科书目');
-      final second = find.widgetWithText(BookshelfTile, '幻梦书目');
+      final cardType = usesAppleGlass ? BookshelfTile : NovelCard;
+      final first = find.widgetWithText(cardType, '百科书目');
+      final second = find.widgetWithText(cardType, '幻梦书目');
       expect(first, findsOneWidget);
       expect(second, findsOneWidget);
       expect(
         find.descendant(of: first, matching: find.text('5')),
         findsOneWidget,
       );
-      expect(tester.widget<BookshelfTile>(second).unreadCount, isNull);
-
-      await tester.tap(
+      expect(
         find.descendant(
-          of: find.byKey(const ValueKey('bookshelf-sources')),
-          matching: find.text('轻小说百科'),
+          of: second,
+          matching: find.byType(BookshelfUnreadBadge),
         ),
+        findsNothing,
       );
+
+      await tester.tap(find.text('全部书源'));
+      await tester.pumpAndSettle();
+      expect(find.text('书架筛选'), findsOneWidget);
+      await tester.tap(find.widgetWithText(AppRadioListTile<int>, '轻小说百科'));
       await tester.pumpAndSettle();
       expect(first, findsOneWidget);
       expect(second, findsNothing);
@@ -211,7 +217,7 @@ void main() {
   );
 
   testWidgets(
-    'both shelf scopes can create folders, move books, reorder and remove folders',
+    'iOS shelf scopes can create folders, move books, reorder and remove folders',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
@@ -243,15 +249,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      if (defaultTargetPlatform == TargetPlatform.iOS) {
-        expect(
-          tester
-              .widget<AppleGlassActions>(find.byType(AppleGlassActions))
-              .actions
-              .map((action) => action.symbol),
-          ['folder.badge.plus', 'square.and.pencil'],
-        );
-      }
+      expect(
+        tester
+            .widget<AppleGlassActions>(find.byType(AppleGlassActions))
+            .actions
+            .map((action) => action.symbol),
+        ['folder.badge.plus', 'square.and.pencil'],
+      );
       Finder tile(String title) => find.widgetWithText(BookshelfTile, title);
       Future<void> press(Finder finder) async {
         await tester.tap(finder);
@@ -301,12 +305,8 @@ void main() {
       tester.state<NavigatorState>(find.byType(Navigator)).pop();
       await tester.pumpAndSettle();
 
-      await press(
-        find.descendant(
-          of: find.byKey(const ValueKey('bookshelf-sources')),
-          matching: find.text('轻小说百科'),
-        ),
-      );
+      await press(find.text('全部书源'));
+      await press(find.widgetWithText(AppRadioListTile<int>, '轻小说百科'));
       await folder('百科分组');
       await button('编辑书架');
       await button('切换到拖动排序');
@@ -332,10 +332,7 @@ void main() {
       expect(tile('百科书目'), findsOneWidget);
       expect(storage, contains('共读续'));
     },
-    variant: const TargetPlatformVariant({
-      TargetPlatform.iOS,
-      TargetPlatform.android,
-    }),
+    variant: const TargetPlatformVariant({TargetPlatform.iOS}),
   );
 
   test(

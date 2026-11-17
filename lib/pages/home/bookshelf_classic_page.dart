@@ -1,0 +1,481 @@
+part of 'bookshelf_page.dart';
+
+class _ClassicBookshelfPage extends StatefulWidget {
+  const _ClassicBookshelfPage();
+
+  @override
+  State<_ClassicBookshelfPage> createState() => _ClassicBookshelfPageState();
+}
+
+class _ClassicBookshelfPageState extends State<_ClassicBookshelfPage> {
+  Widget _localLibraryButton(BuildContext context) => AppButton.textIcon(
+    icon: const Icon(Icons.folder_open_rounded),
+    label: const Text('本地书籍'),
+    onPressed:
+        () => Navigator.of(context).push(
+          HorizontalCoverPageRoute(
+            builder: (_) => const LocalEpubLibraryPage(),
+          ),
+        ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<BookshelfCubit, BookshelfState>(
+      builder: _buildMainScaffold,
+    );
+  }
+
+  SourceId? _sourceFilter;
+  bool _openingBook = false;
+  bool _movingSelection = false;
+
+  Widget _buildMainScaffold(BuildContext context, BookshelfState state) {
+    final cubit = context.read<BookshelfCubit>();
+    final sources = _shelfSources(state);
+    final source = sources.contains(_sourceFilter) ? _sourceFilter : null;
+    final wenku8Only = source == SourceId.wenku8;
+    final showWenku8 = state.wenku8Enabled && (source == null || wenku8Only);
+    final selecting = wenku8Only && state.isSelecting;
+    final books = <LocalShelfEntry>[
+      if (showWenku8)
+        for (final book
+            in wenku8Only
+                ? state.getCurrentBooks() ?? const <BookcaseItem>[]
+                : state.wenku8Books)
+          (book: book, coverUrl: ''),
+      for (final entry in state.localBooks.entries)
+        if (source == null || source == entry.key) ...entry.value,
+    ];
+
+    Future<void> refresh() async {
+      await Future.wait([
+        if (showWenku8) cubit.loadBookcases(),
+        if (!wenku8Only) cubit.loadLocalShelves(refresh: true),
+      ]);
+      await cubit.refreshUnreadCounts();
+    }
+
+    final filters = _ShelfSourcePicker(
+      sources: sources,
+      source: source,
+      onSelected: (value) {
+        if (cubit.state.isSelecting) cubit.toggleSelectMode();
+        setState(() => _sourceFilter = value);
+      },
+    );
+    final groups =
+        wenku8Only && state.bookcases.isNotEmpty
+            ? _filterBar(
+              labels: state.bookcases.map((group) => group.title).toList(),
+              index: state.bookcases.indexWhere(
+                (group) => group.id == state.currentCaseId,
+              ),
+              onSelect:
+                  (index) => cubit.selectBookcase(state.bookcases[index].id),
+            )
+            : null;
+    final isRefreshing = showWenku8 && state.isRefreshing;
+    final hasBooks = books.isNotEmpty;
+    final padding = IosDockInsets.scrollPadding(
+      context,
+      const EdgeInsets.all(8),
+    );
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('我的书架'),
+        actions: [
+          if (supportsLocalEpub && !selecting) _localLibraryButton(context),
+          if (selecting) ...[
+            AppIconButton(
+              icon: const Icon(Icons.delete_outline),
+              onPressed:
+                  state.selectedBids.isEmpty
+                      ? null
+                      : () => _showDeleteConfirmDialog(context),
+            ),
+            AppIconButton(
+              icon: const Icon(Icons.move_to_inbox),
+              onPressed:
+                  state.selectedBids.isEmpty
+                      ? null
+                      : () => _showMoveDialog(context),
+            ),
+            AppIconButton(
+              icon: const Icon(Icons.close),
+              onPressed: cubit.toggleSelectMode,
+            ),
+          ] else if (wenku8Only && state.bookcases.isNotEmpty) ...[
+            if (state.tip.isNotEmpty)
+              AppIconButton(
+                icon: const Icon(Icons.info_outline),
+                onPressed: () => _showShelfCapacity(context, state.tip),
+              ),
+            AppIconButton(
+              icon: const Icon(Icons.select_all),
+              onPressed: cubit.toggleSelectMode,
+            ),
+          ],
+        ],
+        bottom: PreferredSize(
+          preferredSize: Size.fromHeight(
+            48 + (groups == null ? 0 : 48) + (isRefreshing ? 3 : 0),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              filters,
+              if (groups != null) groups,
+              if (isRefreshing) const LinearProgressIndicator(minHeight: 3),
+            ],
+          ),
+        ),
+      ),
+      body: Column(
+        children: [
+          if (showWenku8 && state.errorMessage != null)
+            MaterialBanner(
+              content: Text('文库8 · ${state.errorMessage!}'),
+              actions: [
+                if (wenku8Only)
+                  const SourceWebsiteLink(source: SourceId.wenku8),
+                AppButton.text(
+                  onPressed: isRefreshing ? null : cubit.loadBookcases,
+                  child: const Text('重试'),
+                ),
+              ],
+            ),
+          if (!wenku8Only && state.localReadFailed)
+            MaterialBanner(
+              content: const Text('部分本机收藏暂时无法读取'),
+              actions: [
+                AppButton.text(
+                  onPressed:
+                      state.isLoadingLocalBooks
+                          ? null
+                          : () => cubit.loadLocalShelves(refresh: true),
+                  child: const Text('重试'),
+                ),
+              ],
+            ),
+          Expanded(
+            child:
+                wenku8Only && isRefreshing && state.getCurrentBooks() == null
+                    ? SourceLoadingIndicator(
+                      source: SourceId.wenku8,
+                      requestKey: state.currentCaseId,
+                    )
+                    : RefreshIndicator(
+                      onRefresh: refresh,
+                      child: CustomScrollView(
+                        key: PageStorageKey(source?.name ?? 'all-bookshelves'),
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        slivers: [
+                          if (showWenku8 &&
+                              state.status == BookshelfStatus.initial)
+                            SliverToBoxAdapter(
+                              child: Center(
+                                child: AppButton.text(
+                                  onPressed: cubit.loadBookcases,
+                                  child: const Text('加载文库8书架'),
+                                ),
+                              ),
+                            ),
+                          if (!hasBooks && !isRefreshing)
+                            SliverToBoxAdapter(
+                              child: Padding(
+                                padding: const EdgeInsets.all(32),
+                                child: Center(
+                                  child:
+                                      !wenku8Only && state.isLoadingLocalBooks
+                                          ? const CircularProgressIndicator()
+                                          : const Text('书架为空'),
+                                ),
+                              ),
+                            ),
+                          if (hasBooks)
+                            SliverPadding(
+                              padding: padding,
+                              sliver: SliverGrid(
+                                gridDelegate: const BookGridDelegate(
+                                  childAspectRatio: 0.7,
+                                  crossAxisSpacing: 8,
+                                  mainAxisSpacing: 8,
+                                ),
+                                delegate: SliverChildBuilderDelegate((
+                                  context,
+                                  index,
+                                ) {
+                                  final (book: item, :coverUrl) = books[index];
+                                  final bookSource = sourceOf(item.aid);
+                                  return _BookCard(
+                                    key: ValueKey(item.aid),
+                                    item: item,
+                                    source: bookSource,
+                                    storedCoverUrl: coverUrl,
+                                    unreadCount: state.unreadCounts[item.aid],
+                                    showSource: source == null,
+                                    canSelect: wenku8Only,
+                                    selecting: selecting,
+                                    selected: state.isBookSelected(item.bid),
+                                    onOpen:
+                                        (cover) =>
+                                            _openBook(item, bookSource, cover),
+                                  );
+                                }, childCount: books.length),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _filterBar({
+    required List<String> labels,
+    required int index,
+    required ValueChanged<int> onSelect,
+  }) {
+    return SizedBox(
+      height: 48,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: labels.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder:
+            (context, i) => Center(
+              child: FilterChip(
+                label: Text(labels[i]),
+                selected: i == index,
+                onSelected: (selected) {
+                  if (selected) onSelect(i);
+                },
+              ),
+            ),
+      ),
+    );
+  }
+
+  Future<void> _openBook(
+    BookcaseItem item,
+    SourceId source,
+    String cover,
+  ) async {
+    if (_openingBook) return;
+    _openingBook = true;
+    final route = ModalRoute.of(context);
+    try {
+      // This source's existing site session is only active while selected.
+      if (source == SourceId.bili && activeSource.value != source) {
+        await selectSource(source);
+      }
+      if (!mounted || route?.isCurrent == false) return;
+      BookDetailHint.remember(item.aid, item.title, cover);
+      await Navigator.pushNamed(context, '/novel/info', arguments: item.aid);
+      if (mounted) {
+        unawaited(context.read<BookshelfCubit>().refreshUnreadCounts());
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('暂时无法打开这本书，请重试。')));
+      }
+    } finally {
+      _openingBook = false;
+    }
+  }
+
+  Future<void> _showDeleteConfirmDialog(BuildContext context) async {
+    final confirmed = await showAdaptiveDialog<bool>(
+      context: context,
+      builder:
+          (dialog) => AlertDialog.adaptive(
+            title: const Text('确认删除'),
+            content: const Text('确定要删除选中的书籍吗？'),
+            actions: [
+              AppButton.text(
+                onPressed: () => Navigator.pop(dialog),
+                child: const Text('取消'),
+              ),
+              AppButton.text(
+                onPressed: () => Navigator.pop(dialog, true),
+                child: const Text('删除'),
+              ),
+            ],
+          ),
+    );
+    if (confirmed == true && context.mounted) {
+      await _moveSelection(context, '-1');
+    }
+  }
+
+  Future<void> _showMoveDialog(BuildContext context) async {
+    final state = context.read<BookshelfCubit>().state;
+    final destination = await showAdaptiveDialog<String>(
+      context: context,
+      builder:
+          (dialog) => AlertDialog.adaptive(
+            title: const Text('移动到书架'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: state.bookcases.length,
+                itemBuilder: (context, index) {
+                  final group = state.bookcases[index];
+                  if (group.id == state.currentCaseId) {
+                    return const SizedBox.shrink();
+                  }
+                  return ListTile(
+                    title: Text(group.title),
+                    onTap: () => Navigator.pop(dialog, group.id),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              AppButton.text(
+                onPressed: () => Navigator.pop(dialog),
+                child: const Text('取消'),
+              ),
+            ],
+          ),
+    );
+    if (destination != null && context.mounted) {
+      await _moveSelection(context, destination);
+    }
+  }
+
+  Future<void> _moveSelection(BuildContext context, String destination) async {
+    if (_movingSelection) return;
+    _movingSelection = true;
+    try {
+      await context.read<BookshelfCubit>().moveSelectedBooks(
+        destination,
+        confirm: (action) => _confirmWenku8ShelfAction(context, action),
+      );
+    } finally {
+      _movingSelection = false;
+    }
+  }
+}
+
+class _BookCard extends StatelessWidget {
+  const _BookCard({
+    super.key,
+    required this.item,
+    required this.source,
+    required this.storedCoverUrl,
+    required this.unreadCount,
+    required this.showSource,
+    required this.canSelect,
+    required this.selecting,
+    required this.selected,
+    required this.onOpen,
+  });
+
+  final BookcaseItem item;
+  final SourceId source;
+  final String storedCoverUrl;
+  final int? unreadCount;
+  final bool showSource, canSelect, selecting, selected;
+  final ValueChanged<String> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final cubit = context.read<BookshelfCubit>();
+    final cover = _coverUrl;
+    final count = unreadCount;
+
+    void onTap() {
+      if (selecting) {
+        cubit.toggleBookSelection(item.bid);
+      } else {
+        onOpen(cover);
+      }
+    }
+
+    void onLongPress() {
+      if (!selecting) {
+        cubit.toggleSelectMode();
+        cubit.toggleBookSelection(item.bid);
+      }
+    }
+
+    final content = Stack(
+      children: [
+        NovelCard(
+          title: item.title,
+          coverUrl: cover,
+          source: source,
+          padding: const EdgeInsets.all(8.0),
+          author: showSource ? source.label : null,
+          showAuthor: showSource,
+          coverBadge:
+              count != null && count > 0 ? BookshelfUnreadBadge(count) : null,
+        ),
+        if (selecting)
+          Positioned(
+            right: 0,
+            top: 0,
+            child: Container(
+              width: 24,
+              height: 24,
+              margin: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color:
+                    selected
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.surface,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color:
+                      selected
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).colorScheme.outline,
+                  width: 2,
+                ),
+              ),
+              child:
+                  selected
+                      ? Icon(
+                        Icons.check_rounded,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.onPrimary,
+                      )
+                      : null,
+            ),
+          ),
+      ],
+    );
+    if (usesMaterialYou) {
+      return BookCardInk(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        onLongPress: canSelect ? onLongPress : null,
+        child: content,
+      );
+    }
+    return GestureDetector(
+      onTap: onTap,
+      onLongPress: canSelect ? onLongPress : null,
+      child: content,
+    );
+  }
+
+  String get _coverUrl {
+    if (source == SourceId.wenku8) {
+      final id = int.tryParse(item.aid);
+      if (id == null || id <= 0) return '';
+      return 'https://img.wenku8.com/image/${id ~/ 1000}/${item.aid}/${item.aid}s.jpg';
+    }
+    final cached = coverForBook(item.aid);
+    return cached.isNotEmpty ? cached : storedCoverUrl;
+  }
+}

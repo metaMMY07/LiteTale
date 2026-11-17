@@ -77,7 +77,7 @@ class BookshelfTile extends StatelessWidget {
                         Positioned(
                           top: 0,
                           left: 0,
-                          child: _UnreadCorner(count),
+                          child: BookshelfUnreadBadge(count),
                         ),
                       if (selected)
                         ColoredBox(
@@ -201,8 +201,8 @@ class BookshelfFolderCover extends StatelessWidget {
   }
 }
 
-class _UnreadCorner extends StatelessWidget {
-  const _UnreadCorner(this.count);
+class BookshelfUnreadBadge extends StatelessWidget {
+  const BookshelfUnreadBadge(this.count, {super.key});
 
   final int count;
 

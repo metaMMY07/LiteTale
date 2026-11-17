@@ -18,6 +18,8 @@ class BookshelfState {
   final String? currentCaseId;
   final Map<String, List<BookcaseItem>> bookcaseContents;
   final String? errorMessage;
+  final Set<String> selectedBids;
+  final bool isSelecting;
   final bool isRefreshing;
   final bool wenku8Enabled;
   final Map<SourceId, List<LocalShelfEntry>> localBooks;
@@ -32,6 +34,8 @@ class BookshelfState {
     this.currentCaseId,
     required this.bookcaseContents,
     this.errorMessage,
+    this.selectedBids = const {},
+    this.isSelecting = false,
     this.isRefreshing = false,
     this.wenku8Enabled = false,
     this.localBooks = const {},
@@ -47,6 +51,8 @@ class BookshelfState {
     String? currentCaseId,
     Map<String, List<BookcaseItem>>? bookcaseContents,
     String? errorMessage,
+    Set<String>? selectedBids,
+    bool? isSelecting,
     bool? isRefreshing,
     Map<SourceId, List<LocalShelfEntry>>? localBooks,
     bool? isLoadingLocalBooks,
@@ -63,6 +69,8 @@ class BookshelfState {
               : currentCaseId ?? this.currentCaseId,
       bookcaseContents: bookcaseContents ?? this.bookcaseContents,
       errorMessage: errorMessage,
+      selectedBids: selectedBids ?? this.selectedBids,
+      isSelecting: isSelecting ?? this.isSelecting,
       isRefreshing: isRefreshing ?? this.isRefreshing,
       wenku8Enabled: wenku8Enabled,
       localBooks: localBooks ?? this.localBooks,
@@ -87,6 +95,8 @@ class BookshelfState {
   }
 
   bool isBookInBookshelf(String aid) => getBookBid(aid) != null;
+
+  bool isBookSelected(String bid) => selectedBids.contains(bid);
 
   String? getBookBid(String aid) {
     final source = sourceOf(aid);
@@ -377,6 +387,8 @@ class BookshelfCubit extends Cubit<BookshelfState> {
             bookcases: const [],
             bookcaseContents: const {},
             isRefreshing: false,
+            selectedBids: const {},
+            isSelecting: false,
           ),
         );
         unawaited(refreshUnreadCounts());
@@ -398,6 +410,8 @@ class BookshelfCubit extends Cubit<BookshelfState> {
           currentCaseId: selected,
           bookcaseContents: contents,
           isRefreshing: _caseLoads.containsKey(selected),
+          selectedBids: selected == current ? null : const {},
+          isSelecting: selected == current ? null : false,
         ),
       );
       unawaited(refreshUnreadCounts());
@@ -428,7 +442,14 @@ class BookshelfCubit extends Cubit<BookshelfState> {
       await loadBookcases();
       return;
     }
-    emit(state.copyWith(currentCaseId: caseId, isRefreshing: true));
+    emit(
+      state.copyWith(
+        currentCaseId: caseId,
+        isRefreshing: true,
+        selectedBids: const {},
+        isSelecting: false,
+      ),
+    );
     try {
       final content = await _case(caseId);
       if (!_current(request, scope) ||
@@ -449,6 +470,50 @@ class BookshelfCubit extends Cubit<BookshelfState> {
       if (_current(request, scope) && state.currentCaseId == caseId) {
         _readFailed(error);
       }
+    }
+  }
+
+  void toggleSelectMode() {
+    emit(
+      state.copyWith(
+        isSelecting: !state.isSelecting,
+        selectedBids: const {},
+        errorMessage: state.errorMessage,
+      ),
+    );
+  }
+
+  void toggleBookSelection(String bid) {
+    final bids = {...state.selectedBids};
+    if (!bids.remove(bid)) bids.add(bid);
+    emit(state.copyWith(selectedBids: bids, errorMessage: state.errorMessage));
+  }
+
+  Future<void> moveSelectedBooks(
+    String destination, {
+    ConfirmWenku8ShelfAction? confirm,
+  }) async {
+    final from = state.currentCaseId;
+    final selected = state.selectedBids;
+    if (!state.isSelecting || from == null || selected.isEmpty) return;
+    final ids = {
+      for (final book in state.getCurrentBooks() ?? const <BookcaseItem>[])
+        if (selected.contains(book.bid)) book.aid,
+    };
+    if (ids.isEmpty) return;
+    final moved =
+        destination == '-1'
+            ? await removeShelfBooks(ids, confirm: confirm)
+            : await moveWenku8Books(
+              ids,
+              from: from,
+              to: destination,
+              confirm: confirm,
+            );
+    if (moved.isNotEmpty &&
+        !isClosed &&
+        identical(state.selectedBids, selected)) {
+      toggleSelectMode();
     }
   }
 
