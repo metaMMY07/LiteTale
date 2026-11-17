@@ -45,15 +45,15 @@ class BookshelfPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) =>
-      usesAppleGlass
-          ? const _IosBookshelfPage()
+      usesAppleGlass || usesMaterialYou
+          ? const _OrganizedBookshelfPage()
           : const _ClassicBookshelfPage();
 }
 
-class _IosBookshelfPage extends StatefulWidget {
-  const _IosBookshelfPage() : folderId = null, initialSource = null;
+class _OrganizedBookshelfPage extends StatefulWidget {
+  const _OrganizedBookshelfPage() : folderId = null, initialSource = null;
 
-  const _IosBookshelfPage.folder({
+  const _OrganizedBookshelfPage.folder({
     required this.folderId,
     required this.initialSource,
   });
@@ -62,10 +62,11 @@ class _IosBookshelfPage extends StatefulWidget {
   final SourceId? initialSource;
 
   @override
-  State<_IosBookshelfPage> createState() => _IosBookshelfPageState();
+  State<_OrganizedBookshelfPage> createState() =>
+      _OrganizedBookshelfPageState();
 }
 
-class _IosBookshelfPageState extends State<_IosBookshelfPage> {
+class _OrganizedBookshelfPageState extends State<_OrganizedBookshelfPage> {
   late SourceId? _sourceFilter = widget.initialSource;
   late final BookshelfCubit _cubit = context.read<BookshelfCubit>();
   BookshelfOrganization get _organization => _cubit.organization;
@@ -89,6 +90,7 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
   );
 
   Widget _buildShelf(BuildContext context, BookshelfState state) {
+    final apple = usesAppleGlass;
     final folderId = widget.folderId;
     final folder = folderId == null ? null : _organization.folder(folderId);
     final sources = _shelfSources(state);
@@ -154,9 +156,13 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
           label: folderId == null ? '新建文件夹' : '重命名文件夹',
           symbol: folderId == null ? 'folder.badge.plus' : 'pencil',
           fallbackIcon:
-              folderId == null
-                  ? CupertinoIcons.folder_badge_plus
-                  : CupertinoIcons.pencil,
+              apple
+                  ? (folderId == null
+                      ? CupertinoIcons.folder_badge_plus
+                      : CupertinoIcons.pencil)
+                  : (folderId == null
+                      ? Icons.create_new_folder_outlined
+                      : Icons.edit_outlined),
           onPressed:
               editAvailable && (folderId == null || folder != null)
                   ? () => _nameFolder(scope, folder)
@@ -166,7 +172,8 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
           id: 'edit',
           label: '编辑书架',
           symbol: 'square.and.pencil',
-          fallbackIcon: CupertinoIcons.square_pencil,
+          fallbackIcon:
+              apple ? CupertinoIcons.square_pencil : Icons.edit_note_rounded,
           onPressed:
               editAvailable && ids.isNotEmpty
                   ? () => _setMode(scope, _ShelfMode.select)
@@ -181,9 +188,13 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
                   ? 'arrow.up.arrow.down'
                   : 'checkmark.circle',
           fallbackIcon:
-              mode == _ShelfMode.select
-                  ? CupertinoIcons.arrow_up_arrow_down
-                  : CupertinoIcons.check_mark_circled,
+              apple
+                  ? (mode == _ShelfMode.select
+                      ? CupertinoIcons.arrow_up_arrow_down
+                      : CupertinoIcons.check_mark_circled)
+                  : (mode == _ShelfMode.select
+                      ? Icons.swap_vert_rounded
+                      : Icons.check_circle_outline),
           onPressed:
               _busy
                   ? null
@@ -198,7 +209,8 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
           id: 'move',
           label: '移动所选书籍',
           symbol: 'folder',
-          fallbackIcon: CupertinoIcons.folder,
+          fallbackIcon:
+              apple ? CupertinoIcons.folder : Icons.drive_file_move_outline,
           onPressed:
               editAvailable && destinations.isNotEmpty
                   ? () => _move(scope, selectedBooks, destinations)
@@ -208,7 +220,7 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
           id: 'delete',
           label: '删除所选项目',
           symbol: 'trash',
-          fallbackIcon: CupertinoIcons.trash,
+          fallbackIcon: apple ? CupertinoIcons.trash : Icons.delete_outline,
           onPressed:
               editAvailable && selected.isNotEmpty
                   ? () => _delete(scope, selectedBooks, selectedFolders)
@@ -218,7 +230,7 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
           id: 'close',
           label: '退出编辑',
           symbol: 'xmark',
-          fallbackIcon: CupertinoIcons.xmark,
+          fallbackIcon: apple ? CupertinoIcons.xmark : Icons.close_rounded,
           onPressed: _busy ? null : () => _setMode(scope, _ShelfMode.browse),
         ),
       ],
@@ -226,24 +238,38 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
     final showFilters = !editing && folderId == null;
     final showGroups = showFilters && wenku8Only && state.bookcases.isNotEmpty;
     final refreshing = showWenku8 && state.isRefreshing;
-    final padding = IosDockInsets.scrollPadding(
-      context,
-      const EdgeInsets.fromLTRB(16, 4, 16, 12),
-    );
-    final title = folder?.title ?? (folderId == null ? '书架' : '文件夹');
+    // The home Scaffold extends under the floating bar and supplies its
+    // measured height in MediaQuery. The last row can scroll clear of it.
+    final padding =
+        apple
+            ? IosDockInsets.scrollPadding(
+              context,
+              const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            )
+            : EdgeInsets.fromLTRB(
+              8,
+              8,
+              8,
+              8 + MediaQuery.paddingOf(context).bottom,
+            );
+    final title =
+        folder?.title ?? (folderId == null ? (apple ? '书架' : '我的书架') : '文件夹');
     final routeScope =
         '${source?.name ?? 'all'}/${scope.group ?? ''}/${folderId ?? ''}';
 
     return Scaffold(
       appBar: AppBar(
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        centerTitle: !editing,
+        centerTitle: apple && !editing,
         automaticallyImplyLeading: folderId != null,
-        titleTextStyle: Theme.of(
-          context,
-        ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+        titleTextStyle:
+            apple
+                ? Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)
+                : null,
         leading:
-            folderId != null
+            apple && folderId != null
                 ? Padding(
                   padding: const EdgeInsetsDirectional.only(start: 8),
                   child: Center(
@@ -262,15 +288,26 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
                 )
                 : null,
         actions: [
-          Padding(
-            padding: const EdgeInsetsDirectional.only(end: 12),
-            child: AppleGlassActions(actions: actions),
-          ),
+          if (apple)
+            Padding(
+              padding: const EdgeInsetsDirectional.only(end: 12),
+              child: AppleGlassActions(actions: actions),
+            )
+          else ...[
+            if (showFilters && supportsLocalEpub)
+              _shelfLocalLibraryButton(context),
+            for (final action in actions)
+              IconButton(
+                tooltip: action.label,
+                icon: Icon(action.fallbackIcon),
+                onPressed: action.onPressed,
+              ),
+          ],
         ],
         bottom: PreferredSize(
           preferredSize: Size.fromHeight(
             (showFilters ? 48 : 0) +
-                (showGroups ? 60 : 0) +
+                (showGroups ? (apple ? 60 : 48) : 0) +
                 (refreshing || _busy ? 3 : 0),
           ),
           child: Column(
@@ -292,20 +329,7 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
               if (showGroups)
                 Row(
                   children: [
-                    Expanded(
-                      child: AppleGlassFilterBar(
-                        labels: [
-                          for (final group in state.bookcases) group.title,
-                        ],
-                        index: state.bookcases.indexWhere(
-                          (group) => group.id == scope.group,
-                        ),
-                        onSelect:
-                            (index) => _cubit.selectBookcase(
-                              state.bookcases[index].id,
-                            ),
-                      ),
-                    ),
+                    Expanded(child: _groupPicker(state, scope.group)),
                     if (state.tip.isNotEmpty)
                       AppIconButton(
                         icon: const Icon(Icons.info_outline, size: 19),
@@ -378,6 +402,10 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
                   key: ValueKey(scope),
                   ids: ids,
                   showSource: source == null,
+                  gridDelegate:
+                      apple
+                          ? null
+                          : const BookGridDelegate(childAspectRatio: 0.7),
                   reordering: mode == _ShelfMode.reorder && !_busy,
                   onReorder:
                       (order) => _save(
@@ -391,21 +419,42 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
                     final selecting = mode == _ShelfMode.select;
                     final book = books[id];
                     if (book != null) {
+                      final cover = _shelfCover(book);
+                      final onTap =
+                          _busy
+                              ? null
+                              : selecting
+                              ? () => _toggle(id)
+                              : editing
+                              ? null
+                              : () => _openBook(book);
+                      if (!apple) {
+                        return _ShelfNovelCard(
+                          title: book.book.title,
+                          cover: cover,
+                          showSource: source == null,
+                          unreadCount: state.unreadCounts[id],
+                          selecting: selecting,
+                          selected: selected.contains(id),
+                          onTap: onTap,
+                          onLongPress:
+                              wenku8Only && !editing && editAvailable
+                                  ? () => _setMode(
+                                    scope,
+                                    _ShelfMode.select,
+                                    selectedId: id,
+                                  )
+                                  : null,
+                        );
+                      }
                       return BookshelfTile(
                         title: book.book.title,
-                        cover: BookshelfBookCover(_cover(book)),
+                        cover: BookshelfBookCover(cover),
                         showSource: source == null,
                         sourceLabel: sourceOf(id).label,
                         unreadCount: state.unreadCounts[id],
                         selected: selected.contains(id),
-                        onTap:
-                            _busy
-                                ? null
-                                : selecting
-                                ? () => _toggle(id)
-                                : editing
-                                ? null
-                                : () => _openBook(book),
+                        onTap: onTap,
                       );
                     }
                     final tileFolder = _organization.folder(id)!;
@@ -413,7 +462,7 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
                         tileFolder.books
                             .where(books.containsKey)
                             .take(4)
-                            .map((bookId) => _cover(books[bookId]!))
+                            .map((bookId) => _shelfCover(books[bookId]!))
                             .toList();
                     return BookshelfTile(
                       title: tileFolder.title,
@@ -439,6 +488,16 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
     );
   }
 
+  Widget _groupPicker(BookshelfState state, String? groupId) {
+    final labels = [for (final group in state.bookcases) group.title];
+    final index = state.bookcases.indexWhere((group) => group.id == groupId);
+    void onSelect(int index) =>
+        _cubit.selectBookcase(state.bookcases[index].id);
+    return usesAppleGlass
+        ? AppleGlassFilterBar(labels: labels, index: index, onSelect: onSelect)
+        : _shelfGroupChips(labels: labels, index: index, onSelect: onSelect);
+  }
+
   Widget _notice(String message, VoidCallback? retry, {SourceId? source}) =>
       MaterialBanner(
         content: Text(message),
@@ -460,11 +519,13 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
     await _cubit.refreshUnreadCounts();
   }
 
-  void _setMode(_ShelfScope scope, _ShelfMode mode) => setState(() {
-    _editingScope = scope;
-    _mode = mode;
-    _selection.clear();
-  });
+  void _setMode(_ShelfScope scope, _ShelfMode mode, {String? selectedId}) =>
+      setState(() {
+        _editingScope = scope;
+        _mode = mode;
+        _selection.clear();
+        if (selectedId != null) _selection.add(selectedId);
+      });
 
   void _toggle(String id) => setState(() {
     if (!_selection.remove(id)) _selection.add(id);
@@ -608,28 +669,12 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
       Navigator.of(context).push(
         HorizontalCoverPageRoute(
           builder:
-              (_) => _IosBookshelfPage.folder(
+              (_) => _OrganizedBookshelfPage.folder(
                 folderId: folder.id,
                 initialSource: source,
               ),
         ),
       );
-
-  ShelfCover _cover(LocalShelfEntry entry) {
-    final aid = entry.book.aid, source = sourceOf(entry.book.aid);
-    if (source == SourceId.wenku8) {
-      final id = int.tryParse(aid);
-      return (
-        source: source,
-        url:
-            id == null || id <= 0
-                ? ''
-                : 'https://img.wenku8.com/image/${id ~/ 1000}/$aid/${aid}s.jpg',
-      );
-    }
-    final cached = coverForBook(aid);
-    return (source: source, url: cached.isEmpty ? entry.coverUrl : cached);
-  }
 
   Future<void> _openBook(LocalShelfEntry entry) async {
     if (_openingBook) return;
@@ -637,7 +682,7 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
     final route = ModalRoute.of(context);
     try {
       final item = entry.book;
-      final cover = _cover(entry);
+      final cover = _shelfCover(entry);
       if (cover.source == SourceId.bili && activeSource.value != cover.source) {
         await selectSource(cover.source);
       }
@@ -651,6 +696,22 @@ class _IosBookshelfPageState extends State<_IosBookshelfPage> {
       _openingBook = false;
     }
   }
+}
+
+ShelfCover _shelfCover(LocalShelfEntry entry) {
+  final aid = entry.book.aid, source = sourceOf(entry.book.aid);
+  if (source == SourceId.wenku8) {
+    final id = int.tryParse(aid);
+    return (
+      source: source,
+      url:
+          id == null || id <= 0
+              ? ''
+              : 'https://img.wenku8.com/image/${id ~/ 1000}/$aid/${aid}s.jpg',
+    );
+  }
+  final cached = coverForBook(aid);
+  return (source: source, url: cached.isEmpty ? entry.coverUrl : cached);
 }
 
 List<SourceId?> _shelfSources(BookshelfState state) => [

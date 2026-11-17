@@ -15,8 +15,10 @@ import 'package:wild/sources/source_api.dart' as api;
 import 'package:wild/src/rust/api/wenku8.dart' show ReadingHistory;
 import 'package:wild/src/rust/frb_generated.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
+import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/bookshelf_tile.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:wild/widgets/fluid_navigation_bar.dart';
 import 'package:wild/widgets/novel_card.dart';
 import 'package:wild/widgets/platform_controls.dart';
 
@@ -217,7 +219,7 @@ void main() {
   );
 
   testWidgets(
-    'iOS shelf scopes can create folders, move books, reorder and remove folders',
+    'shelf scopes can create folders, move books, reorder and remove folders',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
@@ -249,14 +251,21 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(
-        tester
-            .widget<AppleGlassActions>(find.byType(AppleGlassActions))
-            .actions
-            .map((action) => action.symbol),
-        ['folder.badge.plus', 'square.and.pencil'],
+      if (usesAppleGlass) {
+        expect(
+          tester
+              .widget<AppleGlassActions>(find.byType(AppleGlassActions))
+              .actions
+              .map((action) => action.symbol),
+          ['folder.badge.plus', 'square.and.pencil'],
+        );
+      }
+      Finder book(String title) => find.widgetWithText(
+        usesAppleGlass ? BookshelfTile : NovelCard,
+        title,
       );
-      Finder tile(String title) => find.widgetWithText(BookshelfTile, title);
+      Finder folderTile(String title) =>
+          find.widgetWithText(BookshelfTile, title);
       Future<void> press(Finder finder) async {
         await tester.tap(finder);
         await tester.pumpAndSettle();
@@ -271,18 +280,17 @@ void main() {
       }
 
       await folder('共读');
-      expect(
-        tester.getTopLeft(tile('共读')).dy,
-        tester.getTopLeft(tile('幻梦书目')).dy,
-      );
+      expect(folderTile('共读'), findsOneWidget);
       await button('编辑书架');
-      await press(tile('百科书目'));
-      await press(tile('幻梦书目'));
-      expect(tester.widget<BookshelfTile>(tile('百科书目')).selected, isTrue);
+      await press(book('百科书目'));
+      await press(book('幻梦书目'));
+      if (usesAppleGlass) {
+        expect(tester.widget<BookshelfTile>(book('百科书目')).selected, isTrue);
+      }
       await button('移动所选书籍');
       expect(find.text('移动 2 本书'), findsOneWidget);
       await press(find.widgetWithText(ListTile, '共读'));
-      expect(tile('百科书目'), findsNothing);
+      expect(book('百科书目'), findsNothing);
       expect(
         tester
             .widget<BookshelfFolderCover>(find.byType(BookshelfFolderCover))
@@ -290,18 +298,18 @@ void main() {
         hasLength(2),
       );
       await button('退出编辑');
-      await press(tile('共读'));
-      expect(tile('幻梦书目'), findsOneWidget);
+      await press(folderTile('共读'));
+      expect(book('幻梦书目'), findsOneWidget);
       await button('重命名文件夹');
       await tester.enterText(find.byType(TextField), '共读续');
       await tester.pump();
       await press(find.text('确认重命名'));
       expect(find.text('共读续'), findsOneWidget);
       await button('编辑书架');
-      await press(tile('百科书目'));
+      await press(book('百科书目'));
       await button('移动所选书籍');
       await press(find.widgetWithText(ListTile, '书架根目录'));
-      expect(tile('百科书目'), findsNothing);
+      expect(book('百科书目'), findsNothing);
       tester.state<NavigatorState>(find.byType(Navigator)).pop();
       await tester.pumpAndSettle();
 
@@ -310,8 +318,8 @@ void main() {
       await folder('百科分组');
       await button('编辑书架');
       await button('切换到拖动排序');
-      final target = tester.getCenter(tile('百科分组'));
-      final gesture = await tester.startGesture(tester.getCenter(tile('百科书目')));
+      final target = tester.getCenter(folderTile('百科分组'));
+      final gesture = await tester.startGesture(tester.getCenter(book('百科书目')));
       await tester.pump(const Duration(milliseconds: 650));
       await gesture.moveTo(target);
       await tester.pump();
@@ -322,17 +330,95 @@ void main() {
         'lnv:1',
       );
       await button('切换到多选');
-      await press(tile('百科书目'));
+      await press(book('百科书目'));
       await button('移动所选书籍');
       await press(find.widgetWithText(ListTile, '百科分组'));
-      await press(tile('百科分组'));
+      await press(folderTile('百科分组'));
       await button('删除所选项目');
       await press(find.text('删除'));
-      expect(tile('百科分组'), findsNothing);
-      expect(tile('百科书目'), findsOneWidget);
+      expect(folderTile('百科分组'), findsNothing);
+      expect(book('百科书目'), findsOneWidget);
       expect(storage, contains('共读续'));
     },
-    variant: const TargetPlatformVariant({TargetPlatform.iOS}),
+    variant: const TargetPlatformVariant({
+      TargetPlatform.iOS,
+      TargetPlatform.android,
+    }),
+  );
+
+  testWidgets(
+    'Android shelf scrolls beside the capsule and lifts the last row above it',
+    (tester) async {
+      tester.view.physicalSize = const Size(960, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final cubit = BookshelfCubit(
+        organization: BookshelfOrganization(read: () async => ''),
+        localSources: () => [SourceId.lnovel],
+        loadLocal:
+            (_) async => [
+              for (var i = 1; i <= 20; i++) localBook('lnv:$i', '书目 $i'),
+            ],
+        loadUnread: (_) async => {},
+      )..setWenku8Enabled(false);
+      addTearDown(cubit.close);
+      await cubit.loadLocalShelves();
+      await tester.pumpWidget(
+        BlocProvider.value(
+          value: cubit,
+          child: MaterialApp(
+            theme: materialYouTheme(Brightness.dark),
+            home: Scaffold(
+              extendBody: true,
+              body: const BookshelfPage(),
+              bottomNavigationBar: FluidNavigationBar(
+                destinations: const [
+                  FluidNavigationDestination(
+                    icon: Icons.explore_outlined,
+                    selectedIcon: Icons.explore,
+                    label: '发现',
+                  ),
+                  FluidNavigationDestination(
+                    icon: Icons.book_outlined,
+                    selectedIcon: Icons.book,
+                    label: '书架',
+                  ),
+                ],
+                selectedIndex: 1,
+                onDestinationSelected: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final capsule = tester.getRect(
+        find.descendant(
+          of: find.byType(FluidNavigationBar),
+          matching: find.byWidgetPredicate(
+            (widget) => widget is Material && widget.shape is StadiumBorder,
+          ),
+        ),
+      );
+      final viewport = tester.getRect(find.byType(CustomScrollView));
+      expect(viewport.bottom, greaterThan(capsule.bottom));
+      final position =
+          tester.state<ScrollableState>(find.byType(Scrollable)).position;
+      await tester.dragFrom(
+        Offset(capsule.left / 2, capsule.center.dy),
+        const Offset(0, -180),
+      );
+      await tester.pumpAndSettle();
+      expect(position.pixels, greaterThan(0));
+
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      final lastCard = tester.getRect(find.widgetWithText(NovelCard, '书目 20'));
+      expect(lastCard.bottom, lessThan(capsule.top));
+    },
+    variant: const TargetPlatformVariant({TargetPlatform.android}),
   );
 
   test(

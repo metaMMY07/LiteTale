@@ -8,17 +8,6 @@ class _ClassicBookshelfPage extends StatefulWidget {
 }
 
 class _ClassicBookshelfPageState extends State<_ClassicBookshelfPage> {
-  Widget _localLibraryButton(BuildContext context) => AppButton.textIcon(
-    icon: const Icon(Icons.folder_open_rounded),
-    label: const Text('本地书籍'),
-    onPressed:
-        () => Navigator.of(context).push(
-          HorizontalCoverPageRoute(
-            builder: (_) => const LocalEpubLibraryPage(),
-          ),
-        ),
-  );
-
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<BookshelfCubit, BookshelfState>(
@@ -66,7 +55,7 @@ class _ClassicBookshelfPageState extends State<_ClassicBookshelfPage> {
     );
     final groups =
         wenku8Only && state.bookcases.isNotEmpty
-            ? _filterBar(
+            ? _shelfGroupChips(
               labels: state.bookcases.map((group) => group.title).toList(),
               index: state.bookcases.indexWhere(
                 (group) => group.id == state.currentCaseId,
@@ -86,7 +75,8 @@ class _ClassicBookshelfPageState extends State<_ClassicBookshelfPage> {
       appBar: AppBar(
         title: const Text('我的书架'),
         actions: [
-          if (supportsLocalEpub && !selecting) _localLibraryButton(context),
+          if (supportsLocalEpub && !selecting)
+            _shelfLocalLibraryButton(context),
           if (selecting) ...[
             AppIconButton(
               icon: const Icon(Icons.delete_outline),
@@ -207,21 +197,36 @@ class _ClassicBookshelfPageState extends State<_ClassicBookshelfPage> {
                                   context,
                                   index,
                                 ) {
-                                  final (book: item, :coverUrl) = books[index];
-                                  final bookSource = sourceOf(item.aid);
-                                  return _BookCard(
+                                  final entry = books[index];
+                                  final item = entry.book;
+                                  final cover = _shelfCover(entry);
+                                  return _ShelfNovelCard(
                                     key: ValueKey(item.aid),
-                                    item: item,
-                                    source: bookSource,
-                                    storedCoverUrl: coverUrl,
+                                    title: item.title,
+                                    cover: cover,
                                     unreadCount: state.unreadCounts[item.aid],
                                     showSource: source == null,
-                                    canSelect: wenku8Only,
                                     selecting: selecting,
                                     selected: state.isBookSelected(item.bid),
-                                    onOpen:
-                                        (cover) =>
-                                            _openBook(item, bookSource, cover),
+                                    onTap:
+                                        selecting
+                                            ? () => cubit.toggleBookSelection(
+                                              item.bid,
+                                            )
+                                            : () => _openBook(
+                                              item,
+                                              cover.source,
+                                              cover.url,
+                                            ),
+                                    onLongPress:
+                                        wenku8Only && !selecting
+                                            ? () {
+                                              cubit.toggleSelectMode();
+                                              cubit.toggleBookSelection(
+                                                item.bid,
+                                              );
+                                            }
+                                            : null,
                                   );
                                 }, childCount: books.length),
                               ),
@@ -231,32 +236,6 @@ class _ClassicBookshelfPageState extends State<_ClassicBookshelfPage> {
                     ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _filterBar({
-    required List<String> labels,
-    required int index,
-    required ValueChanged<int> onSelect,
-  }) {
-    return SizedBox(
-      height: 48,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: labels.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder:
-            (context, i) => Center(
-              child: FilterChip(
-                label: Text(labels[i]),
-                selected: i == index,
-                onSelected: (selected) {
-                  if (selected) onSelect(i);
-                },
-              ),
-            ),
       ),
     );
   }
@@ -366,56 +345,71 @@ class _ClassicBookshelfPageState extends State<_ClassicBookshelfPage> {
   }
 }
 
-class _BookCard extends StatelessWidget {
-  const _BookCard({
+Widget _shelfLocalLibraryButton(BuildContext context) => AppButton.textIcon(
+  icon: const Icon(Icons.folder_open_rounded),
+  label: const Text('本地书籍'),
+  onPressed:
+      () => Navigator.of(context).push(
+        HorizontalCoverPageRoute(builder: (_) => const LocalEpubLibraryPage()),
+      ),
+);
+
+Widget _shelfGroupChips({
+  required List<String> labels,
+  required int index,
+  required ValueChanged<int> onSelect,
+}) => SizedBox(
+  height: 48,
+  child: ListView.separated(
+    scrollDirection: Axis.horizontal,
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    itemCount: labels.length,
+    separatorBuilder: (_, __) => const SizedBox(width: 8),
+    itemBuilder:
+        (context, i) => Center(
+          child: FilterChip(
+            label: Text(labels[i]),
+            selected: i == index,
+            onSelected: (selected) {
+              if (selected) onSelect(i);
+            },
+          ),
+        ),
+  ),
+);
+
+class _ShelfNovelCard extends StatelessWidget {
+  const _ShelfNovelCard({
     super.key,
-    required this.item,
-    required this.source,
-    required this.storedCoverUrl,
+    required this.title,
+    required this.cover,
     required this.unreadCount,
     required this.showSource,
-    required this.canSelect,
     required this.selecting,
     required this.selected,
-    required this.onOpen,
+    this.onTap,
+    this.onLongPress,
   });
 
-  final BookcaseItem item;
-  final SourceId source;
-  final String storedCoverUrl;
+  final String title;
+  final ShelfCover cover;
   final int? unreadCount;
-  final bool showSource, canSelect, selecting, selected;
-  final ValueChanged<String> onOpen;
+  final bool showSource, selecting, selected;
+  final VoidCallback? onTap, onLongPress;
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<BookshelfCubit>();
-    final cover = _coverUrl;
+    final colors = Theme.of(context).colorScheme;
     final count = unreadCount;
-
-    void onTap() {
-      if (selecting) {
-        cubit.toggleBookSelection(item.bid);
-      } else {
-        onOpen(cover);
-      }
-    }
-
-    void onLongPress() {
-      if (!selecting) {
-        cubit.toggleSelectMode();
-        cubit.toggleBookSelection(item.bid);
-      }
-    }
 
     final content = Stack(
       children: [
         NovelCard(
-          title: item.title,
-          coverUrl: cover,
-          source: source,
+          title: title,
+          coverUrl: cover.url,
+          source: cover.source,
           padding: const EdgeInsets.all(8.0),
-          author: showSource ? source.label : null,
+          author: showSource ? cover.source.label : null,
           showAuthor: showSource,
           coverBadge:
               count != null && count > 0 ? BookshelfUnreadBadge(count) : null,
@@ -429,16 +423,10 @@ class _BookCard extends StatelessWidget {
               height: 24,
               margin: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color:
-                    selected
-                        ? Theme.of(context).colorScheme.primary
-                        : Theme.of(context).colorScheme.surface,
+                color: selected ? colors.primary : colors.surface,
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color:
-                      selected
-                          ? Theme.of(context).colorScheme.primary
-                          : Theme.of(context).colorScheme.outline,
+                  color: selected ? colors.primary : colors.outline,
                   width: 2,
                 ),
               ),
@@ -447,7 +435,7 @@ class _BookCard extends StatelessWidget {
                       ? Icon(
                         Icons.check_rounded,
                         size: 16,
-                        color: Theme.of(context).colorScheme.onPrimary,
+                        color: colors.onPrimary,
                       )
                       : null,
             ),
@@ -455,27 +443,21 @@ class _BookCard extends StatelessWidget {
       ],
     );
     if (usesMaterialYou) {
-      return BookCardInk(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        onLongPress: canSelect ? onLongPress : null,
-        child: content,
+      return Semantics(
+        button: onTap != null,
+        selected: selected,
+        child: BookCardInk(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: content,
+        ),
       );
     }
     return GestureDetector(
       onTap: onTap,
-      onLongPress: canSelect ? onLongPress : null,
+      onLongPress: onLongPress,
       child: content,
     );
-  }
-
-  String get _coverUrl {
-    if (source == SourceId.wenku8) {
-      final id = int.tryParse(item.aid);
-      if (id == null || id <= 0) return '';
-      return 'https://img.wenku8.com/image/${id ~/ 1000}/${item.aid}/${item.aid}s.jpg';
-    }
-    final cached = coverForBook(item.aid);
-    return cached.isNotEmpty ? cached : storedCoverUrl;
   }
 }

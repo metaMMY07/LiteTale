@@ -100,23 +100,20 @@ class _FluidNavigationBarState extends State<FluidNavigationBar>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    return ColoredBox(
-      color: theme.scaffoldBackgroundColor,
-      child: SafeArea(
-        top: false,
-        minimum: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-        child: Align(
-          heightFactor: 1,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 680),
-            child: Material(
-              color:
-                  theme.navigationBarTheme.backgroundColor ??
-                  materialRaisedSurface(colors),
-              shape: const StadiumBorder(),
-              clipBehavior: Clip.antiAlias,
-              child: _navigationContent(context, theme),
-            ),
+    return SafeArea(
+      top: false,
+      minimum: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+      child: Align(
+        heightFactor: 1,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          child: Material(
+            color:
+                theme.navigationBarTheme.backgroundColor ??
+                materialRaisedSurface(colors),
+            shape: const StadiumBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: _navigationContent(context, theme),
           ),
         ),
       ),

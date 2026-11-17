@@ -10,12 +10,14 @@ class BookshelfGrid extends StatefulWidget {
     required this.reordering,
     required this.tile,
     required this.onReorder,
+    this.gridDelegate,
   });
 
   final List<String> ids;
   final bool showSource, reordering;
   final Widget Function(BuildContext, String) tile;
   final ValueChanged<List<String>> onReorder;
+  final SliverGridDelegate? gridDelegate;
 
   @override
   State<BookshelfGrid> createState() => _BookshelfGridState();
@@ -69,33 +71,41 @@ class _BookshelfGridState extends State<BookshelfGrid> {
     }
   }
 
+  SliverGridDelegate _coverGrid(BuildContext context, double width) {
+    const gap = 10.0;
+    final columns = (width / 145).floor().clamp(width < 282 ? 2 : 3, 8);
+    final tileWidth = (width - (columns - 1) * gap) / columns;
+    return SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: columns,
+      crossAxisSpacing: gap,
+      mainAxisSpacing: gap,
+      mainAxisExtent:
+          tileWidth * 1.5 +
+          BookshelfTile.captionHeight(context, widget.showSource),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => SliverLayoutBuilder(
     builder: (context, constraints) {
-      const gap = 10.0;
-      final width = constraints.crossAxisExtent;
-      final columns = (width / 145).floor().clamp(width < 282 ? 2 : 3, 8);
-      final tileWidth = (width - (columns - 1) * gap) / columns;
-      final tileHeight =
-          tileWidth * 1.5 +
-          BookshelfTile.captionHeight(context, widget.showSource);
+      final delegate =
+          widget.gridDelegate ??
+          _coverGrid(context, constraints.crossAxisExtent);
+      final dragLayout =
+          widget.reordering ? delegate.getLayout(constraints) : null;
       final order = _preview ?? widget.ids;
       final indices = {for (var i = 0; i < order.length; i++) order[i]: i};
       return SliverGrid(
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: columns,
-          crossAxisSpacing: gap,
-          mainAxisSpacing: gap,
-          mainAxisExtent: tileHeight,
-        ),
+        gridDelegate: delegate,
         delegate: SliverChildBuilderDelegate(
           (context, index) {
             final id = order[index];
             final tile = widget.tile(context, id);
+            final dragTile = dragLayout?.getGeometryForChildIndex(index);
             return KeyedSubtree(
               key: ValueKey(id),
               child:
-                  widget.reordering
+                  dragTile != null
                       ? DragTarget<String>(
                         onWillAcceptWithDetails:
                             (details) => _dragged == details.data,
@@ -137,8 +147,8 @@ class _BookshelfGridState extends State<BookshelfGrid> {
                                           ? 1
                                           : 1.04,
                                   child: SizedBox(
-                                    width: tileWidth,
-                                    height: tileHeight,
+                                    width: dragTile.crossAxisExtent,
+                                    height: dragTile.mainAxisExtent,
                                     child: tile,
                                   ),
                                 ),
