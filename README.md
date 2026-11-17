@@ -45,7 +45,7 @@ iOS 安装包需要自行签名后安装。
 - 分别导入全局界面字体和阅读字体，支持 TTF／OTF；加密章节继续使用书源所需字体，避免乱码。
 - 书源导入支持 LiteTale JSON 和 Legado JSON 的部分 CSS／JSON 规则；不执行外部脚本。
 
-APK 使用与既有版本相同的 Android Debug 签名，适合直接安装和从同签名版本升级；目前不用于 Google Play 等商店分发。
+APK 使用与既有版本相同的 Android Debug 签名，适合直接安装和从同签名版本升级。
 
 ## 构建
 
