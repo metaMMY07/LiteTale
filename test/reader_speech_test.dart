@@ -648,6 +648,18 @@ void main() {
       );
       await tester.tap(find.text('详情'));
       await tester.pumpAndSettle();
+      Color? actionColor(String id) =>
+          tester
+              .widget<Material>(
+                find
+                    .descendant(
+                      of: find.byKey(ValueKey(id)),
+                      matching: find.byType(Material),
+                    )
+                    .first,
+              )
+              .color;
+      final disabledColor = actionColor('reader-speech');
       expect(
         tester
             .widget<ReaderRoundAction>(
@@ -657,7 +669,10 @@ void main() {
         isNull,
       );
       chapter.value = _chapter;
-      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(actionColor('reader-speech'), actionColor('reader-catalog'));
+      expect(actionColor('reader-speech'), actionColor('reader-settings'));
+      expect(actionColor('reader-speech'), isNot(disabledColor));
       await tester.tap(find.byTooltip('听书'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 120));

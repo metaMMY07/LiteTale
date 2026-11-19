@@ -35,7 +35,9 @@ class _ReaderMenuMotionState extends State<ReaderMenuMotion> {
   @override
   Widget build(BuildContext context) {
     final exit = ReaderSpeechScope.exitOf(context);
-    if (!usesAppleGlass && exit == null) {
+    if (!usesAppleGlass &&
+        Theme.of(context).platform != TargetPlatform.android &&
+        exit == null) {
       return widget.visible ? widget.child : const SizedBox.shrink();
     }
     final target = widget.visible ? 1.0 : 0.0;
@@ -266,7 +268,11 @@ class ReaderRoundAction extends StatelessWidget {
                 shape: const CircleBorder(),
                 padding: EdgeInsets.zero,
               ),
-              isSelected: selected,
+              isSelected:
+                  !selected &&
+                          Theme.of(context).platform == TargetPlatform.android
+                      ? null
+                      : selected,
               icon: Icon(icon),
               onPressed: onPressed,
             ),

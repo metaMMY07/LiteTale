@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:http/http.dart' as http;
@@ -35,12 +37,30 @@ class VersionInfo extends Equatable {
   List<Object?> get props => [version, url, body];
 }
 
+const _releaseRepository = 'metaMMY07/LiteTale';
+final _versionPattern = RegExp(
+  r'^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$',
+);
+final _buildTag = RegExp(r'(?:-build|\+(?:build\.)?)(\d+)$');
+
+int? _buildFromTag(String tag) =>
+    int.tryParse(_buildTag.firstMatch(tag)?.group(1) ?? '');
+
+int? _installedBuildNumber() {
+  final number = int.tryParse(AppInfo.buildNumber);
+  if (number == null) return null;
+  // Flutter's split APKs add the ABI offset to the release build number.
+  return defaultTargetPlatform == TargetPlatform.android &&
+          number >= 1000 &&
+          number < 5000
+      ? number % 1000
+      : number;
+}
+
 /// SemVer comparison accepts the development tags used by LiteTale too.
 int compareUpdateVersions(String a, String b) {
   List<String> parse(String value) {
-    final m = RegExp(
-      r'^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$',
-    ).firstMatch(value);
+    final m = _versionPattern.firstMatch(value);
     if (m == null) throw const FormatException('不支持的版本号');
     return [m[1]!, m[2]!, m[3]!, m[4] ?? ''];
   }
@@ -73,22 +93,49 @@ int compareUpdateVersions(String a, String b) {
 }
 
 class UpdateCubit extends Cubit<UpdateState> {
-  UpdateCubit({http.Client? client, String Function()? version})
-    : _client = client ?? http.Client(),
-      _version = version ?? (() => AppInfo.version),
-      super(const UpdateState());
+  UpdateCubit({
+    http.Client? client,
+    String Function()? version,
+    int? Function()? buildNumber,
+  }) : _client = client ?? http.Client(),
+       _version = version ?? (() => AppInfo.version),
+       _buildNumber = buildNumber ?? _installedBuildNumber,
+       super(const UpdateState());
   final http.Client _client;
   final String Function() _version;
+  final int? Function() _buildNumber;
   String? _checkedChannel;
+  String? _checkingChannel;
+  Future<VersionInfo?>? _pending;
+  String? _promptedUrl;
+
+  bool markPromptShown(VersionInfo info) {
+    if (info != state.updateInfo || info.url == _promptedUrl) return false;
+    _promptedUrl = info.url;
+    return true;
+  }
 
   Future<VersionInfo?> checkUpdate({
     bool force = false,
     String channel = 'stable',
-  }) async {
-    if (state.phase == UpdatePhase.checking) return null;
-    if (state.hasCheckedOnStartup && !force && channel == _checkedChannel) {
-      return null;
+  }) {
+    if (isClosed) return Future.value();
+    if (_pending case final pending?) {
+      return channel == _checkingChannel
+          ? pending
+          : pending.then((_) => checkUpdate(force: force, channel: channel));
     }
+    if (state.hasCheckedOnStartup && !force && channel == _checkedChannel) {
+      return Future.value(state.updateInfo);
+    }
+    _checkingChannel = channel;
+    return _pending = _checkUpdate(channel).whenComplete(() {
+      _pending = null;
+      _checkingChannel = null;
+    });
+  }
+
+  Future<VersionInfo?> _checkUpdate(String channel) async {
     emit(
       UpdateState(
         hasCheckedOnStartup: state.hasCheckedOnStartup,
@@ -97,23 +144,34 @@ class UpdateCubit extends Cubit<UpdateState> {
       ),
     );
     try {
+      final installedVersion = _version();
       final uri = Uri.parse(
-        'https://api.github.com/repos/metaMMY07/LiteTale/releases?per_page=30',
+        'https://api.github.com/repos/$_releaseRepository/releases?per_page=30',
       );
       final response = await _client
           .get(
             uri,
             headers: {
-              'User-Agent': 'LiteTale/${_version()}',
+              'User-Agent': 'LiteTale/$installedVersion',
               'Accept': 'application/vnd.github+json',
             },
           )
           .timeout(const Duration(seconds: 15));
+      if (isClosed) return null;
       if (response.statusCode != 200) {
         throw StateError('Update server unavailable');
       }
-      final list = jsonDecode(response.body) as List;
-      final releases = <Map<String, dynamic>>[];
+      final list = jsonDecode(utf8.decode(response.bodyBytes)) as List;
+      final releases =
+          <
+            ({
+              String tag,
+              String version,
+              bool stable,
+              int publishedAt,
+              Map<String, dynamic> data,
+            })
+          >[];
       for (final item in list) {
         if (item is! Map ||
             item['draft'] == true ||
@@ -122,20 +180,29 @@ class UpdateCubit extends Cubit<UpdateState> {
         }
         final row = Map<String, dynamic>.from(item);
         final tag = row['tag_name'] as String;
-        if (channel == 'stable' &&
-            (row['prerelease'] == true || tag.contains('-'))) {
-          continue;
-        }
-        try {
-          compareUpdateVersions(tag, _version());
-          releases.add(row);
-        } on FormatException {
-          continue;
-        }
+        final stable = row['prerelease'] != true;
+        final parsed = _versionPattern.firstMatch(tag);
+        if (parsed == null || (channel == 'stable' && !stable)) continue;
+        // A published build or fix has the same public version as its package.
+        releases.add((
+          tag: tag,
+          version: stable ? '${parsed[1]}.${parsed[2]}.${parsed[3]}' : tag,
+          stable: stable,
+          publishedAt:
+              DateTime.tryParse(
+                '${row['published_at']}',
+              )?.millisecondsSinceEpoch ??
+              0,
+          data: row,
+        ));
       }
-      releases.sort(
-        (a, b) => compareUpdateVersions(b['tag_name'], a['tag_name']),
-      );
+      releases.sort((a, b) {
+        final version = compareUpdateVersions(b.version, a.version);
+        if (version != 0) return version;
+        final published = b.publishedAt.compareTo(a.publishedAt);
+        if (published != 0) return published;
+        return (_buildFromTag(b.tag) ?? 0).compareTo(_buildFromTag(a.tag) ?? 0);
+      });
       _checkedChannel = channel;
       if (releases.isEmpty) {
         emit(
@@ -148,27 +215,44 @@ class UpdateCubit extends Cubit<UpdateState> {
         return null;
       }
       final latest = releases.first;
-      if (compareUpdateVersions(latest['tag_name'], _version()) <= 0) {
+      var order = compareUpdateVersions(latest.version, installedVersion);
+      var currentMessage = '已是最新版本';
+      final installedBuild = _buildNumber();
+      if (order == 0 && latest.stable && installedBuild != null) {
+        final build =
+            _buildFromTag(latest.tag) ??
+            await _releaseBuild(
+              latest.data['target_commitish'],
+              latest.version,
+            );
+        if (isClosed) return null;
+        if (build == null) {
+          currentMessage = '已发布版本号与当前相同';
+        } else {
+          order = build.compareTo(installedBuild);
+        }
+      }
+      if (order <= 0) {
         emit(
-          const UpdateState(
+          UpdateState(
             hasCheckedOnStartup: true,
             phase: UpdatePhase.current,
-            message: '已是最新版本',
+            message: currentMessage,
           ),
         );
         return null;
       }
-      final releaseUri = Uri.tryParse('${latest['html_url']}');
+      final releaseUri = Uri.tryParse('${latest.data['html_url']}');
       if (releaseUri == null ||
           releaseUri.scheme != 'https' ||
           releaseUri.host != 'github.com' ||
-          !releaseUri.path.startsWith('/metaMMY07/LiteTale/releases/')) {
+          !releaseUri.path.startsWith('/$_releaseRepository/releases/')) {
         throw const FormatException('更新链接无效');
       }
       final info = VersionInfo(
-        version: latest['tag_name'],
+        version: latest.tag,
         url: releaseUri.toString(),
-        body: latest['body'] is String ? latest['body'] : '',
+        body: latest.data['body'] is String ? latest.data['body'] : '',
       );
       emit(
         UpdateState(
@@ -178,7 +262,7 @@ class UpdateCubit extends Cubit<UpdateState> {
           message: '发现 ${info.version}',
         ),
       );
-      await AppLogs.instance.record('info', '更新检查完成：发现新版本');
+      unawaited(AppLogs.instance.record('info', '更新检查完成：发现新版本'));
       return info;
     } catch (_) {
       if (!isClosed) {
@@ -189,7 +273,36 @@ class UpdateCubit extends Cubit<UpdateState> {
           ),
         );
       }
-      await AppLogs.instance.record('error', '更新检查失败');
+      unawaited(AppLogs.instance.record('error', '更新检查失败'));
+      return null;
+    }
+  }
+
+  Future<int?> _releaseBuild(Object? revision, String version) async {
+    // Only an immutable release snapshot can identify a build without a
+    // number in its tag. A branch's pubspec may describe another package.
+    if (revision is! String || !RegExp(r'^[0-9a-f]{40}$').hasMatch(revision)) {
+      return null;
+    }
+    try {
+      final response = await _client
+          .get(
+            Uri.https(
+              'raw.githubusercontent.com',
+              '/$_releaseRepository/$revision/pubspec.yaml',
+            ),
+          )
+          .timeout(const Duration(seconds: 4));
+      if (response.statusCode != 200) return null;
+      final match = RegExp(
+        r'^version:[ \t]*(v?\d+\.\d+\.\d+)\+(\d+)[ \t]*\r?$',
+        multiLine: true,
+      ).firstMatch(response.body);
+      if (match == null || compareUpdateVersions(match[1]!, version) != 0) {
+        return null;
+      }
+      return int.tryParse(match[2]!);
+    } catch (_) {
       return null;
     }
   }

@@ -1,9 +1,110 @@
-import 'package:wild/widgets/apple_glass_chrome.dart';
-import 'package:wild/widgets/platform_controls.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:wild/pages/update_cubit.dart';
 import 'package:wild/settings/settings_preferences.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
+
+Future<void> showUpdatePrompt(
+  BuildContext context,
+  VersionInfo info, {
+  bool automatic = false,
+}) async {
+  final firstPrompt = context.read<UpdateCubit>().markPromptShown(info);
+  if (automatic && !firstPrompt) return;
+  final open = await showDialog<bool>(
+    context: context,
+    builder: (dialog) {
+      final theme = Theme.of(dialog);
+      final colors = theme.colorScheme;
+      final apple = usesAppleGlass;
+      final buttonStyle =
+          apple
+              ? FilledButton.styleFrom(
+                foregroundColor: colors.onSurface,
+                backgroundColor: colors.onSurface.withValues(alpha: .12),
+                shape: const StadiumBorder(),
+                minimumSize: const Size(0, 48),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 12,
+                ),
+              )
+              : null;
+      return Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+        backgroundColor: apple ? Colors.transparent : null,
+        elevation: apple ? 0 : null,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: AppleGlassSurface(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('检测到新版本', style: theme.textTheme.titleLarge),
+                  const SizedBox(height: 8),
+                  Text(
+                    '要更新吗？',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: FilledButton.tonal(
+                          style: buttonStyle,
+                          onPressed: () => Navigator.pop(dialog, false),
+                          child: const Text('暂不', textAlign: TextAlign.center),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.tonal(
+                          style: buttonStyle,
+                          onPressed: () => Navigator.pop(dialog, true),
+                          child: const Text(
+                            '打开 GitHub',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+  if (open != true || !context.mounted) return;
+  try {
+    if (await launchUrl(
+      Uri.parse(info.url),
+      mode: LaunchMode.externalApplication,
+    )) {
+      return;
+    }
+  } catch (_) {
+    // Report link failures in the same page that opened the prompt.
+  }
+  if (context.mounted) {
+    ScaffoldMessenger.maybeOf(
+      context,
+    )?.showSnackBar(const SnackBar(content: Text('无法打开 GitHub 发布页')));
+  }
+}
 
 class UpdateChecker extends StatefulWidget {
   final Widget child;
@@ -20,92 +121,44 @@ class UpdateChecker extends StatefulWidget {
 }
 
 class _UpdateCheckerState extends State<UpdateChecker> {
-  OverlayEntry? _overlayEntry;
+  VersionInfo? _availableUpdate;
 
   @override
-  void dispose() {
-    _overlayEntry?.remove();
-    super.dispose();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final current = ModalRoute.isCurrentOf(context);
+    if (current != false && _availableUpdate != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _showIfCurrent());
+    }
   }
 
-  void _showUpdateDialog(VersionInfo updateInfo) {
-    _overlayEntry?.remove();
-    _overlayEntry = OverlayEntry(
-      builder:
-          (context) => Material(
-            color: Colors.black54,
-            child: Center(
-              child: AppleGlassCard(
-                margin: const EdgeInsets.symmetric(horizontal: 32),
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '发现新版本',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        '最新版本：${updateInfo.version}',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxHeight: MediaQuery.of(context).size.height * 0.4,
-                        ),
-                        child: SingleChildScrollView(
-                          child: Text(
-                            updateInfo.body,
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: AppButton.text(
-                          onPressed: () {
-                            _overlayEntry?.remove();
-                            _overlayEntry = null;
-                          },
-                          child: const Text('我知道了'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-    );
-
-    Overlay.of(context).insert(_overlayEntry!);
+  void _showIfCurrent() {
+    final info = _availableUpdate;
+    if (!mounted || info == null || ModalRoute.isCurrentOf(context) == false) {
+      return;
+    }
+    _availableUpdate = null;
+    unawaited(showUpdatePrompt(context, info, automatic: true));
   }
 
   Future<void> _checkUpdate() async {
+    if (!mounted) return;
     final settings = settingsPreferencesOf(context, listen: false);
     if (!settings.autoUpdate && !widget.forceCheck) return;
     final updateInfo = await context.read<UpdateCubit>().checkUpdate(
       force: widget.forceCheck,
       channel: settings.updateChannel,
     );
-    if (updateInfo != null && mounted) {
-      _showUpdateDialog(updateInfo);
-    }
+    if (!mounted) return;
+    _availableUpdate = updateInfo;
+    _showIfCurrent();
   }
 
   @override
   void initState() {
     super.initState();
-    // 在下一帧检查更新，确保 context 已经准备好
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkUpdate();
+      unawaited(_checkUpdate());
     });
   }
 

@@ -1,21 +1,34 @@
+// The browser is mocked at the url_launcher plugin boundary.
+// ignore_for_file: depend_on_referenced_packages
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
+import 'package:wild/pages/home/about_page.dart';
 import 'package:wild/pages/update_cubit.dart';
+import 'package:wild/settings/settings_preferences.dart';
+import 'package:wild/widgets/update_checker.dart';
 
 Map<String, Object?> _release(
   String tag, {
   bool draft = false,
   bool prerelease = false,
   String? url,
+  String? publishedAt,
+  String? revision,
 }) => {
   'tag_name': tag,
   'draft': draft,
   'prerelease': prerelease,
   'html_url': url ?? 'https://github.com/metaMMY07/LiteTale/releases/tag/$tag',
   'body': 'Notes for $tag',
+  'published_at': publishedAt,
+  'target_commitish': revision,
 };
 
 UpdateCubit _cubitWith(
@@ -29,6 +42,20 @@ UpdateCubit _cubitWith(
     ),
     version: () => currentVersion,
   );
+}
+
+class _UpdateBrowser extends UrlLauncherPlatform {
+  final opened = <String>[];
+
+  @override
+  get linkDelegate => null;
+
+  @override
+  Future<bool> launchUrl(String url, LaunchOptions options) async {
+    expect(options.mode, PreferredLaunchMode.externalApplication);
+    opened.add(url);
+    return true;
+  }
 }
 
 void main() {
@@ -85,6 +112,50 @@ void main() {
   });
 
   group('release feed handling', () {
+    test('stable updates include published fix and build tags', () async {
+      final cubit = _cubitWith([
+        _release('v1.2.5-build120', publishedAt: '2026-11-17T08:00:00Z'),
+        _release('v1.2.5-fix', publishedAt: '2026-11-17T14:39:00Z'),
+        _release('v1.2.6-test', prerelease: true),
+        _release('v1.2.4-build113'),
+      ], currentVersion: '1.2.4');
+      addTearDown(cubit.close);
+
+      expect((await cubit.checkUpdate())?.version, 'v1.2.5-fix');
+    });
+
+    test(
+      'same-version fixes compare against their release snapshot build',
+      () async {
+        const revision = '6389030147c202796eb637f5fcfb71caae31836d';
+        var installedBuild = 120;
+        final requests = <Uri>[];
+        final cubit = UpdateCubit(
+          client: MockClient((request) async {
+            requests.add(request.url);
+            return request.url.host == 'api.github.com'
+                ? http.Response(
+                  jsonEncode([_release('v1.2.5-fix', revision: revision)]),
+                  200,
+                )
+                : http.Response('name: wild\nversion: 1.2.5+122\n', 200);
+          }),
+          version: () => '1.2.5',
+          buildNumber: () => installedBuild,
+        );
+        addTearDown(cubit.close);
+        expect((await cubit.checkUpdate())?.version, 'v1.2.5-fix');
+        expect(requests, hasLength(2));
+        expect(
+          requests.last.toString(),
+          'https://raw.githubusercontent.com/metaMMY07/LiteTale/$revision/pubspec.yaml',
+        );
+        installedBuild = 122;
+        expect(await cubit.checkUpdate(force: true), isNull);
+        expect(cubit.state.phase, UpdatePhase.current);
+      },
+    );
+
     test(
       'empty or draft-only feeds report unpublished, never latest',
       () async {
@@ -146,4 +217,111 @@ void main() {
       }
     });
   });
+
+  testWidgets(
+    'startup keeps its update through route replacement and prompts once',
+    (tester) async {
+      final navigator = GlobalKey<NavigatorState>();
+      final response = Completer<http.Response>();
+      var requests = 0;
+      final cubit = UpdateCubit(
+        client: MockClient((_) {
+          requests++;
+          return response.future;
+        }),
+        version: () => '1.2.4',
+      );
+      addTearDown(cubit.close);
+      const page = UpdateChecker(child: Scaffold(body: Text('发现')));
+      await tester.pumpWidget(
+        BlocProvider.value(
+          value: cubit,
+          child: MaterialApp(navigatorKey: navigator, home: page),
+        ),
+      );
+      void replacePage() => unawaited(
+        navigator.currentState!.pushReplacement<void, void>(
+          MaterialPageRoute(builder: (_) => page),
+        ),
+      );
+      replacePage();
+      await tester.pumpAndSettle();
+      response.complete(
+        http.Response(jsonEncode([_release('v1.2.5-fix')]), 200),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('检测到新版本'), findsOneWidget);
+      expect(find.text('要更新吗？'), findsOneWidget);
+      expect(find.text('打开 GitHub'), findsOneWidget);
+      await tester.tap(find.text('暂不'));
+      await tester.pumpAndSettle();
+      replacePage();
+      await tester.pumpAndSettle();
+      expect(find.text('检测到新版本'), findsNothing);
+      expect(requests, 1);
+    },
+    variant: const TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+    }),
+  );
+
+  testWidgets(
+    'manual check shows progress, results, and the configured release',
+    (tester) async {
+      var response = Completer<http.Response>();
+      final cubit = UpdateCubit(
+        client: MockClient((_) => response.future),
+        version: () => '1.2.4',
+        buildNumber: () => null,
+      );
+      final preferences = SettingsPreferencesCubit(write: (_) async {});
+      await preferences.update(
+        (settings) =>
+            settings.copyWith(autoUpdate: false, updateChannel: 'preview'),
+      );
+      addTearDown(cubit.close);
+      addTearDown(preferences.close);
+      final originalBrowser = UrlLauncherPlatform.instance;
+      final browser = _UpdateBrowser();
+      UrlLauncherPlatform.instance = browser;
+      addTearDown(() => UrlLauncherPlatform.instance = originalBrowser);
+      await tester.pumpWidget(
+        MultiBlocProvider(
+          providers: [
+            BlocProvider.value(value: cubit),
+            BlocProvider.value(value: preferences),
+          ],
+          child: const MaterialApp(home: UpdateChecker(child: AboutPage())),
+        ),
+      );
+
+      Future<void> check(http.Response result) async {
+        await tester.tap(find.text('检查更新'));
+        await tester.pump();
+        expect(find.text('正在检查更新…'), findsOneWidget);
+        response.complete(result);
+        await tester.pumpAndSettle();
+        response = Completer<http.Response>();
+      }
+
+      expect(cubit.state.phase, UpdatePhase.idle);
+      await check(http.Response(jsonEncode([_release('v1.2.4')]), 200));
+      expect(find.text('已是最新版本'), findsOneWidget);
+      await check(http.Response('[]', 503));
+      expect(find.text('检查失败，请检查网络后重试'), findsOneWidget);
+      await check(
+        http.Response(
+          jsonEncode([_release('v1.2.5-test', prerelease: true)]),
+          200,
+        ),
+      );
+      expect(find.text('检测到新版本'), findsOneWidget);
+      await tester.tap(find.text('打开 GitHub'));
+      await tester.pumpAndSettle();
+      expect(browser.opened, [
+        'https://github.com/metaMMY07/LiteTale/releases/tag/v1.2.5-test',
+      ]);
+    },
+  );
 }

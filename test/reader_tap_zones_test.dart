@@ -185,10 +185,26 @@ void main() {
     await tester.tapAt(const Offset(1120, 330));
     await tester.pumpAndSettle();
     expect(loaded().currentPageIndex, 2);
+    final paper = tester.getRect(find.byType(ReaderCoverView));
+    final toolbar = find.byType(ReaderToolbar);
+    final scrubber = find.byType(ReaderPageScrubber);
     await tester.tapAt(leftMiddle);
+    await tester.pump();
+    final toolbarStart = tester.getTopLeft(toolbar).dy;
+    final scrubberStart = tester.getTopLeft(scrubber).dy;
+    await tester.pump(const Duration(milliseconds: 80));
+    final toolbarDuring = tester.getTopLeft(toolbar).dy;
+    final scrubberDuring = tester.getTopLeft(scrubber).dy;
     await tester.pumpAndSettle();
-    expect(find.byType(ReaderToolbar), findsOneWidget);
-    expect(find.byType(ReaderPageScrubber), findsOneWidget);
+    expect(
+      toolbarDuring,
+      inExclusiveRange(toolbarStart, tester.getTopLeft(toolbar).dy),
+    );
+    expect(
+      scrubberDuring,
+      inExclusiveRange(tester.getTopLeft(scrubber).dy, scrubberStart),
+    );
+    expect(tester.getRect(find.byType(ReaderCoverView)), paper);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 350));
     expect(tester.takeException(), isNull);
