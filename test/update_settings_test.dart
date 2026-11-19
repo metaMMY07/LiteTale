@@ -125,9 +125,10 @@ void main() {
     });
 
     test(
-      'same-version fixes compare against their release snapshot build',
+      'same-version fix and build labels compare their release snapshot build',
       () async {
         const revision = '6389030147c202796eb637f5fcfb71caae31836d';
+        var tag = 'v1.2.5-fix';
         var installedBuild = 120;
         final requests = <Uri>[];
         final cubit = UpdateCubit(
@@ -135,7 +136,7 @@ void main() {
             requests.add(request.url);
             return request.url.host == 'api.github.com'
                 ? http.Response(
-                  jsonEncode([_release('v1.2.5-fix', revision: revision)]),
+                  jsonEncode([_release(tag, revision: revision)]),
                   200,
                 )
                 : http.Response('name: wild\nversion: 1.2.5+122\n', 200);
@@ -150,11 +151,37 @@ void main() {
           requests.last.toString(),
           'https://raw.githubusercontent.com/metaMMY07/LiteTale/$revision/pubspec.yaml',
         );
+        tag = 'v1.2.5-build10';
+        expect((await cubit.checkUpdate(force: true))?.version, tag);
         installedBuild = 122;
         expect(await cubit.checkUpdate(force: true), isNull);
         expect(cubit.state.phase, UpdatePhase.current);
       },
     );
+
+    test('a release with only a fix label reads its tag version', () async {
+      final requests = <Uri>[];
+      final cubit = UpdateCubit(
+        client: MockClient((request) async {
+          requests.add(request.url);
+          return request.url.host == 'api.github.com'
+              ? http.Response(
+                jsonEncode([_release('fix3', revision: 'main')]),
+                200,
+              )
+              : http.Response('name: wild\nversion: 1.2.5+125\n', 200);
+        }),
+        version: () => '1.2.5',
+        buildNumber: () => 124,
+      );
+      addTearDown(cubit.close);
+      expect((await cubit.checkUpdate())?.version, 'fix3');
+      expect(requests, hasLength(2));
+      expect(
+        requests.last.path,
+        '/metaMMY07/LiteTale/refs/tags/fix3/pubspec.yaml',
+      );
+    });
 
     test(
       'empty or draft-only feeds report unpublished, never latest',

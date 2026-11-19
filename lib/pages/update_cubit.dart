@@ -43,6 +43,8 @@ final _versionPattern = RegExp(
 );
 final _buildTag = RegExp(r'(?:-build|\+(?:build\.)?)(\d+)$');
 
+typedef _ReleasePackage = ({String version, int build});
+
 int? _buildFromTag(String tag) =>
     int.tryParse(_buildTag.firstMatch(tag)?.group(1) ?? '');
 
@@ -167,11 +169,11 @@ class UpdateCubit extends Cubit<UpdateState> {
             ({
               String tag,
               String version,
-              bool stable,
               int publishedAt,
               Map<String, dynamic> data,
             })
           >[];
+      ({String tag, int publishedAt, Map<String, dynamic> data})? newestLabel;
       for (final item in list) {
         if (item is! Map ||
             item['draft'] == true ||
@@ -181,20 +183,42 @@ class UpdateCubit extends Cubit<UpdateState> {
         final row = Map<String, dynamic>.from(item);
         final tag = row['tag_name'] as String;
         final stable = row['prerelease'] != true;
+        if (channel == 'stable' && !stable) continue;
+        final publishedAt =
+            DateTime.tryParse(
+              '${row['published_at']}',
+            )?.millisecondsSinceEpoch ??
+            0;
         final parsed = _versionPattern.firstMatch(tag);
-        if (parsed == null || (channel == 'stable' && !stable)) continue;
+        if (parsed == null) {
+          if (newestLabel == null || publishedAt > newestLabel.publishedAt) {
+            newestLabel = (tag: tag, publishedAt: publishedAt, data: row);
+          }
+          continue;
+        }
         // A published build or fix has the same public version as its package.
         releases.add((
           tag: tag,
           version: stable ? '${parsed[1]}.${parsed[2]}.${parsed[3]}' : tag,
-          stable: stable,
-          publishedAt:
-              DateTime.tryParse(
-                '${row['published_at']}',
-              )?.millisecondsSinceEpoch ??
-              0,
+          publishedAt: publishedAt,
           data: row,
         ));
+      }
+      _ReleasePackage? labelPackage;
+      if (newestLabel case final label?) {
+        labelPackage = await _releasePackage(
+          label.data['target_commitish'],
+          label.tag,
+        );
+        if (isClosed) return null;
+        if (labelPackage != null) {
+          releases.add((
+            tag: label.tag,
+            version: labelPackage.version,
+            publishedAt: label.publishedAt,
+            data: label.data,
+          ));
+        }
       }
       releases.sort((a, b) {
         final version = compareUpdateVersions(b.version, a.version);
@@ -218,14 +242,22 @@ class UpdateCubit extends Cubit<UpdateState> {
       var order = compareUpdateVersions(latest.version, installedVersion);
       var currentMessage = '已是最新版本';
       final installedBuild = _buildNumber();
-      if (order == 0 && latest.stable && installedBuild != null) {
-        final build =
-            _buildFromTag(latest.tag) ??
-            await _releaseBuild(
-              latest.data['target_commitish'],
-              latest.version,
-            );
+      if (order == 0 && installedBuild != null) {
+        final package =
+            latest.tag == newestLabel?.tag
+                ? labelPackage
+                : await _releasePackage(
+                  latest.data['target_commitish'],
+                  latest.tag,
+                );
         if (isClosed) return null;
+        // A label such as build10 can differ from the package's build number.
+        final build =
+            package == null
+                ? _buildFromTag(latest.tag)
+                : compareUpdateVersions(package.version, latest.version) == 0
+                ? package.build
+                : null;
         if (build == null) {
           currentMessage = '已发布版本号与当前相同';
         } else {
@@ -278,18 +310,18 @@ class UpdateCubit extends Cubit<UpdateState> {
     }
   }
 
-  Future<int?> _releaseBuild(Object? revision, String version) async {
-    // Only an immutable release snapshot can identify a build without a
-    // number in its tag. A branch's pubspec may describe another package.
-    if (revision is! String || !RegExp(r'^[0-9a-f]{40}$').hasMatch(revision)) {
-      return null;
-    }
+  Future<_ReleasePackage?> _releasePackage(Object? revision, String tag) async {
+    // A branch can move on to a different package after publication.
+    final ref =
+        revision is String && RegExp(r'^[0-9a-f]{40}$').hasMatch(revision)
+            ? revision
+            : 'refs/tags/$tag';
     try {
       final response = await _client
           .get(
             Uri.https(
               'raw.githubusercontent.com',
-              '/$_releaseRepository/$revision/pubspec.yaml',
+              '/$_releaseRepository/$ref/pubspec.yaml',
             ),
           )
           .timeout(const Duration(seconds: 4));
@@ -298,10 +330,9 @@ class UpdateCubit extends Cubit<UpdateState> {
         r'^version:[ \t]*(v?\d+\.\d+\.\d+)\+(\d+)[ \t]*\r?$',
         multiLine: true,
       ).firstMatch(response.body);
-      if (match == null || compareUpdateVersions(match[1]!, version) != 0) {
-        return null;
-      }
-      return int.tryParse(match[2]!);
+      if (match == null) return null;
+      final build = int.tryParse(match[2]!);
+      return build == null ? null : (version: match[1]!, build: build);
     } catch (_) {
       return null;
     }
