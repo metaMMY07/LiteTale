@@ -4,7 +4,7 @@
   <p>基于 Wild 的 Android 与 iOS 轻小说阅读器</p>
 
 [![license](https://img.shields.io/github/license/metaMMY07/LiteTale)](LICENSE)
-[![release](https://img.shields.io/badge/release-v1.2.5--fix-blue)](https://github.com/metaMMY07/LiteTale/releases)
+[![release](https://img.shields.io/badge/release-v1.2.5-blue)](https://github.com/metaMMY07/LiteTale/releases)
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
