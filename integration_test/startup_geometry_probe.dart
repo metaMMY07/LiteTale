@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/main.dart' as app;
+import 'package:wild/pages/home/index_page.dart';
 import 'package:wild/pages/home_page.dart';
 import 'package:wild/theme/ios_dock_insets.dart';
 import 'package:wild/widgets/app_launch_screen.dart';
@@ -14,6 +16,9 @@ import 'package:wild/widgets/apple_glass_chrome.dart';
 Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
   final start = Timeline.now;
+  final temp = Directory.systemTemp;
+  final phase = File('${temp.path}/litetale-startup-phase.txt');
+  phase.writeAsStringSync('entered Dart');
   final frames = <List<int>>[];
   final geometry = <Map<String, Object?>>[];
   var signature = '';
@@ -41,6 +46,7 @@ Future<void> main() async {
       final name = switch (widget) {
         AppLaunchScreen() => 'launch',
         HomePage() => 'home',
+        IndexPage() => 'discover',
         AppleGlassToolbar() => 'toolbar',
         AppleGlassBottomBar() => 'dock',
         _ => null,
@@ -75,15 +81,20 @@ Future<void> main() async {
     signature = nextSignature;
     geometry.add({'us': Timeline.now - start, ...snapshot});
   });
-  await app.main();
-  Timer(const Duration(seconds: 9), () {
+  try {
+    await app.main();
+    phase.writeAsStringSync('app.main returned');
+  } catch (error, stackTrace) {
+    phase.writeAsStringSync('$error\n$stackTrace');
+    rethrow;
+  }
+  Timer(const Duration(seconds: 12), () {
     done = true;
-    for (final row in geometry) {
-      debugPrintSynchronously('LITETALE_GEOMETRY ${jsonEncode(row)}');
-    }
-    for (final frame in frames) {
-      debugPrintSynchronously('LITETALE_FRAME ${jsonEncode(frame)}');
-    }
-    debugPrintSynchronously('LITETALE_PROBE_DONE');
+    final file = File('${temp.path}/litetale-startup-data.tmp');
+    file.writeAsStringSync(jsonEncode({
+      'geometry': geometry,
+      'frames': frames,
+    }));
+    file.renameSync('${temp.path}/litetale-startup-data.json');
   });
 }

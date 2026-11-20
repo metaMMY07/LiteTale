@@ -63,26 +63,40 @@ jobs:
           if d['state']!='Booted':subprocess.run(['xcrun','simctl','boot',d['udid']],check=True,timeout=90)
           subprocess.run(['xcrun','simctl','bootstatus',d['udid'],'-b'],check=True,timeout=300)
           PY
-      - name: Build and run the existing app on the simulator
-        timeout-minutes: 20
+      - name: Build the existing app for the simulator
+        timeout-minutes: 23
         run: |
           set -euo pipefail
           mkdir -p build/startup-probe
           python3 tools/prepare_ios_assets.py pubspec.yaml
           flutter build ios --debug --simulator --no-codesign --no-pub --target=integration_test/startup_geometry_probe.dart 2>&1 | tee build/startup-probe/compile.log
+      - name: Install and record cold launches
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          bundle=io.github.metammy07.litetale
           xcrun simctl install "$SIMULATOR_ID" build/ios/iphonesimulator/Runner.app
+          data="$(xcrun simctl get_app_container "$SIMULATOR_ID" "$bundle" data)/tmp"
+          directory=build/startup-probe
+          xcrun simctl spawn "$SIMULATOR_ID" log stream --level debug --style compact --predicate 'process == "Runner"' > "$directory/simulator.log" 2>&1 &
+          stream_pid=$!
+          trap 'kill "$stream_pid" || true' EXIT
           for run in 1 2 3; do
-            log="build/startup-probe/launch-$run.log"
-            xcrun simctl launch --terminate-running-process --console "$SIMULATOR_ID" io.github.metammy07.litetale > "$log" 2>&1 &
-            launcher=$!
-            for attempt in $(seq 1 40); do
-              if grep -q LITETALE_PROBE_DONE "$log"; then break; fi
+            rm -f "$data/litetale-startup-phase.txt" "$data/litetale-startup-data.json"
+            xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" "$bundle" --enable-dart-profiling
+            for attempt in $(seq 1 120); do
+              if [ -f "$data/litetale-startup-data.json" ]; then break; fi
               sleep 0.5
             done
-            xcrun simctl terminate "$SIMULATOR_ID" io.github.metammy07.litetale || true
-            wait "$launcher" || true
-            grep LITETALE_GEOMETRY "$log"
-            grep -q LITETALE_PROBE_DONE "$log"
+            if [ -f "$data/litetale-startup-phase.txt" ]; then
+              cp "$data/litetale-startup-phase.txt" "$directory/phase-$run.txt"
+              cat "$directory/phase-$run.txt"
+            fi
+            if [ "$run" = 1 ] || [ ! -s "$data/litetale-startup-data.json" ]; then
+              xcrun simctl io "$SIMULATOR_ID" screenshot "$directory/startup-$run.png" || true
+            fi
+            cp "$data/litetale-startup-data.json" "$directory/launch-$run.json"
+            xcrun simctl terminate "$SIMULATOR_ID" "$bundle" || true
           done
       - uses: actions/upload-artifact@v4
         if: always()
