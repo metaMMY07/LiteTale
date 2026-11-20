@@ -1,0 +1,111 @@
+name: LiteTale cold startup probe
+on:
+  push:
+    branches: ['build/transition-probe-*']
+permissions:
+  contents: read
+concurrency:
+  group: startup-probe-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      CARGOKIT_RUST_TOOLCHAIN: '1.90.0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode and prime simulator services
+        run: |
+          sudo xcode-select --switch "$DEVELOPER_DIR"
+          sudo xcodebuild -runFirstLaunch
+          nohup xcrun simctl list devices available --json > /tmp/litetale-simulator-prime.log 2>&1 &
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.3'
+          channel: stable
+          architecture: arm64
+          cache: true
+      - name: Set up simulator Rust toolchain
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal
+          rustup default 1.90.0
+          if [ "$(uname -m)" = arm64 ]; then TARGET=aarch64-apple-ios-sim; else TARGET=x86_64-apple-ios; fi
+          rustup target add "$TARGET" --toolchain 1.90.0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/Library/Caches/CocoaPods
+          key: ios-sim-deps-1.90-${{ hashFiles('rust/Cargo.lock','pubspec.lock') }}
+      - name: Resolve locked dependencies
+        run: |
+          flutter config --no-analytics
+          flutter precache --ios
+          flutter pub get --enforce-lockfile
+          cd ios && pod install
+      - name: Check Dart dependencies before native compilation
+        run: dart analyze integration_test/startup_geometry_probe.dart
+      - name: Boot an iOS 26 phone
+        run: |
+          python3 - <<'PY'
+          import json,subprocess,os
+          devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json'],timeout=300))['devices']
+          runtimes=sorted([r for r in devices if 'iOS-26' in r],reverse=True)
+          choices=[d for runtime in runtimes[:1] for d in devices[runtime] if 'iPhone' in d['name']]
+          assert choices,'An iOS 26 runtime is required for glass acceptance'
+          choices.sort(key=lambda d: ('iPhone 17' not in d['name'],d['name']))
+          d=choices[0]
+          print('Selected simulator:',d['name'],d['udid'],flush=True)
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('SIMULATOR_ID='+d['udid']+'\n')
+          if d['state']!='Booted':subprocess.run(['xcrun','simctl','boot',d['udid']],check=True,timeout=90)
+          subprocess.run(['xcrun','simctl','bootstatus',d['udid'],'-b'],check=True,timeout=300)
+          PY
+      - name: Build the existing app for the simulator
+        timeout-minutes: 23
+        run: |
+          set -euo pipefail
+          mkdir -p build/startup-probe
+          python3 tools/prepare_ios_assets.py pubspec.yaml
+          flutter build ios --debug --simulator --no-codesign --no-pub --target=integration_test/startup_geometry_probe.dart 2>&1 | tee build/startup-probe/compile.log
+      - name: Install and record cold launches
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          bundle=io.github.metammy07.litetale
+          xcrun simctl install "$SIMULATOR_ID" build/ios/iphonesimulator/Runner.app
+          data="$(xcrun simctl get_app_container "$SIMULATOR_ID" "$bundle" data)/tmp"
+          directory=build/startup-probe
+          xcrun simctl spawn "$SIMULATOR_ID" log stream --level debug --style compact --predicate 'process == "Runner"' > "$directory/simulator.log" 2>&1 &
+          stream_pid=$!
+          trap 'kill "$stream_pid" || true' EXIT
+          for run in 1; do
+            rm -f "$data/litetale-startup-phase.txt" "$data/litetale-startup-data.json"
+            xcrun simctl io "$SIMULATOR_ID" recordVideo --codec h264 "$directory/cold-launch.mp4" > "$directory/video.log" 2>&1 &
+            recording=$!
+            sleep 1
+            xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" "$bundle" --enable-dart-profiling
+            for attempt in $(seq 1 120); do
+              if [ -f "$data/litetale-startup-data.json" ]; then break; fi
+              sleep 0.5
+            done
+            if [ -f "$data/litetale-startup-phase.txt" ]; then
+              cp "$data/litetale-startup-phase.txt" "$directory/phase-$run.txt"
+              cat "$directory/phase-$run.txt"
+            fi
+            if [ "$run" = 1 ] || [ ! -s "$data/litetale-startup-data.json" ]; then
+              xcrun simctl io "$SIMULATOR_ID" screenshot "$directory/startup-$run.png" || true
+            fi
+            kill -INT "$recording" || true
+            wait "$recording" || true
+            cp "$data/litetale-startup-data.json" "$directory/launch-$run.json"
+            xcrun simctl terminate "$SIMULATOR_ID" "$bundle" || true
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LiteTale-startup-probe
+          path: build/startup-probe
+          retention-days: 7
