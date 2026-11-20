@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:wild/theme/ios_dock_insets.dart';
 import 'package:wild/theme/ios_page_arrival.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:wild/widgets/app_launch_screen.dart';
 
 typedef _DockState =
     ({
@@ -171,10 +172,12 @@ class IosAppDockHost extends StatelessWidget {
     super.key,
     required this.controller,
     required this.child,
+    this.revealHomeOnStartup = false,
   });
 
   final IosDockController controller;
   final Widget child;
+  final bool revealHomeOnStartup;
 
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<_DockState>(
@@ -188,7 +191,7 @@ class IosAppDockHost extends StatelessWidget {
       final blocked = hidden || state.fullscreen || state.blocked;
       final direction = Directionality.of(context);
       final progress = reader ?? kAlwaysDismissedAnimation;
-      return Stack(
+      final content = Stack(
         fit: StackFit.expand,
         children: [
           IosDockInsets(
@@ -251,6 +254,9 @@ class IosAppDockHost extends StatelessWidget {
             ),
         ],
       );
+      return revealHomeOnStartup
+          ? IosStartupTransition(homeMounted: state.mounted, child: content)
+          : content;
     },
   );
 }

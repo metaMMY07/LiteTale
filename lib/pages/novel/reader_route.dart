@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wild/services/reading_progress.dart';
@@ -130,34 +128,4 @@ Future<void> openReaderListening(
     ),
   );
   await ReadingProgressQueue.instance.flushBounded();
-}
-
-/// Primary route status covers both the Cupertino slide and Android's cover.
-Future<bool> waitForListeningArrival(BuildContext context) async {
-  final route = ModalRoute.of(context);
-  final animation = route?.animation;
-  if (route != null && animation != null && !animation.isCompleted) {
-    final arrived = Completer<bool>();
-    void status(AnimationStatus status) {
-      if (status == AnimationStatus.completed && !arrived.isCompleted) {
-        arrived.complete(true);
-      }
-    }
-
-    animation.addStatusListener(status);
-    try {
-      if (!await Future.any([
-        arrived.future,
-        route.completed.then((_) => false),
-      ])) {
-        return false;
-      }
-    } finally {
-      animation.removeStatusListener(status);
-    }
-  }
-  await WidgetsBinding.instance.endOfFrame;
-  return context.mounted &&
-      route?.isCurrent != false &&
-      route?.offstage != true;
 }

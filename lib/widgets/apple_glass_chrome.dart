@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:wild/theme/ios_page_arrival.dart';
+import 'package:wild/widgets/app_launch_screen.dart';
 
 bool get usesAppleGlass => defaultTargetPlatform == TargetPlatform.iOS;
 
@@ -917,6 +918,7 @@ class _AppleChromeState extends State<_AppleChrome> {
   UiKitView? _nativeView;
   bool _nativeReady = false;
   bool _acceptActions = false;
+  VoidCallback? _finishStartupAttachment;
 
   bool get _isSurface => widget.parameters['kind'] == 'surface';
 
@@ -948,6 +950,8 @@ class _AppleChromeState extends State<_AppleChrome> {
       _update();
     }
     setState(() => _nativeReady = true);
+    _finishStartupAttachment?.call();
+    _finishStartupAttachment = null;
   }
 
   @override
@@ -989,6 +993,7 @@ class _AppleChromeState extends State<_AppleChrome> {
 
   @override
   void dispose() {
+    _finishStartupAttachment?.call();
     _channel?.setMethodCallHandler(null);
     super.dispose();
   }
@@ -1012,6 +1017,7 @@ class _AppleChromeState extends State<_AppleChrome> {
     // live glass view follows its page even while an adjacent page slides.
     // Only the Navigator's fully covered routes and inactive tabs are parked.
     if (_nativeView == null && onstage) {
+      _finishStartupAttachment = IosStartupTransition.waitForGlass(context);
       _nativeView = _createView();
     }
     _acceptActions = interactive && _nativeReady;

@@ -195,6 +195,7 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                                     child: IosAppDockHost(
                                       controller: dock,
                                       child: child!,
+                                      revealHomeOnStartup: true,
                                     ),
                                   ),
                         );

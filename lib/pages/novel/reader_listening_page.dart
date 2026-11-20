@@ -16,6 +16,7 @@ import 'package:wild/settings/settings_widgets.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart';
 import 'package:wild/src/rust/wenku8/models.dart';
+import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/apple_reader_panel.dart';
@@ -115,7 +116,7 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
   Future<void> _enter() async {
     if (!mounted) return;
     unawaited(_restoreVoice());
-    if (!await waitForListeningArrival(context) || !mounted || _closing) return;
+    if (!await waitForPageArrival(context) || !mounted || _closing) return;
     setState(() => _showMenu = true);
     if (MediaQuery.disableAnimationsOf(context)) {
       _menu.value = 1;

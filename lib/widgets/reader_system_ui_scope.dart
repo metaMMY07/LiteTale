@@ -1,6 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/theme/ios_page_arrival.dart';
+import 'package:wild/theme/material_you.dart';
 import 'package:wild/widgets/reading_progress_scope.dart';
 
 /// The route owns immersive mode, so changing chapters or repaginating does
@@ -29,12 +31,15 @@ class _ReaderSystemUiScopeState extends State<ReaderSystemUiScope>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _ready ??= _enter(IosPageArrival.pendingOf(context));
+    _ready ??= _enter(
+      usesMaterialYou
+          ? waitForPageArrival(context)
+          : IosPageArrival.pendingOf(context),
+    );
   }
 
   Future<void> _enter(Future<bool>? arrival) async {
-    // iOS insets can invalidate both pages if the system bars change while the
-    // reader is sliding in. Android retains its immediate immersive behavior.
+    // System bars can invalidate both viewports while the reader slides in.
     if (arrival != null && !await arrival) return;
     if (!mounted) return;
     _entered = true;

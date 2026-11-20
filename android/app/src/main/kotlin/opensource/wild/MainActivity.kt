@@ -3,6 +3,8 @@ package opensource.wild
 import android.os.*
 import android.view.*
 import androidx.annotation.NonNull
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -50,6 +52,17 @@ class MainActivity : FlutterFragmentActivity() {
         epubPages = EpubPageChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         readerImages = ReaderImageChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         readerSpeech = ReaderSpeechChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "litetale/window_insets")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "stableTopInset") {
+                    val insets = ViewCompat.getRootWindowInsets(window.decorView)
+                    val types = WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.displayCutout()
+                    result.success(insets?.getInsetsIgnoringVisibility(types)?.top)
+                } else {
+                    result.notImplemented()
+                }
+            }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "litetale/web_session")
             .setMethodCallHandler { call, result ->

@@ -1,4 +1,5 @@
 import 'package:wild/widgets/platform_controls.dart';
+import 'package:wild/widgets/android_detail_insets.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/wenku8_recovery_button.dart';
@@ -17,6 +18,7 @@ import 'package:wild/utils/wenku8_network_error.dart';
 import 'package:wild/widgets/source_website.dart';
 import 'package:wild/pages/shelf_login_page.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
+import 'package:wild/theme/material_you.dart';
 
 import 'novel_info_cubit.dart';
 import 'reader_route.dart';
@@ -30,7 +32,7 @@ PageRoute<void> novelInfoRoute(RouteSettings settings) =>
       settings: settings,
       builder: (_) {
         final args = settings.arguments;
-        return NovelInfoPage(
+        final page = NovelInfoPage(
           novelId:
               args is Map<String, dynamic>
                   ? args['novelId'] as String
@@ -40,6 +42,7 @@ PageRoute<void> novelInfoRoute(RouteSettings settings) =>
                   ? args['listening'] as ReaderListeningRequest?
                   : null,
         );
+        return usesMaterialYou ? AndroidDetailInsets(child: page) : page;
       },
     );
 
@@ -277,7 +280,7 @@ class _ListeningDetailEntryState extends State<_ListeningDetailEntry> {
     final scope = bookNavigationScope(request.chapter.aid);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted ||
-          !await waitForListeningArrival(context) ||
+          !await waitForPageArrival(context) ||
           !mounted ||
           scope != bookNavigationScope(request.chapter.aid)) {
         return;

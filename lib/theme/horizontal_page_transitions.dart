@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:wild/theme/ios_page_arrival.dart';
@@ -11,6 +13,40 @@ Future<T?> pushAndWaitForPageExit<T>(
   final result = await Navigator.of(context).push(page);
   await page.completed;
   return result;
+}
+
+/// Wait for a route to finish covering its predecessor before a window change.
+Future<bool> waitForPageArrival(BuildContext context) async {
+  final route = ModalRoute.of(context);
+  // Hero measurement can temporarily report a completed animation on the
+  // hidden destination. Check the real route after that measurement frame.
+  if (route?.offstage == true) await WidgetsBinding.instance.endOfFrame;
+  final animation = route?.animation;
+  if (route != null && animation != null && !animation.isCompleted) {
+    final arrived = Completer<bool>();
+    void status(AnimationStatus status) {
+      if (status == AnimationStatus.completed && !arrived.isCompleted) {
+        arrived.complete(true);
+      }
+    }
+
+    animation.addStatusListener(status);
+    try {
+      if (!await Future.any([
+        arrived.future,
+        route.completed.then((_) => false),
+      ])) {
+        return false;
+      }
+    } finally {
+      animation.removeStatusListener(status);
+    }
+  }
+  await WidgetsBinding.instance.endOfFrame;
+  return context.mounted &&
+      route?.isCurrent != false &&
+      route?.offstage != true &&
+      animation?.isCompleted != false;
 }
 
 const horizontalPageTransitionsTheme = PageTransitionsTheme(
