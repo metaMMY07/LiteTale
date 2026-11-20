@@ -1,0 +1,92 @@
+name: LiteTale cold startup probe
+on:
+  push:
+    branches: ['build/transition-probe-*']
+permissions:
+  contents: read
+concurrency:
+  group: startup-probe-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      CARGOKIT_RUST_TOOLCHAIN: '1.90.0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode and prime simulator services
+        run: |
+          sudo xcode-select --switch "$DEVELOPER_DIR"
+          sudo xcodebuild -runFirstLaunch
+          nohup xcrun simctl list devices available --json > /tmp/litetale-simulator-prime.log 2>&1 &
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.3'
+          channel: stable
+          architecture: arm64
+          cache: true
+      - name: Set up simulator Rust toolchain
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal
+          rustup default 1.90.0
+          if [ "$(uname -m)" = arm64 ]; then TARGET=aarch64-apple-ios-sim; else TARGET=x86_64-apple-ios; fi
+          rustup target add "$TARGET" --toolchain 1.90.0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/Library/Caches/CocoaPods
+          key: ios-sim-deps-1.90-${{ hashFiles('rust/Cargo.lock','pubspec.lock') }}
+      - name: Resolve locked dependencies
+        run: |
+          flutter config --no-analytics
+          flutter precache --ios
+          flutter pub get --enforce-lockfile
+          cd ios && pod install
+      - name: Check Dart dependencies before native compilation
+        run: dart analyze integration_test/startup_geometry_probe.dart
+      - name: Boot an iOS 26 phone
+        run: |
+          python3 - <<'PY'
+          import json,subprocess,os
+          devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json'],timeout=300))['devices']
+          runtimes=sorted([r for r in devices if 'iOS-26' in r],reverse=True)
+          choices=[d for runtime in runtimes[:1] for d in devices[runtime] if 'iPhone' in d['name']]
+          assert choices,'An iOS 26 runtime is required for glass acceptance'
+          choices.sort(key=lambda d: ('iPhone 17' not in d['name'],d['name']))
+          d=choices[0]
+          print('Selected simulator:',d['name'],d['udid'],flush=True)
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('SIMULATOR_ID='+d['udid']+'\n')
+          if d['state']!='Booted':subprocess.run(['xcrun','simctl','boot',d['udid']],check=True,timeout=90)
+          subprocess.run(['xcrun','simctl','bootstatus',d['udid'],'-b'],check=True,timeout=300)
+          PY
+      - name: Build and run the existing app on the simulator
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          mkdir -p build/startup-probe
+          python3 tools/prepare_ios_assets.py pubspec.yaml
+          flutter build ios --debug --simulator --no-codesign --no-pub --target=integration_test/startup_geometry_probe.dart 2>&1 | tee build/startup-probe/compile.log
+          xcrun simctl install "$SIMULATOR_ID" build/ios/iphonesimulator/Runner.app
+          for run in 1 2 3; do
+            log="build/startup-probe/launch-$run.log"
+            xcrun simctl launch --terminate-running-process --console "$SIMULATOR_ID" io.github.metammy07.litetale > "$log" 2>&1 &
+            launcher=$!
+            for attempt in $(seq 1 40); do
+              if grep -q LITETALE_PROBE_DONE "$log"; then break; fi
+              sleep 0.5
+            done
+            xcrun simctl terminate "$SIMULATOR_ID" io.github.metammy07.litetale || true
+            wait "$launcher" || true
+            grep LITETALE_GEOMETRY "$log"
+            grep -q LITETALE_PROBE_DONE "$log"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LiteTale-startup-probe
+          path: build/startup-probe
+          retention-days: 7
