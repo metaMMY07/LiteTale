@@ -10,8 +10,10 @@ import 'package:wild/settings/settings_preferences.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_api.dart' as api;
 import 'package:wild/src/rust/wenku8/models.dart';
+import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/reader_cover_view.dart';
 import 'package:wild/widgets/reader_controls.dart';
+import 'package:wild/widgets/reader_settings_panel.dart';
 
 import 'paginated_reader_requests_test.dart' show info;
 import 'reader_controls_test.dart' show providers;
@@ -35,6 +37,103 @@ class _ReaderTapSource implements BookSource {
 
 void main() {
   const image = '<!--image-->test://illustration<!--image-->';
+
+  testWidgets(
+    'the reader menu switch persists both footer visibility states',
+    (tester) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final old = api.bookSources[SourceId.lnovel]!;
+      api.bookSources[SourceId.lnovel] = _ReaderTapSource();
+      addTearDown(() => api.bookSources[SourceId.lnovel] = old);
+      const aid = 'lnv:footer-visibility';
+      var stored = '{"version":1}';
+      final preferences = SettingsPreferencesCubit(
+        read: () async => stored,
+        write: (value) async => stored = value,
+      );
+      addTearDown(preferences.close);
+      await preferences.initialize();
+      await tester.pumpWidget(
+        providers(
+          BlocProvider.value(
+            value: preferences,
+            child: BlocProvider(
+              create: (_) => FontSettingsCubit(),
+              child: MaterialApp(
+                home: ReaderPage(
+                  aid: aid,
+                  cid: 'a',
+                  initialTitle: '正文',
+                  initialPage: 1,
+                  novelInfo: info,
+                  volumes: const [
+                    Volume(
+                      id: 'v',
+                      title: '卷',
+                      chapters: [
+                        Chapter(aid: aid, cid: 'a', title: '正文', url: ''),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final clock = find.byKey(const ValueKey('reader-clock'));
+      final progress = find.byKey(const ValueKey('reader-page-number'));
+      expect(clock, findsOneWidget);
+      expect(progress, findsOneWidget);
+      final cubit =
+          tester.element(find.byType(ReaderCoverView)).read<ReaderCubit>();
+      final loaded = cubit.state as ReaderLoaded;
+      await tester.tapAt(const Offset(200, 300));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('reader-settings')));
+      await tester.pumpAndSettle();
+
+      final panel = find.byType(ReaderSettingsPanel);
+      final toggle = find.byKey(const ValueKey('reader-footer-setting'));
+      await tester.scrollUntilVisible(
+        toggle,
+        260,
+        scrollable: find.descendant(
+          of: panel,
+          matching: find.byType(Scrollable),
+        ),
+      );
+      expect(tester.widget<AppSwitch>(toggle).value, true);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(tester.widget<AppSwitch>(toggle).value, false);
+      expect(clock, findsNothing);
+      expect(progress, findsNothing);
+      final restored = SettingsPreferencesCubit(read: () async => stored);
+      addTearDown(restored.close);
+      await restored.initialize();
+      expect(restored.state.showReaderFooter, false);
+      expect((cubit.state as ReaderLoaded).pages, same(loaded.pages));
+      expect(
+        (cubit.state as ReaderLoaded).currentPageIndex,
+        loaded.currentPageIndex,
+      );
+
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(clock, findsOneWidget);
+      expect(progress, findsOneWidget);
+      await restored.initialize();
+      expect(restored.state.showReaderFooter, true);
+      Navigator.of(tester.element(panel)).pop();
+      await tester.pumpAndSettle();
+      expect(find.byType(ReaderPageScrubber), findsOneWidget);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
 
   testWidgets(
     'iOS uses the shared paper effect and keeps its portrait tap zones',

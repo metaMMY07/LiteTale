@@ -13,6 +13,7 @@ import 'package:wild/pages/novel/reader_type_cubit.dart';
 import 'package:wild/pages/novel/right_padding_cubit.dart';
 import 'package:wild/pages/novel/theme_cubit.dart';
 import 'package:wild/pages/novel/top_bar_height_cubit.dart';
+import 'package:wild/settings/settings_preferences.dart';
 
 /// A projection of LiteTale's own preferences. Native UI owns layout/drafts;
 /// existing cubits remain the only persistence and reader layout authority.
@@ -23,6 +24,7 @@ class ReaderSettingsBinding {
     this.autoScroll,
     this.includeMarks = false,
     this.localEpub = false,
+    this.footerPreferences,
   }) : _context = context,
        size = context.read<FontSizeCubit>(),
        line = context.read<LineHeightCubit>(),
@@ -49,6 +51,7 @@ class ReaderSettingsBinding {
   final ReaderCurlCubit pageEffect;
   final ReaderBackgroundCubit paper;
   final AutoScrollConfigCubit? autoScroll;
+  final SettingsPreferencesCubit? footerPreferences;
   final bool includeMarks, localEpub;
   final Future<void> Function()? onLayoutChanged;
   final _pending = <String>{};
@@ -208,6 +211,15 @@ class ReaderSettingsBinding {
         {
           'title': '阅读器外观',
           'rows': [
+            if (footerPreferences case final preferences?)
+              row(
+                'readerFooter',
+                'toggle',
+                'clock',
+                '显示时间和进度',
+                '在阅读页底部显示时间和本章页码',
+                preferences.state.showReaderFooter,
+              ),
             row(
               'theme',
               'choice',
@@ -363,6 +375,11 @@ class ReaderSettingsBinding {
           );
         case 'pageEffect':
           await pageEffect.setEffect(_iosPageEffects[value]!);
+        case 'readerFooter':
+          await footerPreferences!.update(
+            (preferences) =>
+                preferences.copyWith(showReaderFooter: value as bool),
+          );
         case 'theme':
           await theme.setThemeMode(
             value == '浅色'
@@ -392,7 +409,10 @@ class ReaderSettingsBinding {
         case 'interval':
           await autoScroll!.updateScrollInterval((value as double).round());
       }
-      if (id != 'mode' && id != 'pageEffect' && _context.mounted) {
+      if (id != 'mode' &&
+          id != 'pageEffect' &&
+          id != 'readerFooter' &&
+          _context.mounted) {
         await onLayoutChanged?.call();
       }
     } catch (e) {

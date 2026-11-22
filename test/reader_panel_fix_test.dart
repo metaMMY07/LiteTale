@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wild/cubits/reader_curl_cubit.dart';
 import 'package:wild/pages/novel/font_size_cubit.dart';
 import 'package:wild/pages/novel/reader_type_cubit.dart';
+import 'package:wild/settings/settings_preferences.dart';
 import 'package:wild/widgets/apple_reader_panel.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/book_details_view.dart';
@@ -34,6 +35,8 @@ void main() {
   ) async {
     late ReaderSettingsBinding binding;
     final size = _Size();
+    final preferences = SettingsPreferencesCubit(write: (_) async {});
+    addTearDown(preferences.close);
     var layouts = 0;
     await tester.pumpWidget(
       providers(
@@ -44,6 +47,7 @@ void main() {
               builder: (context) {
                 binding = ReaderSettingsBinding(
                   context,
+                  footerPreferences: preferences,
                   onLayoutChanged: () async {
                     layouts++;
                   },
@@ -77,12 +81,23 @@ void main() {
       {'id': 'mode', 'value': 'unsupported'},
       {'id': 'pageEffect', 'value': '原有仿真'},
       {'id': 'volume', 'value': 1},
+      {'id': 'readerFooter', 'value': 1},
       {'id': 'lightBackground', 'value': -1},
       {'id': 'missing', 'value': 24},
     ]) {
       expect(await binding.change(event), isEmpty);
     }
     expect(size.values, isEmpty);
+    expect(layouts, 0);
+    final footer = rows.singleWhere((row) => row['id'] == 'readerFooter');
+    expect(footer['kind'], 'toggle');
+    expect(footer['value'], true);
+    final changedFooter = await binding.change({
+      'id': 'readerFooter',
+      'value': false,
+    });
+    expect(changedFooter['configuration'], isA<Map>());
+    expect(preferences.state.showReaderFooter, false);
     expect(layouts, 0);
     final effect = await binding.change({'id': 'pageEffect', 'value': '纸页翻动'});
     expect(effect['configuration'], isA<Map>());

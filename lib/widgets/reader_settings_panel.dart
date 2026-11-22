@@ -16,6 +16,7 @@ import 'package:wild/pages/novel/reader_type_cubit.dart';
 import 'package:wild/pages/novel/right_padding_cubit.dart';
 import 'package:wild/pages/novel/theme_cubit.dart';
 import 'package:wild/pages/novel/top_bar_height_cubit.dart';
+import 'package:wild/settings/settings_preferences.dart';
 import 'package:wild/settings/settings_widgets.dart'
     show settingsAction, chooseSetting;
 import 'package:wild/theme/material_you.dart';
@@ -32,6 +33,7 @@ Future<bool> showReaderSettingsPanel(
   bool localEpub = false,
   AutoScrollConfigCubit? autoScroll,
   bool includeMarks = false,
+  SettingsPreferencesCubit? footerPreferences,
 }) async {
   if (usesAppleGlass && await AppleReaderPanel.available) {
     if (!context.mounted || ModalRoute.of(context)?.isCurrent == false) {
@@ -43,6 +45,7 @@ Future<bool> showReaderSettingsPanel(
       autoScroll: autoScroll,
       includeMarks: includeMarks,
       localEpub: localEpub,
+      footerPreferences: footerPreferences,
     );
     final selection = await AppleReaderPanel.show(
       context,
@@ -79,6 +82,7 @@ Future<bool> showReaderSettingsPanel(
             localEpub: localEpub,
             autoScroll: autoScroll,
             includeMarks: includeMarks,
+            footerPreferences: footerPreferences,
           ),
     ),
   );
@@ -118,6 +122,7 @@ class ReaderSettingsPanel extends StatelessWidget {
     this.autoScroll,
     this.dragHandle,
     this.includeMarks = false,
+    this.footerPreferences,
   });
   final ScrollController? scrollController;
   final Future<void> Function()? onLayoutChanged;
@@ -125,6 +130,7 @@ class ReaderSettingsPanel extends StatelessWidget {
   final AutoScrollConfigCubit? autoScroll;
   final Widget? dragHandle;
   final bool includeMarks;
+  final SettingsPreferencesCubit? footerPreferences;
 
   Future<void> _save(BuildContext context, Future<void> Function() action) =>
       settingsAction(context, () async {
@@ -194,6 +200,7 @@ class ReaderSettingsPanel extends StatelessWidget {
       onLayoutChanged: onLayoutChanged,
       autoScroll: autoScroll,
       localEpub: localEpub,
+      footerPreferences: footerPreferences,
     );
     return AppleReaderSettingsView(
       configuration: binding.snapshot,
@@ -422,6 +429,34 @@ class ReaderSettingsPanel extends StatelessWidget {
                 const ReaderSettingLabel('阅读器外观'),
                 ReaderSettingGroup(
                   children: [
+                    if (footerPreferences case final preferences?)
+                      BlocSelector<
+                        SettingsPreferencesCubit,
+                        SettingsPreferences,
+                        bool
+                      >(
+                        bloc: preferences,
+                        selector: (state) => state.showReaderFooter,
+                        builder:
+                            (context, visible) => ReaderSettingRow(
+                              icon: Icons.schedule_outlined,
+                              title: '显示时间和进度',
+                              description: '在阅读页底部显示时间和本章页码',
+                              trailing: AppSwitch(
+                                key: const ValueKey('reader-footer-setting'),
+                                value: visible,
+                                onChanged:
+                                    (value) => settingsAction(
+                                      context,
+                                      () => preferences.update(
+                                        (state) => state.copyWith(
+                                          showReaderFooter: value,
+                                        ),
+                                      ),
+                                    ),
+                              ),
+                            ),
+                      ),
                     ReaderSettingRow(
                       icon: Icons.brightness_auto_outlined,
                       title: '深浅色',

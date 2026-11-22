@@ -47,6 +47,7 @@ class SettingsPreferences {
     this.tapToTurn = true,
     this.boundaryChapters = true,
     this.preventBack = false,
+    this.showReaderFooter = true,
   });
 
   final bool autoUpdate;
@@ -57,6 +58,7 @@ class SettingsPreferences {
   final bool tapToTurn;
   final bool boundaryChapters;
   final bool preventBack;
+  final bool showReaderFooter;
 
   Map<String, Object> toJson() => {
     'version': 1,
@@ -68,6 +70,7 @@ class SettingsPreferences {
     'tapToTurn': tapToTurn,
     'boundaryChapters': boundaryChapters,
     'preventBack': preventBack,
+    'showReaderFooter': showReaderFooter,
   };
 
   factory SettingsPreferences.fromJson(Map<String, dynamic> value) {
@@ -97,6 +100,7 @@ class SettingsPreferences {
       tapToTurn: flag('tapToTurn', true),
       boundaryChapters: flag('boundaryChapters', true),
       preventBack: flag('preventBack', false),
+      showReaderFooter: flag('showReaderFooter', defaults.showReaderFooter),
     );
   }
 
@@ -109,6 +113,7 @@ class SettingsPreferences {
     bool? tapToTurn,
     bool? boundaryChapters,
     bool? preventBack,
+    bool? showReaderFooter,
   }) => SettingsPreferences(
     autoUpdate: autoUpdate ?? this.autoUpdate,
     updateChannel: updateChannel ?? this.updateChannel,
@@ -118,6 +123,7 @@ class SettingsPreferences {
     tapToTurn: tapToTurn ?? this.tapToTurn,
     boundaryChapters: boundaryChapters ?? this.boundaryChapters,
     preventBack: preventBack ?? this.preventBack,
+    showReaderFooter: showReaderFooter ?? this.showReaderFooter,
   );
 }
 

@@ -544,6 +544,7 @@ class _ReaderViewState extends State<_ReaderView> {
       panelContext,
       localEpub: _bookSource == SourceId.localEpub,
       includeMarks: true,
+      footerPreferences: panelContext.read<SettingsPreferencesCubit?>(),
       onLayoutChanged: () async {
         if (!cubit.isClosed) await cubit.reloadCurrentPage();
       },
@@ -843,18 +844,23 @@ class _ReaderViewState extends State<_ReaderView> {
                       },
                     ),
                   ),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: ReaderFooter(
-                      layout: widget.state.layout,
-                      pageLabel: context.read<ReaderCubit>().footerPageLabel,
-                      color: textColor,
-                      fontFamily:
-                          context.read<FontSettingsCubit>().state.readerFamily,
+                  if (preferences.showReaderFooter)
+                    Positioned(
+                      key: const ValueKey('reader-footer'),
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: ReaderFooter(
+                        layout: widget.state.layout,
+                        pageLabel: context.read<ReaderCubit>().footerPageLabel,
+                        color: textColor,
+                        fontFamily:
+                            context
+                                .read<FontSettingsCubit>()
+                                .state
+                                .readerFamily,
+                      ),
                     ),
-                  ),
                   Positioned(
                     top: 0,
                     left: 0,
