@@ -91,6 +91,7 @@ class _BiliVerificationPageState extends State<BiliVerificationPage> {
       await _web
           .initialize(
             normalBrowserUserAgent: true,
+            iosBiliCompatibility: true,
             enableVerificationCookies: true,
             allowMainFrameNavigation: _allowPage,
             onLoaded: () => unawaited(_inspectAccess()),

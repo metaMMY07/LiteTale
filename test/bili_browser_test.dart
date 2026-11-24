@@ -277,8 +277,9 @@ void main() {
     'unbounded chapter navigation retains a finite safety ceiling',
     () async {
       final p = _Port()..chapterPages = BiliBrowserSession.maxChapterPages + 1;
+      final s = session(p, timeout: const Duration(seconds: 3));
       await expectLater(
-        session(p).chapter('bili:1', 'bili:1:2'),
+        s.chapter('bili:1', 'bili:1:2'),
         throwsA(
           isA<BiliBrowserException>().having(
             (error) => error.message,

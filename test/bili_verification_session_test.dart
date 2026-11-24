@@ -5,6 +5,7 @@ import 'package:wild/services/bili_browser.dart';
 import 'package:wild/services/read_request.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/utils/bili_site_dom.dart';
+import 'package:wild/widgets/wenku_webview.dart';
 
 const _browserNotice = '''(ò﹏ò)
 抱歉，网站阅读器升级～～您的浏览器似乎无法完美使用本站～
@@ -61,6 +62,24 @@ void main() {
     'next': null,
     'html': '<div id="volume-list">已验证目录</div>',
   };
+
+  test(
+    'iOS compatibility keeps the installed WebKit and device identifiers',
+    () {
+      const device =
+          'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) '
+          'AppleWebKit/605.1.15 (KHTML, like Gecko)';
+      const original = '$device Mobile/15E148';
+      final compatible = biliIosWebKitUserAgent(original, '26.2');
+      expect(
+        compatible,
+        '$device Version/26.2 Mobile/15E148 Safari/604.1 LiteTale',
+      );
+      expect(biliIosWebKitUserAgent(compatible, '26.2'), compatible);
+      expect(biliIosWebKitUserAgent(original, 'unknown'), original);
+      expect(biliIosWebKitUserAgent('Mozilla/5.0', '26.2'), 'Mozilla/5.0');
+    },
+  );
 
   test(
     'interactive challenge keeps the requested chapter and mobile mode',

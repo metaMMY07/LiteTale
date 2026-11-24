@@ -69,6 +69,8 @@ import Photos
                 result(applicationSupportsPath)
             } else if call.method == "documentRoot" {
                result(documentsPath)
+            } else if call.method == "iosSystemVersion" {
+                result(UIDevice.current.systemVersion)
             } else if call.method == "testSourceDocumentPicker" {
                 #if targetEnvironment(simulator)
                 // Simulator acceptance drives the real file_selector picker;

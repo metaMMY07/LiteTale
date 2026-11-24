@@ -39,6 +39,7 @@ class WenkuWebView {
     bool Function(String)? allowMainFrameNavigation,
     VoidCallback? onNavigationBlocked,
     bool normalBrowserUserAgent = false,
+    bool iosBiliCompatibility = false,
     bool enableVerificationCookies = false,
   }) async {
     setPageHandlers(
@@ -107,6 +108,16 @@ class WenkuWebView {
         }
       }
       await controller.setJavaScriptMode(mobile.JavaScriptMode.unrestricted);
+      if (iosBiliCompatibility && Platform.isIOS) {
+        final agent = await controller.getUserAgent();
+        final version = await const MethodChannel(
+          'methods',
+        ).invokeMethod<String>('iosSystemVersion');
+        if (agent != null && version != null) {
+          final compatible = biliIosWebKitUserAgent(agent, version);
+          if (compatible != agent) await controller.setUserAgent(compatible);
+        }
+      }
       await controller.setNavigationDelegate(
         mobile.NavigationDelegate(
           onNavigationRequest: (request) {
@@ -215,4 +226,25 @@ class WenkuWebView {
     }
     await _windows?.dispose();
   }
+}
+
+@visibleForTesting
+String biliIosWebKitUserAgent(String agent, String iOSVersion) {
+  final engine = RegExp(r'\bAppleWebKit/(\d+(?:\.\d+)*)').firstMatch(agent);
+  if (engine == null ||
+      agent.contains(' Safari/') ||
+      agent.contains(' Version/') ||
+      !RegExp(r'^[0-9]+(?:\.[0-9]+){1,2}$').hasMatch(iOSVersion)) {
+    return agent;
+  }
+  // Keep the device and engine identifiers while supplying the product
+  // version pair required by Bili's reader.
+  if (agent.contains(' Mobile/')) {
+    final mobile = agent.replaceFirst(
+      ' Mobile/',
+      ' Version/$iOSVersion Mobile/',
+    );
+    return '$mobile Safari/604.1 LiteTale';
+  }
+  return '$agent Version/$iOSVersion Safari/${engine[1]} LiteTale';
 }

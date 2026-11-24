@@ -100,6 +100,7 @@ class _RendererState extends State<_Renderer> implements BiliBrowserPort {
         allowMainFrameNavigation: session.allowsRendererNavigation,
         onNavigationBlocked: _pageBlocked,
         normalBrowserUserAgent: true,
+        iosBiliCompatibility: true,
         enableVerificationCookies: true,
       );
       if (!mounted || generation != session.rendererGeneration) return;
