@@ -9,7 +9,7 @@ final class ProbeApp: UIResponder, UIApplicationDelegate, WKNavigationDelegate {
     private let destination = URL(string: "https://www.bilinovel.net/novel/3605/209868.html")!
     private var web: WKWebView?
     private var scenario = 0
-    private let profiles = ["mobile", "desktop", "mobile-compatibility"]
+    private let profiles = ["mobile-version", "mobile-version-app", "desktop-version"]
     private var results: [[String: Any]] = []
     private var sampling = false
     private var summaryScript = ""
@@ -49,7 +49,10 @@ final class ProbeApp: UIResponder, UIApplicationDelegate, WKNavigationDelegate {
             nextPage: typeof result.next === "string",
             hasSafariProductToken: /Safari\//.test(navigator.userAgent),
             visibility: document.visibilityState,
-            documentState: document.readyState
+            documentState: document.readyState,
+            chapterContainer: Boolean(document.querySelector('#acontent,#TextContent')),
+            hasMobileProductToken: /Mobile\//.test(navigator.userAgent),
+            hasVersionProductToken: /Version\//.test(navigator.userAgent)
           });
         })()
         """#
@@ -61,23 +64,26 @@ final class ProbeApp: UIResponder, UIApplicationDelegate, WKNavigationDelegate {
         sampling = false
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
-        configuration.defaultWebpagePreferences.preferredContentMode = scenario == 1 ? .desktop : .mobile
+        configuration.defaultWebpagePreferences.preferredContentMode = scenario == 2 ? .desktop : .mobile
         let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 768), configuration: configuration)
         view.navigationDelegate = self
         web = view
 
         let startedScenario = scenario
-        if scenario == 2 {
-            view.evaluateJavaScript("navigator.userAgent") { [weak self, weak view] value, error in
-                guard let self, let view, web === view else { return }
-                guard error == nil, let agent = value as? String, agent.contains("AppleWebKit/") else {
-                    finish(view, result: ["agentUnavailable": true])
-                    return
-                }
-                view.customUserAgent = agent + " Safari/604.1 LiteTale"
-                view.load(URLRequest(url: destination, timeoutInterval: 18))
+        view.evaluateJavaScript("navigator.userAgent") { [weak self, weak view] value, error in
+            guard let self, let view, web === view else { return }
+            guard error == nil, let agent = value as? String,
+                  let engine = agent.split(separator: " ").first(where: { $0.hasPrefix("AppleWebKit/") }) else {
+                finish(view, result: ["agentUnavailable": true])
+                return
             }
-        } else {
+            let version = "Version/\(UIDevice.current.systemVersion)"
+            if let device = agent.range(of: " Mobile/") {
+                let compatibility = "\(agent[..<device.lowerBound]) \(version)\(agent[device.lowerBound...]) Safari/604.1"
+                view.customUserAgent = scenario == 1 ? compatibility + " LiteTale" : compatibility
+            } else {
+                view.customUserAgent = agent + " \(version) Safari/" + engine.dropFirst("AppleWebKit/".count)
+            }
             view.load(URLRequest(url: destination, timeoutInterval: 18))
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 23) { [weak self, weak view] in
