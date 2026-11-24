@@ -708,9 +708,12 @@ class BiliBrowserSession extends ChangeNotifier {
     int? searchPage,
   }) async {
     Duration? verificationStarted;
+    ({Uri url, String content, Object? next})? chapterCandidate;
     final request = ReadRequest.current;
     final manualSearchAt = clock.elapsed + searchPageGrace;
     while (clock.elapsed < operationTimeout) {
+      final previousChapter = chapterCandidate;
+      chapterCandidate = null;
       dynamic raw;
       try {
         raw = await js(script);
@@ -811,7 +814,14 @@ class BiliBrowserSession extends ChangeNotifier {
         throw BiliBrowserException('${value['error']}');
       }
       if (value['ready'] == true) {
-        return value;
+        final content = value['content'];
+        if (script != biliChapterProbeScript || content is! String) {
+          return value;
+        }
+        // The first readable snapshot can precede the page's visibility
+        // styles or continuation link. Confirm both before appending it.
+        chapterCandidate = (url: loaded, content: content, next: value['next']);
+        if (chapterCandidate == previousChapter) return value;
       }
       if (searchEntry != null &&
           searchKeyword != null &&

@@ -86,10 +86,11 @@ void main() {
               'error': '原站要求浏览器验证',
             },
             {'ready': true, 'content': '正常验证完成', 'next': null},
+            {'ready': true, 'content': '正常验证完成', 'next': null},
           ]);
     final result = await session(p).chapter('bili:1', 'bili:1:2');
     expect(result.content, '正常验证完成');
-    expect(p.chapterProbes, 2);
+    expect(p.chapterProbes, 3);
   });
 
   test(
@@ -113,9 +114,10 @@ void main() {
           ..responses.addAll([
             {'ready': true, 'content': '残缺正文', 'contentIncomplete': true},
             {'ready': true, 'content': '完整正文', 'next': null},
+            {'ready': true, 'content': '完整正文', 'next': null},
           ]);
     expect((await session(p).chapter('bili:1', 'bili:1:2')).content, '完整正文');
-    expect(p.chapterProbes, 2);
+    expect(p.chapterProbes, 3);
   });
   test(
     'persistent partial text offers the ordinary site reading flow',
@@ -145,10 +147,40 @@ void main() {
             ..responses.addAll([
               {'url': 'about:blank', 'ready': true, 'content': '旧文档'},
               {'ready': true, 'content': '目标正文', 'next': null},
+              {'ready': true, 'content': '目标正文', 'next': null},
             ]);
       expect((await session(p).chapter('bili:1', 'bili:1:2')).content, '目标正文');
     },
   );
+
+  test('chapter waits for the text and continuation to settle', () async {
+    const continuation = 'https://www.bilinovel.net/novel/1/2_2.html';
+    const firstPage = {
+      'ready': true,
+      'content': '第一段\n第二段',
+      'next': continuation,
+    };
+    const secondPage = {'ready': true, 'content': '「好。」\n「好。」'};
+    final p =
+        _Port()
+          ..responses.addAll([
+            {...firstPage, 'content': '第一段\n第三段\n第二段', 'next': null},
+            {...firstPage, 'next': null},
+            firstPage,
+            firstPage,
+            secondPage,
+            secondPage,
+          ]);
+    final chapter = await session(p).chapter('bili:1', 'bili:1:2');
+    expect(chapter.content, '第一段\n第二段\n「好。」\n「好。」');
+    expect(p.chapterProbes, 6);
+    expect(p.urls, [
+      'https://www.bilinovel.net/novel/1/2.html',
+      continuation,
+      'about:blank',
+    ]);
+  });
+
   for (final flag in ['accessDenied', 'contentIncomplete']) {
     test(
       '$flag cannot be adopted, even if it includes ready and text',
@@ -228,13 +260,12 @@ void main() {
   test(
     'verified same-chapter subpage can complete an existing first page',
     () async {
-      final p =
-          _Port()
-            ..responses.add({
-              'ready': true,
-              'content': '第一页',
-              'next': 'https://www.bilinovel.net/novel/1/2_2.html',
-            });
+      const firstPage = {
+        'ready': true,
+        'content': '第一页',
+        'next': 'https://www.bilinovel.net/novel/1/2_2.html',
+      };
+      final p = _Port()..responses.addAll([firstPage, firstPage]);
       final s = session(p), r = request(path: '/novel/1/2_2.html');
       await s.adoptVisiblePage(
         r,
@@ -244,7 +275,7 @@ void main() {
       );
       final chapter = await s.chapter('bili:1', 'bili:1:2');
       expect(chapter.content, '第一页\n用户验证后已加载的正文');
-      expect(p.chapterProbes, 1);
+      expect(p.chapterProbes, 2);
       expect(p.urls, isNot(contains('${r.target}')));
     },
   );
