@@ -9,7 +9,7 @@ final class ProbeApp: UIResponder, UIApplicationDelegate, WKNavigationDelegate {
     private let destination = URL(string: "https://www.bilinovel.net/novel/3605/209868.html")!
     private var web: WKWebView?
     private var scenario = 0
-    private let profiles = ["mobile-version", "mobile-version-app", "desktop-version"]
+    private let profiles = ["visible", "background-after-visible"]
     private var results: [[String: Any]] = []
     private var sampling = false
     private var summaryScript = ""
@@ -63,11 +63,12 @@ final class ProbeApp: UIResponder, UIApplicationDelegate, WKNavigationDelegate {
     private func startScenario() {
         sampling = false
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        configuration.defaultWebpagePreferences.preferredContentMode = scenario == 2 ? .desktop : .mobile
+        configuration.websiteDataStore = .default()
+        configuration.defaultWebpagePreferences.preferredContentMode = .mobile
         let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 768), configuration: configuration)
         view.navigationDelegate = self
         web = view
+        if scenario == 0 { window?.rootViewController?.view.addSubview(view) }
 
         let startedScenario = scenario
         view.evaluateJavaScript("navigator.userAgent") { [weak self, weak view] value, error in
@@ -80,7 +81,7 @@ final class ProbeApp: UIResponder, UIApplicationDelegate, WKNavigationDelegate {
             let version = "Version/\(UIDevice.current.systemVersion)"
             if let device = agent.range(of: " Mobile/") {
                 let compatibility = "\(agent[..<device.lowerBound]) \(version)\(agent[device.lowerBound...]) Safari/604.1"
-                view.customUserAgent = scenario == 1 ? compatibility + " LiteTale" : compatibility
+                view.customUserAgent = compatibility + " LiteTale"
             } else {
                 view.customUserAgent = agent + " \(version) Safari/" + engine.dropFirst("AppleWebKit/".count)
             }
@@ -120,11 +121,11 @@ final class ProbeApp: UIResponder, UIApplicationDelegate, WKNavigationDelegate {
                 return
             }
             let observations = samples + [decoded]
-            if observations.count >= 3 || decoded["accessDenied"] as? Bool == true {
+            if observations.count >= 4 || decoded["accessDenied"] as? Bool == true {
                 finish(view, result: ["samples": observations])
                 return
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self, weak view] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + [1.0, 3.0, 6.0][observations.count - 1]) { [weak self, weak view] in
                 guard let self, let view else { return }
                 sample(view, samples: observations)
             }
@@ -147,7 +148,8 @@ final class ProbeApp: UIResponder, UIApplicationDelegate, WKNavigationDelegate {
         view.removeFromSuperview()
         results.append(result.merging(["profile": profiles[scenario], "attachedToWindow": attached]) { current, _ in current })
         scenario += 1
-        let explicitlyDenied = (result["samples"] as? [[String: Any]])?.last?["accessDenied"] as? Bool == true
+        let last = (result["samples"] as? [[String: Any]])?.last
+        let explicitlyDenied = last?["accessDenied"] as? Bool == true || last?["verificationRequired"] as? Bool == true
         if scenario < profiles.count && !explicitlyDenied {
             startScenario()
         } else {
