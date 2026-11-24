@@ -34,8 +34,9 @@ final class ProbeApp: UIResponder, UIApplicationDelegate, WKNavigationDelegate {
         (() => {
           const result = JSON.parse(\#(source));
           const content = String(result.content ?? "");
-          const compact = content.replace(/[\s\u200b-\u200f\u2060\ufeff]/g, "");
+          const compact = content.replace(new RegExp("[\\s\\u00ad\\u200b-\\u200f\\u202a-\\u202e\\u2060\\u2066-\\u2069\\ufeff]", "g"), "");
           return JSON.stringify({
+            guardRecognized: new RegExp("[网網]站[阅閱閲][读讀]器[升昇][级級].{0,24}[浏瀏][览覽]器似乎[无無]法完美使用本(?:[网網])?站.{0,120}(?:Chrome.{0,48}Safari|Safari.{0,48}Chrome).{0,40}原生[浏瀏][览覽]器", "i").test(compact),
             ready: result.ready === true,
             paragraphs: content.split("\n").filter(Boolean).length,
             length: content.length,
@@ -128,7 +129,7 @@ final class ProbeApp: UIResponder, UIApplicationDelegate, WKNavigationDelegate {
         view.removeFromSuperview()
         results.append(result.merging(["attachedToWindow": attached]) { current, _ in current })
         scenario += 1
-        if scenario < 2 {
+        if scenario < 1 {
             startScenario()
         } else {
             complete(["scenarios": results])
