@@ -1,0 +1,56 @@
+name: iOS Bili WebKit probe
+on:
+  push:
+    branches: ['build/ios-bili-webkit-probe-*']
+    paths: ['.github/workflows/ios-bili-webkit-probe.yml', '.ci-bili/**']
+
+permissions:
+  contents: read
+
+jobs:
+  webkit:
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build and run the native WebKit probe
+        run: |
+          set -euo pipefail
+          device=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          runtimes = json.load(sys.stdin)["devices"]
+          dev = next(d["udid"] for r, ds in sorted(runtimes.items(), reverse=True) if "iOS-26" in r for d in ds if "iPhone" in d["name"])
+          print(dev)
+          ')
+          xcrun simctl boot "$device"
+          app="$RUNNER_TEMP/BiliProbe.app"
+          mkdir -p "$app"
+          cp .ci-bili/chapter-script.json "$app/"
+          arch=$(uname -m)
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          xcrun --sdk iphonesimulator swiftc -swift-version 6 -target "$arch-apple-ios18.0-simulator" -sdk "$sdk" -parse-as-library .ci-bili/ProbeApp.swift -o "$app/Probe"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string io.github.metammy07.biliprobe' -c 'Add :CFBundleName string BiliProbe' -c 'Add :CFBundleExecutable string Probe' -c 'Add :CFBundlePackageType string APPL' -c 'Add :CFBundleVersion string 1' -c 'Add :CFBundleShortVersionString string 1.0' -c 'Add :MinimumOSVersion string 18.0' -c 'Add :UILaunchScreen dict' "$app/Info.plist"
+          xcrun simctl bootstatus "$device" -b
+          codesign --force --sign - "$app"
+          xcrun simctl install "$device" "$app"
+          xcrun simctl launch "$device" io.github.metammy07.biliprobe
+          folder=$(xcrun simctl get_app_container "$device" io.github.metammy07.biliprobe data)
+          for attempt in $(seq 1 36); do
+            if test -s "$folder/Documents/probe.json"; then
+              cat "$folder/Documents/probe.json"
+              cp "$folder/Documents/probe.json" "$RUNNER_TEMP/probe.json"
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bili-webkit-probe
+          path: ${{ runner.temp }}/probe.json
+          if-no-files-found: error
+          retention-days: 7
