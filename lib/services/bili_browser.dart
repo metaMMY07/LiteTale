@@ -90,15 +90,22 @@ class BiliBrowserSession extends ChangeNotifier {
   // Long chapters can legitimately exceed eight mobile website pages.
   // Keep a finite ceiling, same-chapter validation and the shared deadline.
   static const maxChapterPages = 64;
-  // The site's compatibility notice occupies the normal chapter container.
-  // Match the complete instruction, not individual browser names in prose.
+  static final _noticeFormatting = RegExp(
+    r'[\s\u00ad\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]',
+  );
+  // The compatibility message may be split across DOM text nodes and lines.
+  // Check the site's upgrade and browser instructions together.
   static final _browserCompatibilityNotice = RegExp(
-    r'[网網]站[阅閱][读讀]器[升昇][级級][\s～~，,。]*您的[浏瀏][览覽]器似乎[无無]法完美使用本站'
-    r'[\s\S]{0,100}[为為]了使用完整的[阅閱][读讀]功能'
-    r'[\s\S]{0,64}Chrome[\s\S]{0,48}Safari[\s\S]{0,40}原生[浏瀏][览覽]器'
-    r'[\s\S]{0,32}www\.bilinovel\.net\b',
+    r'[网網]站[阅閱閲][读讀]器[升昇][级級].{0,24}'
+    r'[浏瀏][览覽]器似乎[无無]法完美使用本(?:[网網])?站.{0,120}'
+    r'(?:Chrome.{0,48}Safari|Safari.{0,48}Chrome).{0,40}原生[浏瀏][览覽]器',
     caseSensitive: false,
   );
+
+  static bool _isBrowserCompatibilityNotice(String content) =>
+      _browserCompatibilityNotice.hasMatch(
+        content.replaceAll(_noticeFormatting, ''),
+      );
 
   BiliBrowserSession({
     this.operationTimeout = const Duration(seconds: 30),
@@ -298,7 +305,7 @@ class BiliBrowserSession extends ChangeNotifier {
       if (match == null || content is! String || content.trim().isEmpty) {
         throw const BiliBrowserException('原站章节尚未加载完成，请稍后再试。');
       }
-      if (_browserCompatibilityNotice.hasMatch(content)) {
+      if (_isBrowserCompatibilityNotice(content)) {
         throw BiliSiteBrowserUnsupported(request.target);
       }
       if (value['next'] case final String rawNext) {
@@ -1147,7 +1154,7 @@ class BiliBrowserSession extends ChangeNotifier {
       }
       final content = '${value['content'] ?? ''}'.trim();
       if (content.isEmpty) throw const BiliBrowserException('原站正文为空');
-      if (_browserCompatibilityNotice.hasMatch(content)) {
+      if (_isBrowserCompatibilityNotice(content)) {
         throw BiliSiteBrowserUnsupported(uri);
       }
       chunks.add(content);

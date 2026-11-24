@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -9,9 +10,13 @@ import 'package:wild/sources/source_website.dart';
 import 'app_loading_indicator.dart';
 import 'platform_controls.dart';
 
-Future<void> openSourceWebsite(BuildContext context, Uri uri) async {
+Future<void> openSourceWebsite(
+  BuildContext context,
+  Uri uri, {
+  LaunchMode mode = LaunchMode.externalApplication,
+}) async {
   try {
-    if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return;
+    if (await launchUrl(uri, mode: mode)) return;
   } catch (_) {
     // Launch failures do not change the pending read, source or login state.
   }
@@ -57,6 +62,17 @@ class SourceWebsiteLink extends StatelessWidget {
             '$uri',
             textAlign: textAlign,
             style: Theme.of(context).textTheme.bodySmall,
+          ),
+        if (chapter != null && defaultTargetPlatform == TargetPlatform.iOS)
+          AppButton.outlinedIcon(
+            onPressed:
+                () => openSourceWebsite(
+                  context,
+                  chapter,
+                  mode: LaunchMode.inAppBrowserView,
+                ),
+            icon: const Icon(Icons.language_rounded),
+            label: const Text('在应用内用 Safari 阅读'),
           ),
         AppButton.outlinedIcon(
           onPressed: () => openSourceWebsite(context, uri),

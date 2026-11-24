@@ -79,7 +79,7 @@ jobs:
           set -euo pipefail
           mkdir -p build/ios-preview
           python3 tools/prepare_ios_assets.py pubspec.yaml
-          flutter build ios --release --no-codesign --build-name 1.2.5 --build-number 129 2>&1 | tee build/ios-preview/build.log
+          flutter build ios --release --no-codesign --build-name 1.2.5 --build-number 130 2>&1 | tee build/ios-preview/build.log
       - name: Validate and package the device IPA
         run: |
           set -euo pipefail

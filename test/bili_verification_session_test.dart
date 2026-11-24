@@ -232,6 +232,20 @@ void main() {
     expect(p.urls.last, 'about:blank');
   });
 
+  test('browser notice survives WebView whitespace and split text', () async {
+    const notice =
+        '網站閱\u200b讀器升級～\n\u00a0您的瀏覽器似乎無法完美使用本網站～\n'
+        '【為了使用完整的閱讀功能】\n'
+        '請使用〔Chro\u2060me瀏覽器〕或者〔Safari\n瀏覽器〕原生瀏覽器，'
+        '訪問 www.\nbilinovel.net!';
+    const blocked = {'ready': true, 'content': notice};
+    final p = _Port()..responses.addAll([blocked, blocked]);
+    await expectLater(
+      session(p).chapter('bili:1', 'bili:1:2'),
+      throwsA(isA<BiliSiteBrowserUnsupported>()),
+    );
+  });
+
   test('visible confirmation cannot save the browser notice', () async {
     var persisted = false;
     final r = request();

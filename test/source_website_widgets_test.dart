@@ -156,6 +156,30 @@ void main() {
   });
 
   testWidgets(
+    'iOS can open the affected Bili chapter in the Safari view',
+    (tester) async {
+      final chapter = Uri.parse('https://www.bilinovel.net/novel/1/2.html');
+      await tester.pumpWidget(
+        _app(
+          SourceWebsiteLink(
+            source: SourceId.bili,
+            readError: BiliSiteBrowserUnsupported(chapter),
+          ),
+        ),
+      );
+      expect(launcher.launches, isEmpty);
+      await tester.tap(find.text('在应用内用 Safari 阅读'));
+      await tester.pump();
+      final (url, options) = launcher.launches.single;
+      expect(url, '$chapter');
+      expect(options.mode, PreferredLaunchMode.inAppBrowserView);
+      expect(options.webViewConfiguration.headers, isEmpty);
+      expect(find.text('在浏览器打开原站章节'), findsOneWidget);
+    },
+    variant: const TargetPlatformVariant({TargetPlatform.iOS}),
+  );
+
+  testWidgets(
     'a new load or source starts its own deadline and replaces old links',
     (tester) async {
       Future<void> load(SourceId source, int request) => tester.pumpWidget(
