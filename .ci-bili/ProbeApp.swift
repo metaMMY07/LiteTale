@@ -9,6 +9,7 @@ final class ProbeApp: UIResponder, UIApplicationDelegate, WKNavigationDelegate {
     private let destination = URL(string: "https://www.bilinovel.net/novel/3605/209868.html")!
     private var web: WKWebView?
     private var scenario = 0
+    private let profiles = ["mobile", "desktop", "mobile-compatibility"]
     private var results: [[String: Any]] = []
     private var sampling = false
     private var summaryScript = ""
@@ -60,14 +61,25 @@ final class ProbeApp: UIResponder, UIApplicationDelegate, WKNavigationDelegate {
         sampling = false
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        configuration.defaultWebpagePreferences.preferredContentMode = scenario == 1 ? .desktop : .mobile
         let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 768), configuration: configuration)
         view.navigationDelegate = self
         web = view
-        if scenario == 1 {
-            window?.rootViewController?.view.addSubview(view)
-        }
+
         let startedScenario = scenario
-        view.load(URLRequest(url: destination, timeoutInterval: 18))
+        if scenario == 2 {
+            view.evaluateJavaScript("navigator.userAgent") { [weak self, weak view] value, error in
+                guard let self, let view, web === view else { return }
+                guard error == nil, let agent = value as? String, agent.contains("AppleWebKit/") else {
+                    finish(view, result: ["agentUnavailable": true])
+                    return
+                }
+                view.customUserAgent = agent + " Safari/604.1 LiteTale"
+                view.load(URLRequest(url: destination, timeoutInterval: 18))
+            }
+        } else {
+            view.load(URLRequest(url: destination, timeoutInterval: 18))
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 23) { [weak self, weak view] in
             guard let self, let view, web === view, scenario == startedScenario else { return }
             finish(view, result: ["timeout": true])
@@ -127,9 +139,10 @@ final class ProbeApp: UIResponder, UIApplicationDelegate, WKNavigationDelegate {
         web = nil
         view.stopLoading()
         view.removeFromSuperview()
-        results.append(result.merging(["attachedToWindow": attached]) { current, _ in current })
+        results.append(result.merging(["profile": profiles[scenario], "attachedToWindow": attached]) { current, _ in current })
         scenario += 1
-        if scenario < 1 {
+        let explicitlyDenied = (result["samples"] as? [[String: Any]])?.last?["accessDenied"] as? Bool == true
+        if scenario < profiles.count && !explicitlyDenied {
             startScenario()
         } else {
             complete(["scenarios": results])
