@@ -180,7 +180,10 @@ class ReaderPage extends StatelessWidget {
                         children: [
                           Text(state.error),
                           const SizedBox(height: 16),
-                          SourceWebsiteLink(source: sourceOf(aid)),
+                          SourceWebsiteLink(
+                            source: sourceOf(aid),
+                            readError: state.cause,
+                          ),
                           AppButton.elevated(
                             onPressed:
                                 () => context.read<ReaderCubit>().loadChapter(),

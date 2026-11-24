@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
+import 'package:wild/services/bili_browser.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/sources/source_website.dart';
 import 'app_loading_indicator.dart';
@@ -25,10 +26,12 @@ class SourceWebsiteLink extends StatelessWidget {
   const SourceWebsiteLink({
     super.key,
     required this.source,
+    this.readError,
     this.showAddress = true,
     this.textAlign = TextAlign.center,
   });
   final SourceId source;
+  final Object? readError;
   final bool showAddress;
   final TextAlign textAlign;
 
@@ -36,7 +39,11 @@ class SourceWebsiteLink extends StatelessWidget {
   Widget build(BuildContext context) {
     if (source == SourceId.localEpub) return const SizedBox.shrink();
     final host = context.select((ApiHostCubit? cubit) => cubit?.state);
-    final uri = sourceWebsite(source, wenku8Host: host);
+    final chapter = switch ((source, readError)) {
+      (SourceId.bili, BiliSiteBrowserUnsupported(:final target)) => target,
+      _ => null,
+    };
+    final uri = chapter ?? sourceWebsite(source, wenku8Host: host);
     if (uri == null) return const SizedBox.shrink();
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -54,7 +61,7 @@ class SourceWebsiteLink extends StatelessWidget {
         AppButton.outlinedIcon(
           onPressed: () => openSourceWebsite(context, uri),
           icon: const Icon(Icons.open_in_browser_rounded),
-          label: const Text('打开原网站'),
+          label: Text(chapter == null ? '打开原网站' : '在浏览器打开原站章节'),
         ),
       ],
     );

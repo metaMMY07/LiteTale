@@ -6,6 +6,12 @@ import 'package:wild/services/read_request.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/utils/bili_site_dom.dart';
 
+const _browserNotice = '''(ò﹏ò)
+抱歉，网站阅读器升级～～您的浏览器似乎无法完美使用本站～
+【为了使用完整的阅读功能】
+请使用〔Chrome浏览器〕或者〔Safari浏览器〕原生浏览器，訪問 www.bilinovel.net!
+谢谢!!!''';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final originalSource = activeSource.value;
@@ -179,6 +185,68 @@ void main() {
       continuation,
       'about:blank',
     ]);
+  });
+
+  test(
+    'browser notice in the first page fails and a normal reread succeeds',
+    () async {
+      const body = '她打开 Safari，也打开了 Chrome。\n「好。」\n「好。」';
+      const firstPage = {'ready': true, 'content': body};
+      final blocked = {
+        'ready': true,
+        'content': '$_browserNotice\n$_browserNotice',
+      };
+      final p =
+          _Port()..responses.addAll([blocked, blocked, firstPage, firstPage]);
+      final s = session(p);
+      await expectLater(
+        s.chapter('bili:1', 'bili:1:2'),
+        throwsA(
+          isA<BiliSiteBrowserUnsupported>().having(
+            (error) => error.target.path,
+            'chapter',
+            '/novel/1/2.html',
+          ),
+        ),
+      );
+      expect((await s.chapter('bili:1', 'bili:1:2')).content, body);
+    },
+  );
+
+  test('a browser notice on a continuation fails the whole chapter', () async {
+    const continuation = 'https://www.bilinovel.net/novel/1/2_2.html';
+    const firstPage = {'ready': true, 'content': '第一页正文', 'next': continuation};
+    const blocked = {'ready': true, 'content': _browserNotice};
+    final p =
+        _Port()..responses.addAll([firstPage, firstPage, blocked, blocked]);
+    await expectLater(
+      session(p).chapter('bili:1', 'bili:1:2'),
+      throwsA(
+        isA<BiliSiteBrowserUnsupported>().having(
+          (error) => error.target.toString(),
+          'continuation',
+          continuation,
+        ),
+      ),
+    );
+    expect(p.urls.last, 'about:blank');
+  });
+
+  test('visible confirmation cannot save the browser notice', () async {
+    var persisted = false;
+    final r = request();
+    await expectLater(
+      session(_Port()).adoptVisiblePage(
+        r,
+        visible(r)..['content'] = _browserNotice,
+        persistSession: () async {
+          persisted = true;
+        },
+        isCurrent: () => true,
+      ),
+      throwsA(isA<BiliSiteBrowserUnsupported>()),
+    );
+    expect(persisted, false);
   });
 
   for (final flag in ['accessDenied', 'contentIncomplete']) {

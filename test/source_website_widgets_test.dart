@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 import 'package:wild/cubits/api_host_cubit.dart';
 import 'package:wild/pages/auth_cubit.dart';
+import 'package:wild/services/bili_browser.dart';
 import 'package:wild/settings/rule_source_manager.dart';
 import 'package:wild/settings/source_settings_page.dart';
 import 'package:wild/sources/book_source.dart';
@@ -131,6 +132,27 @@ void main() {
     expect(find.text('打开原网站'), findsOneWidget);
     expect(find.text('https://www.huanmengacg.com/'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Bili compatibility error opens its exact chapter externally', (
+    tester,
+  ) async {
+    final chapter = Uri.parse('https://www.bilinovel.net/novel/1/2_2.html');
+    await tester.pumpWidget(
+      _app(
+        SourceWebsiteLink(
+          source: SourceId.bili,
+          readError: BiliSiteBrowserUnsupported(chapter),
+        ),
+      ),
+    );
+    expect(launcher.launches, isEmpty);
+    await tester.tap(find.text('在浏览器打开原站章节'));
+    await tester.pump();
+    final (url, options) = launcher.launches.single;
+    expect(url, '$chapter');
+    expect(options.mode, PreferredLaunchMode.externalApplication);
+    expect(options.webViewConfiguration.headers, isEmpty);
   });
 
   testWidgets(

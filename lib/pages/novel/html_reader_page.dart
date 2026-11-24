@@ -598,12 +598,9 @@ class _HtmlReaderViewWrapperState extends State<_HtmlReaderViewWrapper>
                                                     const SizedBox(height: 16),
                                                     SourceWebsiteLink(
                                                       source: sourceOf(
-                                                        context
-                                                            .read<
-                                                              HtmlReaderCubit
-                                                            >()
-                                                            .initialAid,
+                                                        cubit.initialAid,
                                                       ),
+                                                      readError: state.cause,
                                                     ),
                                                     AppButton.elevated(
                                                       onPressed:
