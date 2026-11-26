@@ -1,0 +1,250 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:webview_flutter/webview_flutter.dart' as mobile;
+import 'package:webview_flutter_android/webview_flutter_android.dart'
+    as android;
+import 'package:webview_windows/webview_windows.dart' as windows;
+
+/// Shares the Wenku8 fallback parsers across Android WebView and WebView2.
+class WenkuWebView {
+  windows.WebviewController? _windows;
+  mobile.WebViewController? _mobile;
+  final _transferKey = GlobalKey();
+  String? _normalMobileAgent;
+  final _subscriptions = <StreamSubscription<dynamic>>[];
+  late VoidCallback _onLoaded;
+  late void Function(String) _onError;
+  bool Function(String)? _allowNavigation;
+  VoidCallback? _onNavigationBlocked;
+
+  void setPageHandlers({
+    required VoidCallback onLoaded,
+    required void Function(String) onError,
+    bool Function(String)? allowMainFrameNavigation,
+    VoidCallback? onNavigationBlocked,
+  }) {
+    _onLoaded = onLoaded;
+    _onError = onError;
+    _allowNavigation = allowMainFrameNavigation;
+    _onNavigationBlocked = onNavigationBlocked;
+  }
+
+  Future<void> initialize({
+    required VoidCallback onLoaded,
+    required void Function(String) onError,
+    bool Function(String)? allowMainFrameNavigation,
+    VoidCallback? onNavigationBlocked,
+    bool normalBrowserUserAgent = false,
+    bool iosBiliCompatibility = false,
+    bool enableVerificationCookies = false,
+  }) async {
+    setPageHandlers(
+      onLoaded: onLoaded,
+      onError: onError,
+      allowMainFrameNavigation: allowMainFrameNavigation,
+      onNavigationBlocked: onNavigationBlocked,
+    );
+    if (Platform.isWindows) {
+      final version = await windows.WebviewController.getWebViewVersion();
+      if (version == null) {
+        throw StateError('未检测到 Microsoft Edge WebView2 Runtime');
+      }
+      final controller = _windows = windows.WebviewController();
+      await controller.initialize();
+      final edgeVersion = RegExp(
+        r'\d+\.\d+\.\d+\.\d+',
+      ).firstMatch(version)?.group(0);
+      if (edgeVersion != null) {
+        await controller.setUserAgent(
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+          'AppleWebKit/537.36 (KHTML, like Gecko) '
+          'Chrome/${edgeVersion.split('.').first}.0.0.0 Safari/537.36 Edg/$edgeVersion',
+        );
+      }
+      _subscriptions.add(
+        controller.loadingState.listen((state) {
+          if (state == windows.LoadingState.navigationCompleted) _onLoaded();
+        }),
+      );
+      _subscriptions.add(
+        controller.onLoadError.listen((error) {
+          if (error != windows.WebErrorStatus.WebErrorStatusUnknown &&
+              error != windows.WebErrorStatus.WebErrorStatusConnectionAborted &&
+              error != windows.WebErrorStatus.WebErrorStatusOperationCanceled) {
+            _onError('WebView2 加载失败: $error');
+          }
+        }),
+      );
+      await controller.setPopupWindowPolicy(
+        windows.WebviewPopupWindowPolicy.sameWindow,
+      );
+      await controller.setBackgroundColor(Colors.transparent);
+    } else if (Platform.isAndroid || Platform.isIOS) {
+      final controller = _mobile = mobile.WebViewController();
+      if (enableVerificationCookies &&
+          Platform.isAndroid &&
+          controller.platform is android.AndroidWebViewController) {
+        final manager = mobile.WebViewCookieManager().platform;
+        if (manager is android.AndroidWebViewCookieManager) {
+          await manager.setAcceptThirdPartyCookies(
+            controller.platform as android.AndroidWebViewController,
+            true,
+          );
+        }
+      }
+      if (normalBrowserUserAgent && Platform.isAndroid) {
+        // Preserve this device's installed Chromium version. Some public sites
+        // serve a blocked or incompatible page to the embedded-WebView marker.
+        final agent = await controller.getUserAgent();
+        if (agent != null) {
+          _normalMobileAgent = agent
+              .replaceFirst('; wv', '')
+              .replaceFirst(RegExp(r' Version/\S+'), '');
+          await controller.setUserAgent(_normalMobileAgent);
+        }
+      }
+      await controller.setJavaScriptMode(mobile.JavaScriptMode.unrestricted);
+      if (iosBiliCompatibility && Platform.isIOS) {
+        final agent = await controller.getUserAgent();
+        final version = await const MethodChannel(
+          'methods',
+        ).invokeMethod<String>('iosSystemVersion');
+        if (agent != null && version != null) {
+          final compatible = biliIosWebKitUserAgent(agent, version);
+          if (compatible != agent) await controller.setUserAgent(compatible);
+        }
+      }
+      await controller.setNavigationDelegate(
+        mobile.NavigationDelegate(
+          onNavigationRequest: (request) {
+            if (request.isMainFrame &&
+                _allowNavigation?.call(request.url) == false) {
+              _onNavigationBlocked?.call();
+              return mobile.NavigationDecision.prevent;
+            }
+            return mobile.NavigationDecision.navigate;
+          },
+          onPageFinished: (_) => _onLoaded(),
+          onWebResourceError: (error) {
+            if (error.isForMainFrame == true &&
+                !(Platform.isIOS && error.errorCode == -999)) {
+              _onError('网页加载失败: ${error.description}');
+            }
+          },
+        ),
+      );
+    } else {
+      throw UnsupportedError('当前平台暂不支持网页重试');
+    }
+  }
+
+  Future<void> loadUrl(String url) async {
+    if (_windows != null) {
+      await _windows!.loadUrl(url);
+    } else {
+      await _mobile!.loadRequest(Uri.parse(url));
+    }
+  }
+
+  /// Android's HTTPS base URL supplies a normal same-origin fetch context
+  /// without first downloading a whole website. Other engines retain their
+  /// established navigation flow until this capability is verified there.
+  Future<bool> prepareDocumentContext(String host, String html) async {
+    if (!Platform.isAndroid || _mobile == null) return false;
+    await _mobile!.loadHtmlString(html, baseUrl: '$host/');
+    return true;
+  }
+
+  /// Ordinary desktop-site content negotiation, keeping the installed engine
+  /// version. Used only by the public Bili reader; Wenku8 keeps its own policy.
+  Future<void> setDesktopSite(bool enabled) async {
+    if (_normalMobileAgent == null || _mobile == null) return;
+    final agent =
+        enabled
+            ? _normalMobileAgent!
+                .replaceFirst(
+                  RegExp(r'\([^)]*Android[^)]*\)'),
+                  '(X11; Linux x86_64)',
+                )
+                .replaceFirst(' Mobile ', ' ')
+            : _normalMobileAgent!;
+    await _mobile!.setUserAgent(agent);
+  }
+
+  Future<dynamic> executeScript(String script) async {
+    if (_windows != null) return _windows!.executeScript(script);
+    final value = await _mobile!.runJavaScriptReturningResult(script);
+    // Android exposes JSON-quoted strings; booleans and numbers are already typed.
+    if (Platform.isAndroid && value is String) {
+      try {
+        return jsonDecode(value);
+      } on FormatException {
+        return value;
+      }
+    }
+    return value;
+  }
+
+  Future<String> currentUrl() async {
+    final value = await executeScript('location.href');
+    return value?.toString() ?? '';
+  }
+
+  /// Keep cookies in the platform store; never export website session values.
+  Future<void> persistSession() async {
+    if (Platform.isAndroid) {
+      await const MethodChannel(
+        'litetale/web_session',
+      ).invokeMethod<void>('flushCookies');
+    }
+  }
+
+  Widget build() =>
+      _windows != null
+          ? windows.Webview(_windows!, width: 1024, height: 768)
+          : mobile.WebViewWidget(controller: _mobile!);
+
+  /// The platform view retains its native identity when it changes parents.
+  Widget buildTransferable() => KeyedSubtree(key: _transferKey, child: build());
+
+  Future<void> dispose() async {
+    // Android's platform view owns the controller lifetime. Stop an abandoned
+    // public renderer so late resources cannot continue loading after a timeout.
+    if (_mobile != null) {
+      try {
+        await _mobile!.loadRequest(Uri.parse('about:blank'));
+      } catch (_) {
+        // The platform view may already have been removed.
+      }
+    }
+    for (final subscription in _subscriptions) {
+      await subscription.cancel();
+    }
+    await _windows?.dispose();
+  }
+}
+
+@visibleForTesting
+String biliIosWebKitUserAgent(String agent, String iOSVersion) {
+  final engine = RegExp(r'\bAppleWebKit/(\d+(?:\.\d+)*)').firstMatch(agent);
+  if (engine == null ||
+      agent.contains(' Safari/') ||
+      agent.contains(' Version/') ||
+      !RegExp(r'^[0-9]+(?:\.[0-9]+){1,2}$').hasMatch(iOSVersion)) {
+    return agent;
+  }
+  // Keep the device and engine identifiers while supplying the product
+  // version pair required by Bili's reader.
+  if (agent.contains(' Mobile/')) {
+    final mobile = agent.replaceFirst(
+      ' Mobile/',
+      ' Version/$iOSVersion Mobile/',
+    );
+    return '$mobile Safari/604.1 LiteTale';
+  }
+  return '$agent Version/$iOSVersion Safari/${engine[1]} LiteTale';
+}
