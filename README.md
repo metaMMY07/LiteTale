@@ -4,20 +4,23 @@
   <p>基于 Wild 的 Android 与 iOS 轻小说阅读器</p>
 
 [![license](https://img.shields.io/github/license/metaMMY07/LiteTale)](LICENSE)
-[![release](https://img.shields.io/badge/release-v1.2.5-blue)](https://github.com/metaMMY07/LiteTale/releases)
+[![release](https://img.shields.io/badge/release-v1.2.6-blue)](https://github.com/metaMMY07/LiteTale/releases)
 [![downloads](https://img.shields.io/github/downloads/metaMMY07/LiteTale/total)](https://github.com/metaMMY07/LiteTale/releases)
 </div>
 
-## 最新正式版 LiteTale 1.2.5 修复版
+## 最新正式版 LiteTale 1.2.6（2026-11-26）
 
-[Android 手机／平板 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.5-fix/LiteTale-v1.2.5-fix-android-arm64-v8a.apk) · [iPhone／iPad IPA（未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.5-fix/LiteTale-v1.2.5-fix-ios-unsigned.ipa) · [更新内容](https://github.com/metaMMY07/LiteTale/releases/tag/v1.2.5-fix)
+[Android 手机／平板 APK](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.6/LiteTale-v1.2.6-android-arm64-v8a.apk) · [iPhone／iPad IPA（未签名）](https://github.com/metaMMY07/LiteTale/releases/download/v1.2.6/LiteTale-v1.2.6-ios-unsigned.ipa) · [更新内容](https://github.com/metaMMY07/LiteTale/releases/tag/v1.2.6)
 
 iOS 安装包需要自行签名后安装。
 
 ### 更新内容
 
-- 改进书架操作逻辑。
-- 改善android底栏显示。
+- 优化使用流畅度。
+- 修复哔哩轻小说阅读报错。
+- 优化阅读时间统计。
+
+完整校验值和构建边界见 [1.2.6 交付记录](docs/releases/1.2.6.md)。
 
 ### 界面预览
 
