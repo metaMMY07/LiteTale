@@ -1,0 +1,159 @@
+import 'package:wild/theme/material_you.dart';
+import 'dart:io';
+import 'package:wild/theme/ios_system_colors.dart';
+import 'package:wild/services/epub/local_epub_library.dart';
+import 'package:wild/cubits/app_accent_cubit.dart';
+import 'package:wild/cubits/reader_curl_cubit.dart';
+import 'package:wild/cubits/font_settings_cubit.dart';
+import 'package:wild/sources/source_api.dart' show loadSourceSelection;
+import 'package:wild/sources/book_source.dart' show supportsLocalEpub;
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:wild/widgets/app_launch_screen.dart';
+import 'package:wild/widgets/apple_reader_panel.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:wild/pages/auth_cubit.dart';
+import 'package:wild/pages/novel/font_size_cubit.dart';
+import 'package:wild/pages/novel/paragraph_spacing_cubit.dart';
+import 'package:wild/pages/novel/line_height_cubit.dart';
+import 'package:wild/pages/novel/theme_cubit.dart';
+import 'package:wild/pages/novel/reader_type_cubit.dart';
+import 'package:wild/src/rust/api/system.dart';
+import 'package:wild/pages/novel/top_bar_height_cubit.dart';
+import 'package:wild/pages/novel/bottom_bar_height_cubit.dart';
+import 'package:wild/cubits/reader_background_cubit.dart';
+import 'package:wild/cubits/volume_control_cubit.dart';
+import 'package:wild/cubits/screen_up_on_reading_property.dart';
+import 'package:wild/cubits/screen_up_on_scroll_property.dart';
+import 'package:wild/pages/novel/left_padding_cubit.dart';
+import 'package:wild/pages/novel/right_padding_cubit.dart';
+
+import '../methods.dart';
+import 'package:wild/settings/settings_preferences.dart';
+import 'package:wild/settings/reading_statistics.dart';
+import 'package:wild/settings/app_logs.dart';
+
+class InitPage extends StatefulWidget {
+  const InitPage({super.key});
+
+  @override
+  State<StatefulWidget> createState() => _InitPageState();
+}
+
+class _InitPageState extends State<InitPage> {
+  Future<void> _initializeCubits() async {
+    final launchHold =
+        Platform.isIOS
+            ? WidgetsBinding.instance.endOfFrame.then(
+              (_) => Future<void>.delayed(const Duration(milliseconds: 550)),
+            )
+            : Future<void>.value();
+    String root;
+    if (Platform.isMacOS || Platform.isLinux || Platform.isWindows) {
+      root = await desktopRoot();
+    } else {
+      root = await dataRoot();
+    }
+    if (kDebugMode) {
+      print('root: $root');
+    }
+    await init(root: root);
+    if (!mounted) return;
+
+    // 初始化所有 Cubit
+    await loadSourceSelection();
+    if (!mounted) return;
+    final fontSizeCubit = context.read<FontSizeCubit>();
+    final paragraphSpacingCubit = context.read<ParagraphSpacingCubit>();
+    final lineHeightCubit = context.read<LineHeightCubit>();
+    final themeCubit = context.read<ThemeCubit>();
+    final authCubit = context.read<AuthCubit>();
+    final topBarHeightCubit = context.read<TopBarHeightCubit>();
+    final bottomBarHeightCubit = context.read<BottomBarHeightCubit>();
+    final readerTypeCubit = context.read<ReaderTypeCubit>();
+    final readerBackgroundCubit = context.read<ReaderBackgroundCubit>();
+    final volumeControlCubit = context.read<VolumeControlCubit>();
+
+    // 等待所有 Cubit 初始化完成
+    await IosSystemColors.initialize();
+    if (!mounted) return;
+    await Future.wait([
+      if (Platform.isIOS) AppleReaderPanel.available.then<void>((_) {}),
+      if (supportsLocalEpub)
+        LocalEpubLibrary.instance.initialize(root).catchError((Object _) {
+          // Local library exposes a retryable error; online reading still starts.
+        }),
+      context.read<FontSettingsCubit>().initialize(root),
+      context.read<AppAccentCubit>().load(),
+      context.read<ReaderCurlCubit>().load(),
+      context.read<SettingsPreferencesCubit>().initialize(),
+      context.read<ReadingStatisticsCubit>().initialize(),
+      AppLogs.instance.initialize(root),
+      fontSizeCubit.loadFontSize(),
+      paragraphSpacingCubit.loadSpacing(),
+      lineHeightCubit.loadLineHeight(),
+      themeCubit.loadTheme(),
+      authCubit.init(),
+      topBarHeightCubit.loadHeight(),
+      bottomBarHeightCubit.loadHeight(),
+      context.read<LeftPaddingCubit>().loadPadding(),
+      context.read<RightPaddingCubit>().loadPadding(),
+      readerTypeCubit.loadType(),
+      readerBackgroundCubit.init(root),
+      volumeControlCubit.init(),
+      initScreenUpOnReading().then<void>((_) {}),
+      initScreenUpOnScroll().then<void>((_) {}),
+    ]);
+    if (!mounted) return;
+    AppLogs.instance.level =
+        context.read<SettingsPreferencesCubit>().state.logLevel;
+
+    await launchHold;
+    if (!mounted || ModalRoute.isCurrentOf(context) == false) return;
+    Navigator.pushReplacementNamed(context, '/home');
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeCubits();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (usesMaterialYou) {
+      final colors = Theme.of(context).colorScheme;
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 48,
+                backgroundColor: colors.primaryContainer,
+                child: Icon(
+                  Icons.auto_stories_rounded,
+                  size: 48,
+                  color: colors.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'LiteTale',
+                style: Theme.of(context).textTheme.headlineLarge,
+              ),
+              const SizedBox(height: 32),
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return const AppLaunchScreen();
+  }
+}
