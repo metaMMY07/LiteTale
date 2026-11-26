@@ -1,0 +1,326 @@
+import 'dart:convert';
+
+const biliRetireSearchPageScript = r'''(() => {
+  window.__liteTaleRetiredSearchPage = true;
+  return true;
+})()''';
+
+const _biliFindSearchField = r'''
+  function biliFindSearchField() {
+    if (document.readyState === 'loading' || window.__liteTaleRetiredSearchPage) return null;
+    const field = document.querySelector('#searchkey[name="searchkey"]');
+    const form = field && field.form;
+    if (!form || field.disabled || !['post','get'].includes(form.method.toLowerCase()) ||
+        form.querySelector('input[type="password"]')) return null;
+    const action = new URL(form.action, location.href);
+    if (action.origin !== location.origin || action.username || action.password ||
+        action.hash || !['/S6/','/search.html'].includes(action.pathname)) return null;
+    return field;
+  }
+''';
+
+String biliSubmitSearchScript(String keyword) => '''(() => {
+  $_biliFindSearchField
+  const field = biliFindSearchField();
+  if (!field || window.__liteTaleBiliSearchPending) return false;
+  const form = field.form;
+  const submit = form.querySelector('[type="submit"]');
+  if (!form.requestSubmit && !submit) return false;
+  field.value = ${jsonEncode(keyword)};
+  field.dispatchEvent(new Event('input', {bubbles:true}));
+  // A form submission may stay on /search.html. Ignore the previous document's suggested
+  // books until real navigation replaces this window and its pending marker.
+  window.__liteTaleBiliSearchPending = true;
+  if (form.requestSubmit) form.requestSubmit();
+  else submit.click();
+  return true;
+})()''';
+
+String biliFillSearchFieldScript(String keyword) => '''(() => {
+  const field = document.querySelector('#searchkey[name="searchkey"]');
+  if (!field || field.value.trim()) return false;
+  field.value = ${jsonEncode(keyword)};
+  field.dispatchEvent(new Event('input', {bubbles:true}));
+  return true;
+})()''';
+
+const _biliSearchVerificationGuard = r'''
+  function biliCheckSearchVerification(out) {
+    const searchPath = ['/S6/','/search.html','/'].includes(location.pathname);
+    const visible = node => node.getClientRects().length > 0 &&
+      getComputedStyle(node).visibility === 'visible';
+    const form = [...document.forms].find(form => {
+      const action = new URL(form.action, location.href);
+      if (action.origin !== location.origin || form.querySelector('input[type="password"]')) return false;
+      const fields = [...form.querySelectorAll('input')].filter(input =>
+        !input.disabled && ['text','number','tel','search'].includes(input.type) && visible(input));
+      if (!fields.length) return false;
+      const images = [...form.querySelectorAll('img')].filter(visible);
+      if (!images.length) return false;
+      const namedCode = fields.some(input =>
+        /^(?:captcha|captcha_code|checkcode|verifycode|verify_code|seccode|search_code)$/i.test(input.name));
+      const codeImage = images.some(img => /captcha|checkcode|verifycode|seccode|验证码|驗證碼/i.test(
+        [img.getAttribute('src'), img.alt, img.id].join(' ')));
+      const verifySubmit = [...form.querySelectorAll('button,input[type="submit"]')].some(button =>
+        visible(button) &&
+        /^(?:验证并搜索|驗證並搜索|驗證並搜尋)$/.test(
+          (button.tagName === 'INPUT' ? button.value : button.textContent).trim()));
+      return verifySubmit ||
+        (searchPath && namedCode && (codeImage || !!form.querySelector('[name="searchkey"]')));
+    });
+    if (!form) return false;
+    out.ready=false;out.verificationRequired=true;out.searchChallenge=true;
+    const keyword = form.querySelector('input[name="searchkey"]');
+    if (keyword && keyword.value.trim() && keyword.value.length <= 200) {
+      out.searchKeyword = keyword.value.trim();
+    }
+    out.error='原站搜索需要验证码，请打开原站填写后继续';
+    return true;
+  }
+''';
+
+// Access state is identified in the site's error/challenge panels, never by
+// scanning a novel's prose or search result text.
+const _biliAccessGuard = r'''
+  function biliCheckAccess(out) {
+    const panel=document.querySelector('#cf-error-details');
+    const outside=node=>node&&!node.closest('#acontent,#TextContent');
+    const challenge=[...document.querySelectorAll('#challenge-form,#challenge-running,.cf-turnstile,iframe[src*="challenges.cloudflare.com"]')].some(outside);
+    const headline=panel&&panel.querySelector('[data-translate="block_headline"],.cf-error-overview h1,h1');
+    if (outside(panel) && ((headline && (headline.getAttribute('data-translate')==='block_headline' || /blocked|access denied|拒绝访问|拒絕存取/i.test(headline.textContent))) || (!challenge && /Attention Required/i.test(document.title)))) {
+      out.ready=false;out.accessDenied=true;
+      out.error='原站已拒绝访问此页面，当前没有可完成的验证';return true;
+    }
+    const pending=!document.querySelector('#acontent,#TextContent') && /Just a moment|Checking your browser/i.test(document.title);
+    if (challenge || pending) {
+      out.ready=false;out.verificationRequired=true;
+      out.verificationPending=pending||!!document.querySelector('#challenge-running');
+      out.error='原站要求浏览器验证，请完成验证后继续';return true;
+    }
+    return false;
+  }
+''';
+
+const biliAccessProbeScript =
+    r'''(() => {''' +
+    _biliAccessGuard +
+    r'''
+  const out={url:location.href,ready:false};biliCheckAccess(out);return JSON.stringify(out);
+})()''';
+
+const biliHomeReadyScript =
+    r'''(() => {''' +
+    _biliAccessGuard +
+    _biliSearchVerificationGuard +
+    _biliFindSearchField +
+    r'''
+  const out={url:location.href,documentLoading:document.readyState==='loading',ready:false};
+  if (window.__liteTaleRetiredSearchPage) {
+    out.retiredSearchPage=true;return JSON.stringify(out);
+  }
+  if (biliCheckAccess(out) || biliCheckSearchVerification(out)) return JSON.stringify(out);
+  out.ready=!window.__liteTaleBiliSearchPending && !!biliFindSearchField();
+  return JSON.stringify(out);
+})()''';
+
+const biliDocumentProbeScript =
+    r'''(() => {''' +
+    _biliAccessGuard +
+    r'''
+  const out={url:location.href,ready:false,html:''};
+  if (biliCheckAccess(out)) return JSON.stringify(out);
+  const path=location.pathname;
+  let nodes=[];
+  if (path==='/') {
+    nodes=[...document.querySelectorAll('.index_tpic_info')];
+    if (!nodes.length) {
+      nodes=[...document.querySelectorAll('li.module-slide-li')].slice(0,100);
+      if (document.readyState==='loading' && nodes.length<100) return JSON.stringify(out);
+    }
+    if (document.querySelector('.index_tpic_info')) for(const a of document.querySelectorAll('a[href]')) {
+      if (a.querySelector('img') && /\/novel\/[1-9]\d*\.html$/.test(new URL(a.getAttribute('href'),location.href).pathname)) nodes.push(a);
+    }
+  } else if (/\/catalog$/.test(path)) {
+    if (document.readyState==='loading') return JSON.stringify(out);
+    nodes=[...document.querySelectorAll('h1,#volume-list,#volumes')];
+  } else if (/^\/novel\/[1-9]\d*\.html$/.test(path)) {
+    const title=document.querySelector('h1.book-title');
+    if (title) {
+      const summary=document.querySelector('#bookSummary');
+      const status=document.querySelector('a.book-status');
+      if(!summary || !status) return JSON.stringify(out);
+      nodes=[title.closest('.book-layout'),summary,status].filter(Boolean);
+    } else nodes=[...document.querySelectorAll('h1.book-name,.book-html-box,.book-side')];
+  } else {
+    if (document.readyState==='loading') return JSON.stringify(out);
+    nodes=[...document.querySelectorAll('.rank_d_list,.pagebar,#list_content,ol.book-ol,#pagelink')];
+  }
+  if(!nodes.length) return JSON.stringify(out);
+  out.html=nodes.map(node=>{
+    const clone=node.cloneNode(true);
+    clone.querySelectorAll('script,style,form,input,button,iframe').forEach(n=>n.remove());
+    for(const element of [clone,...clone.querySelectorAll('*')]) for(const attr of [...element.attributes]) {
+      if(attr.name.startsWith('on')) element.removeAttribute(attr.name);
+    }
+    return clone.outerHTML;
+  }).join('\n');
+  out.ready=true;return JSON.stringify(out);
+})()''';
+
+const biliSearchProbeScript =
+    r'''(() => {''' +
+    _biliAccessGuard +
+    _biliSearchVerificationGuard +
+    r'''
+  const result = {url:location.href, documentLoading:document.readyState==='loading', ready:false, books:[], next:null};
+  if (window.__liteTaleRetiredSearchPage) {
+    result.retiredSearchPage=true;return JSON.stringify(result);
+  }
+  if (biliCheckAccess(result) || biliCheckSearchVerification(result)) return JSON.stringify(result);
+  if (location.pathname === '/' || !document.body) return JSON.stringify(result);
+  const path = location.pathname;
+  const searchPath = ['/S6/','/search.html'].includes(path);
+  const detail = path.match(/^\/novel\/([1-9]\d*)\.html$/);
+  const body = document.body.innerText;
+  const heading = body.slice(0, 8192);
+  const summary = !detail && heading.match(/^[^\S\r\n]*([^\r\n]{1,200}?)\s*(?:相关共有|相關共有)\s*(\d{1,7})\s*(?:条记录|條記錄)/m);
+  if (summary) {
+    result.resultKeyword = summary[1].trim();
+    result.resultCount = Number(summary[2]);
+  } else if (result.documentLoading || window.__liteTaleBiliSearchPending) {
+    return JSON.stringify(result);
+  }
+  const images = root => {
+    const img = root && (root.matches('img') ? root : root.querySelector('img'));
+    return img ? ['data-src','data-original','src'].map(k => img.getAttribute(k)).filter(Boolean) : [];
+  };
+  const title = document.querySelector('h1.book-name,h1.book-title');
+  if (detail && title) {
+    result.books = [{nid:detail[1],title:title.innerText.trim(),images:[
+      ...images(document.querySelector('img.book-cover')),
+      (document.querySelector('meta[property="og:image"]')||{}).content || '',
+      ...images(document.querySelector('.book-img,.book-cover,.book-info'))
+    ]}];
+    result.ready = true; return JSON.stringify(result);
+  }
+  if (!searchPath && !(summary && /搜索结果|搜索結果|搜尋結果/.test(document.title + heading))) return JSON.stringify(result);
+  if (!summary && /搜索间隔|搜索频繁|请.*秒后.*搜索/.test(body)) {
+    result.error='原站暂时限制搜索频率，请稍后重试';return JSON.stringify(result);
+  }
+  const empty = summary
+    ? result.resultCount === 0
+    : /没有找到|未找到|无搜索结果|没有相关|查无|未搜索到|没有搜到/.test(body);
+  const lists = '.search-list,.search-result,.bookbox,.rank_d_list,table.grid,.book-list,#searchResult,#list_content';
+  const scopes = [...document.querySelectorAll(lists)];
+  // The mobile search form and its suggestions are also at /search.html.
+  if (path === '/search.html' && !summary &&
+      document.querySelector('#searchkey[name="searchkey"]') &&
+      !scopes.length && !empty) return JSON.stringify(result);
+  if (summary && empty) {
+    result.ready = true;
+    return JSON.stringify(result);
+  }
+  const seen = new Set();
+  if (summary) {
+    scopes.push(...document.querySelectorAll('.book-li,.book-item,.module-search-item'));
+  }
+  for (const root of (scopes.length ? scopes : [document.body])) {
+    for (const a of root.querySelectorAll('a[href]')) {
+      const url = new URL(a.getAttribute('href'),location.href);
+      const m = url.origin === location.origin && url.pathname.match(/^\/novel\/([1-9]\d*)\.html$/);
+      if (!m || seen.has(m[1]) || a.closest('#searchHotHistory,#searchPopularWords')) continue;
+      const card = a.closest('.bookbox,.rank_d_list,.book-li,.book-item,.module-search-item,tr,li') || a;
+      const title = card.querySelector('.book-title,.rank_d_b_name,h3,h4') || a;
+      const text = title.innerText.replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      seen.add(m[1]); result.books.push({nid:m[1],title:text,images:images(card)});
+      if (result.books.length >= 100) break;
+    }
+    if (result.books.length >= 100) break;
+  }
+  // The exact count confirms a complete result even with trailing scripts
+  // pending. A partially streamed or paginated list still waits for parsing.
+  if (result.documentLoading && result.books.length !== result.resultCount) return JSON.stringify(result);
+  const currentParams = new URL(location.href).searchParams;
+  const page = Number(currentParams.get('page') || '1');
+  const keyword = result.resultKeyword || currentParams.get('searchkey');
+  const next = [...document.querySelectorAll('a[href]')].find(a => {
+    if (a.rel !== 'next' && !/^(下一页|下页|下一頁|›|»)$/.test(a.innerText.trim())) return false;
+    if (a.getAttribute('aria-disabled') === 'true' || a.closest('.disabled')) return false;
+    try {
+      const url = new URL(a.getAttribute('href'), location.href);
+      const nextKeyword = url.searchParams.get('searchkey');
+      return url.origin === location.origin && !url.hash &&
+        ['/S6/','/search.html'].includes(url.pathname) &&
+        url.searchParams.get('page') === String(page + 1) &&
+        (!keyword || nextKeyword === null || nextKeyword === keyword);
+    } catch (_) {
+      return false;
+    }
+  });
+  if (next) result.next = new URL(next.getAttribute('href'), location.href).href;
+  result.ready = result.books.length > 0 || empty;
+  return JSON.stringify(result);
+})()''';
+
+const biliChapterProbeScript =
+    r'''(() => {''' +
+    _biliAccessGuard +
+    r'''
+  const out = {url:location.href,ready:false,content:'',next:null};
+  if (biliCheckAccess(out)) return JSON.stringify(out);
+  if (document.readyState === 'loading') return JSON.stringify(out);
+  const root = document.querySelector('#TextContent,#acontent');
+  if (!root) return JSON.stringify(out);
+  if (/[（(](?:內容加載失敗|内容加载失败)[！!]?\s*[請请](?:刷新|重新整理)(?:或(?:更換瀏覽器|更换浏览器))?[）)]\s*$/.test(root.innerText.trim().slice(-140))) {
+    out.contentIncomplete=true;return JSON.stringify(out);
+  }
+  let count=0;
+  function read(node) {
+    if (++count > 30000) throw new Error('正文节点过多');
+    if (node.nodeType === 3) {
+      const text=node.textContent;
+      return !text.trim() && /[\r\n]/.test(text) ? '' : text;
+    }
+    if (node.nodeType !== 1) return '';
+    const tag=node.tagName.toLowerCase(), css=getComputedStyle(node);
+    if (['script','style','iframe','noscript','button','form'].includes(tag) ||
+        css.display==='none' || css.visibility==='hidden' || css.opacity==='0' || css.fontSize==='0px' ||
+        /(?:google|ad-slot|dag)/i.test(node.className||'') ||
+        /hidden-images|show-more-images/.test(node.id||'')) return '';
+    if (tag==='br') return '\n';
+    if (tag==='p' && css.position==='absolute') {
+      const bounds=node.getBoundingClientRect();
+      // The site renders decoy copies at zero size. They have normal color and
+      // display values, so display:none alone does not describe visible prose.
+      // Keep genuine repeated paragraphs; filter only this unpainted geometry.
+      if (bounds.width===0 && bounds.height===0) return '';
+    }
+    if (tag==='img') {
+      const raw=node.getAttribute('data-src')||node.getAttribute('data-original')||node.getAttribute('src');
+      if (!raw) return '';
+      const url=new URL(raw,location.href);
+      return /^https?:$/.test(url.protocol)&&!url.username&&!url.password
+        ? '<!--image-->'+url.href+'<!--image-->' : '';
+    }
+    const text=[...node.childNodes].map(read).join('');
+    return text + (['p','div','section'].includes(tag)?'\n':'');
+  }
+  try { out.content=read(root).trim(); } catch (_) { out.error='章节结构过大'; }
+  const match=location.pathname.match(/^\/novel\/([1-9]\d*)\/([1-9]\d*)(?:_\d+)?\.html$/);
+  if (match) {
+    const next=[...document.querySelectorAll('a[href]')].find(a=>{
+      if (!/^(下一页|下一頁)$/.test(a.innerText.trim())) return false;
+      const url=new URL(a.getAttribute('href'),location.href);
+      return url.origin===location.origin &&
+        new RegExp('^/novel/'+match[1]+'/'+match[2]+'_[1-9][0-9]*\.html$').test(url.pathname);
+    });
+    if (next) out.next=new URL(next.getAttribute('href'),location.href).href;
+    if (!out.next && typeof ReadParams!=='undefined' && typeof ReadParams.url_next==='string') {
+      const url=new URL(ReadParams.url_next,location.href);
+      if (url.origin===location.origin &&
+          new RegExp('^/novel/'+match[1]+'/'+match[2]+'_[1-9][0-9]*\.html$').test(url.pathname)) out.next=url.href;
+    }
+  }
+  out.ready=!!out.content; return JSON.stringify(out);
+})()''';

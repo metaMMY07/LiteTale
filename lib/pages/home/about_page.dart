@@ -1,0 +1,183 @@
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:wild/settings/settings_preferences.dart';
+import 'package:wild/settings/settings_widgets.dart';
+import 'package:wild/utils/app_info.dart';
+import 'package:wild/pages/update_cubit.dart';
+import 'package:wild/widgets/left_aligned_scrollable.dart';
+import 'package:wild/widgets/update_checker.dart';
+
+class AboutPage extends StatelessWidget {
+  const AboutPage({super.key});
+
+  Future<void> _launchUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (!await canLaunchUrl(uri)) {
+      throw Exception('Could not launch $url');
+    }
+    await launchUrl(uri);
+  }
+
+  Future<void> _checkUpdate(BuildContext context) async {
+    final channel = settingsPreferencesOf(context, listen: false).updateChannel;
+    final info = await context.read<UpdateCubit>().checkUpdate(
+      force: true,
+      channel: channel,
+    );
+    if (info != null &&
+        context.mounted &&
+        ModalRoute.isCurrentOf(context) != false) {
+      await showUpdatePrompt(context, info);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<UpdateCubit, UpdateState>(
+      builder: (context, state) {
+        final checking = state.phase == UpdatePhase.checking;
+        return Scaffold(
+          appBar: settingsAppBar(context, '关于'),
+          body: LeftAlignedScrollView(
+            topInset: 16,
+            bottomInset: 16,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 24),
+                // 应用图标
+                Center(
+                  child: Icon(
+                    Icons.book,
+                    size: 80,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // 应用名称
+                Center(
+                  child: Text(
+                    AppInfo.appName,
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // 版本号
+                Center(
+                  child: Text(
+                    '版本 ${AppInfo.version}',
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 32),
+                if (state.updateInfo case final info?) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: AppButton.filledIcon(
+                      onPressed: () => showUpdatePrompt(context, info),
+                      icon: const Icon(Icons.system_update),
+                      label: Text('发现新版本 ${info.version}'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: AppButton.outlinedIcon(
+                    onPressed: checking ? null : () => _checkUpdate(context),
+                    icon:
+                        checking
+                            ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                            : const Icon(Icons.refresh),
+                    label: Text(checking ? '正在检查更新…' : '检查更新'),
+                  ),
+                ),
+                if (!checking &&
+                    state.updateInfo == null &&
+                    state.message.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      state.message,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 32),
+                // 其他信息
+                SettingsCard(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '关于 LiteTale',
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'LiteTale 是一个使用 Flutter 开发的轻小说文库客户端，提供流畅的阅读体验和丰富的功能。',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '本版本基于开源项目 Wild 开发，感谢原作者和所有贡献者。',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        AppButton.textIcon(
+                          onPressed:
+                              () => _launchUrl(
+                                'https://github.com/metaMMY07/LiteTale',
+                              ),
+                          icon: const Icon(Icons.code),
+                          label: const Text('查看 LiteTale 源代码'),
+                        ),
+                        AppButton.textIcon(
+                          onPressed:
+                              () =>
+                                  _launchUrl('https://github.com/niuhuan/wild'),
+                          icon: const Icon(Icons.account_tree_outlined),
+                          label: const Text('查看上游 Wild 项目'),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          '开源协议',
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Wild 衍生代码采用 GNU GPL v3；应用图标来自 Novella，并按 GNU AGPL v3 许可使用。',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        AppButton.textIcon(
+                          onPressed: () => showLicensePage(context: context),
+                          icon: const Icon(Icons.description_outlined),
+                          label: const Text('查看开源许可'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
