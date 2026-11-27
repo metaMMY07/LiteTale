@@ -185,6 +185,7 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
   private var surfaceTint: UInt32?
   private var surfaceCapsule = false
   private var modalBackdrop: UIView?
+  private var keepGlassInSheets = false
   private var buttonTint: UIColor?
   private var isDark = false
   private var actionBar: UIStackView?
@@ -236,7 +237,7 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       let view = UIVisualEffectView(effect: effect)
       view.isUserInteractionEnabled = kind == "actions"
       surface = view; addSubview(view)
-      layer.cornerRadius = 20; clipsToBounds = kind == "surface"
+      layer.cornerRadius = 20
       if kind == "actions" {
         let stack = UIStackView()
         stack.distribution = .fillEqually
@@ -426,7 +427,8 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
   }
 
   private func syncModalBackdrop(animated: Bool) {
-    let supportsBackdrop = kind == "surface" || kind == "actions" || (kind == "button" && buttonTint == nil)
+    let supportsBackdrop = !keepGlassInSheets &&
+      (kind == "surface" || kind == "actions" || (kind == "button" && buttonTint == nil))
     guard supportsBackdrop else {
       modalBackdrop?.isHidden = true
       modalBackdrop?.alpha = 0
@@ -472,6 +474,10 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
   }
 
   private func update(_ config: [String: Any]) {
+    keepGlassInSheets = config["keepGlassInSheets"] as? Bool ?? false
+    // Keep the effect inside Flutter's composited rectangle, including while a
+    // Flutter sheet paints its barrier above the view.
+    clipsToBounds = kind == "surface" || keepGlassInSheets
     let dark = config["dark"] as? Bool ?? false
     isDark = dark
     overrideUserInterfaceStyle = dark ? .dark : .light

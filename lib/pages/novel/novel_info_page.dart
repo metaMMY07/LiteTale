@@ -226,6 +226,7 @@ class _IosNovelInfoScaffold extends StatelessWidget {
                   child: Center(
                     child: IosReaderBackButton(
                       onPressed: () => Navigator.maybePop(context),
+                      keepGlassInSheets: true,
                     ),
                   ),
                 )
@@ -299,6 +300,7 @@ class _IosNovelInfoScaffold extends StatelessWidget {
                 padding: const EdgeInsetsDirectional.only(end: 16),
                 child: Center(
                   child: AppleGlassActions(
+                    keepGlassInSheets: true,
                     actions: [
                       if (hasTags)
                         AppleGlassAction(

@@ -11,7 +11,8 @@ import 'package:wild/theme/ios_glass_theme.dart' show iosHomeTitleStyle;
 import 'package:wild/theme/ios_page_arrival.dart';
 import 'package:wild/theme/ios_system_colors.dart';
 import 'package:wild/widgets/app_launch_screen.dart';
-import 'package:wild/widgets/ios_app_dock.dart' show IosAppDockHost;
+import 'package:wild/widgets/ios_app_dock.dart'
+    show IosAppDockHost, IosRouteCover;
 
 bool get usesAppleGlass => defaultTargetPlatform == TargetPlatform.iOS;
 
@@ -85,12 +86,14 @@ class AppleGlassSurface extends StatelessWidget {
     this.capsule = false,
     this.preserveTint = false,
     this.brightness,
+    this.keepGlassInSheets = false,
   });
   final Widget child;
   final Color? tint;
   final bool capsule;
   final bool preserveTint;
   final Brightness? brightness;
+  final bool keepGlassInSheets;
   @override
   Widget build(BuildContext context) {
     if (!usesAppleGlass) return child;
@@ -112,6 +115,7 @@ class AppleGlassSurface extends StatelessWidget {
           child: _AppleChrome(
             parameters: {
               'kind': 'surface',
+              if (keepGlassInSheets) 'keepGlassInSheets': true,
               if (capsule) 'capsule': true,
               if (materialTint != null) 'tint': materialTint.toARGB32(),
               'dark': resolvedBrightness == Brightness.dark,
@@ -163,6 +167,7 @@ class AppleGlassButton extends StatelessWidget {
     this.foreground,
     this.brightness,
     this.selected = false,
+    this.keepGlassInSheets = false,
   });
 
   final String? symbol;
@@ -175,6 +180,7 @@ class AppleGlassButton extends StatelessWidget {
   final Color? foreground;
   final Brightness? brightness;
   final bool selected;
+  final bool keepGlassInSheets;
 
   @override
   Widget build(BuildContext context) {
@@ -199,6 +205,7 @@ class AppleGlassButton extends StatelessWidget {
     return _AppleChrome(
       parameters: {
         'kind': 'button',
+        if (keepGlassInSheets) 'keepGlassInSheets': true,
         'dark': appearance == Brightness.dark,
         'label': label,
         'enabled': onPressed != null,
@@ -474,6 +481,7 @@ class AppleGlassActions extends StatelessWidget {
     this.buttonSize = 44,
     this.iconSize = defaultIconSize,
     this.fallback,
+    this.keepGlassInSheets = false,
   });
 
   static const double defaultIconSize = 20;
@@ -484,6 +492,7 @@ class AppleGlassActions extends StatelessWidget {
   final double buttonSize;
   final double iconSize;
   final Widget? fallback;
+  final bool keepGlassInSheets;
 
   @override
   Widget build(BuildContext context) {
@@ -540,6 +549,7 @@ class AppleGlassActions extends StatelessWidget {
       child: _AppleChrome(
         parameters: {
           'kind': 'actions',
+          if (keepGlassInSheets) 'keepGlassInSheets': true,
           'capsule': true,
           'dark': appearance == Brightness.dark,
           'foreground': foregroundColor.toARGB32(),
@@ -1276,15 +1286,17 @@ class _AppleChromeState extends State<_AppleChrome> {
     final routePopping = _route?.animation?.status == AnimationStatus.reverse;
     final coveredByActiveRoute =
         _route != null && !_route!.isCurrent && !routePopping;
-    final coveredByDismissingPopup =
-        _route != null && IosAppDockHost.hasOverlayAboveOf(context, _route!);
-    // Any Flutter layer drawn above a live UIKit glass view (an incoming/popping
-    // upper PageRoute or a modal sheet/dialog scrim) forces rectangular
-    // FlutterOverlayView tiles while UIGlassEffect shadows and interactive
-    // expansion bleed outside the rectangle. Park the native view Offstage and
-    // render the matching Flutter preview while covered.
+    final cover =
+        _route == null
+            ? IosRouteCover.none
+            : IosAppDockHost.coverAboveOf(context, _route!);
     final covered =
-        coveredByPage || coveredByActiveRoute || coveredByDismissingPopup;
+        coveredByPage || coveredByActiveRoute || cover != IosRouteCover.none;
+    // The detail and reader headers clip their native drawing to the platform
+    // view bounds, so a sheet can dim the same glass through its entire slide.
+    final keepGlassInSheets = widget.parameters['keepGlassInSheets'] == true;
+    final parkNative =
+        covered && !(keepGlassInSheets && cover == IosRouteCover.sheet);
     // A freshly pushed route is offstage for one frame while Hero targets are
     // measured. Its current route still has to start attaching there, so the
     // native glass exists before the first visible entrance frame.
@@ -1302,14 +1314,14 @@ class _AppleChromeState extends State<_AppleChrome> {
       );
     }
     // Start attachment in the destination's first layout. Once attached, a
-    // live glass view follows its page until an upper route or modal covers it.
+    // live glass view follows its page until it needs to be parked.
     if (_nativeView == null && canAttach) {
       _registerChromeWarmup();
       _finishStartupAttachment = IosStartupTransition.waitForGlass(context);
       _nativeView = _createView();
     }
     if (_deferPreviewHandoff && atRest) _deferPreviewHandoff = false;
-    final showingPreview = !_nativeReady || _deferPreviewHandoff || covered;
+    final showingPreview = !_nativeReady || _deferPreviewHandoff || parkNative;
     _acceptActions = interactive && _nativeReady && !_deferPreviewHandoff;
     final preview = IgnorePointer(
       child: ExcludeFocus(
@@ -1325,7 +1337,7 @@ class _AppleChromeState extends State<_AppleChrome> {
             Positioned.fill(
               key: const ValueKey('glass-native'),
               child: Offstage(
-                offstage: covered,
+                offstage: parkNative,
                 child: IgnorePointer(
                   ignoring: !_acceptActions,
                   child: ExcludeSemantics(

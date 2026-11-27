@@ -20,6 +20,9 @@ class AppleReaderPanel {
 
   static bool? get knownSupport => _supported;
 
+  static bool isPresentationRoute(Route<dynamic> route) =>
+      route is _AppleReaderRoute;
+
   static Future<bool> get available {
     if (kIsWeb || !Platform.isIOS) return SynchronousFuture(_supported = false);
     return _support ??= channel

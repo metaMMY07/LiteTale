@@ -182,6 +182,7 @@ class ReaderToolbar extends StatelessWidget {
               height: iosBarHeight,
               child: ReaderControlSurface(
                 brightness: barBrightness,
+                keepGlassInSheets: true,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Center(
@@ -234,6 +235,7 @@ class ReaderToolbar extends StatelessWidget {
                 onPressed: onBack,
                 color: neutralColor,
                 brightness: barBrightness,
+                keepGlassInSheets: true,
               )
             else
               ReaderControlSurface(
@@ -250,6 +252,7 @@ class ReaderToolbar extends StatelessWidget {
               AppleGlassActions(
                 key: const ValueKey('reader-trailing-capsule'),
                 brightness: barBrightness,
+                keepGlassInSheets: true,
                 actions: [
                   AppleGlassAction(
                     id: 'catalog',
@@ -303,6 +306,7 @@ class IosReaderBackButton extends StatelessWidget {
     this.label = '返回',
     this.color,
     this.brightness,
+    this.keepGlassInSheets = false,
   });
 
   static const double iosIconSize = 24;
@@ -311,6 +315,7 @@ class IosReaderBackButton extends StatelessWidget {
   final String label;
   final Color? color;
   final Brightness? brightness;
+  final bool keepGlassInSheets;
 
   @override
   Widget build(BuildContext context) => ReaderRoundAction(
@@ -322,6 +327,7 @@ class IosReaderBackButton extends StatelessWidget {
     size: 44,
     color: color ?? Theme.of(context).colorScheme.onSurface,
     brightness: brightness,
+    keepGlassInSheets: keepGlassInSheets,
     onPressed: onPressed,
   );
 }
@@ -344,6 +350,7 @@ class ReaderRoundAction extends StatelessWidget {
     this.brightness,
     this.motion,
     this.color,
+    this.keepGlassInSheets = false,
   });
   final String label;
   final IconData icon;
@@ -359,6 +366,7 @@ class ReaderRoundAction extends StatelessWidget {
   final Brightness? brightness;
   final MaterialReaderMotion? motion;
   final Color? color;
+  final bool keepGlassInSheets;
 
   @override
   Widget build(BuildContext context) {
@@ -392,6 +400,7 @@ class ReaderRoundAction extends StatelessWidget {
                     brightness: brightness,
                     tint: preserveTint ? tint : null,
                     selected: selected,
+                    keepGlassInSheets: keepGlassInSheets,
                     fallback: appleButton,
                   )
                   : AppleGlassSurface(
@@ -427,15 +436,22 @@ class ReaderRoundAction extends StatelessWidget {
 }
 
 class ReaderControlSurface extends StatelessWidget {
-  const ReaderControlSurface({super.key, required this.child, this.brightness});
+  const ReaderControlSurface({
+    super.key,
+    required this.child,
+    this.brightness,
+    this.keepGlassInSheets = false,
+  });
   final Widget child;
   final Brightness? brightness;
+  final bool keepGlassInSheets;
   @override
   Widget build(BuildContext context) =>
       usesAppleGlass
           ? AppleGlassSurface(
             capsule: true,
             brightness: brightness,
+            keepGlassInSheets: keepGlassInSheets,
             child: child,
           )
           : Material(

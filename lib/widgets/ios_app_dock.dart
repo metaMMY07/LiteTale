@@ -7,6 +7,9 @@ import 'package:wild/theme/ios_dock_insets.dart';
 import 'package:wild/theme/ios_page_arrival.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/app_launch_screen.dart';
+import 'package:wild/widgets/apple_reader_panel.dart';
+
+enum IosRouteCover { none, sheet, other }
 
 typedef _DockState =
     ({
@@ -59,10 +62,7 @@ class IosDockController extends NavigatorObserver {
       _dismissing.keys.any(_isFullscreen) || _routes.any(_isFullscreen);
 
   Animation<double>? get _readerAnimation {
-    final fullscreen = [
-      ..._routes,
-      ..._dismissing.keys,
-    ].where(_isFullscreen);
+    final fullscreen = [..._routes, ..._dismissing.keys].where(_isFullscreen);
     if (fullscreen.length != 1) return null;
     final route = fullscreen.single;
     if (route is PageRoute && fullscreenRoutes.contains(route.settings.name)) {
@@ -71,15 +71,22 @@ class IosDockController extends NavigatorObserver {
     return null;
   }
 
-  bool _hasOverlayAbove(ModalRoute<dynamic> route) {
-    if (_disposed) return false;
-    if (_dismissing.entries.any(
-      (entry) => entry.key is PopupRoute && entry.value.contains(route),
-    )) {
-      return true;
-    }
+  IosRouteCover _coverAbove(ModalRoute<dynamic> route) {
+    if (_disposed) return IosRouteCover.none;
     final index = _routes.lastIndexOf(route);
-    return index >= 0 && index < _routes.length - 1;
+    final routesAbove = [
+      if (index >= 0) ..._routes.skip(index + 1),
+      for (final entry in _dismissing.entries)
+        if (entry.key is PopupRoute && entry.value.contains(route)) entry.key,
+    ];
+    if (routesAbove.isEmpty) return IosRouteCover.none;
+    final onlySheets = routesAbove.every(
+      (upper) =>
+          upper is ModalBottomSheetRoute ||
+          upper is CupertinoModalPopupRoute ||
+          AppleReaderPanel.isPresentationRoute(upper),
+    );
+    return onlySheets ? IosRouteCover.sheet : IosRouteCover.other;
   }
 
   void select(int index) {
@@ -198,13 +205,13 @@ class IosAppDockHost extends StatelessWidget {
   final Widget child;
   final bool revealHomeOnStartup;
 
-  static bool hasOverlayAboveOf(
+  static IosRouteCover coverAboveOf(
     BuildContext context,
     ModalRoute<dynamic> route,
   ) {
     final scope =
         context.dependOnInheritedWidgetOfExactType<_IosOverlayScope>();
-    return scope != null && scope.controller._hasOverlayAbove(route);
+    return scope?.controller._coverAbove(route) ?? IosRouteCover.none;
   }
 
   @override
