@@ -1,0 +1,756 @@
+import 'dart:async';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:wild/services/bookshelf_organization.dart';
+import 'package:wild/sources/book_source.dart';
+import 'package:wild/sources/source_api.dart';
+import 'package:wild/src/rust/wenku8/models.dart';
+import 'package:wild/utils/wenku8_network_error.dart';
+
+enum BookshelfStatus { initial, loading, success, error, cloudflareChallenge }
+
+typedef Wenku8ShelfAction = ({String from, String to, List<String> bids});
+typedef ConfirmWenku8ShelfAction = Future<bool> Function(Wenku8ShelfAction);
+
+class BookshelfState {
+  final String tip;
+  final BookshelfStatus status;
+  final List<Bookcase> bookcases;
+  final String? currentCaseId;
+  final Map<String, List<BookcaseItem>> bookcaseContents;
+  final String? errorMessage;
+  final Set<String> selectedBids;
+  final bool isSelecting;
+  final bool isRefreshing;
+  final bool wenku8Enabled;
+  final Map<SourceId, List<LocalShelfEntry>> localBooks;
+  final bool isLoadingLocalBooks;
+  final bool localReadFailed;
+  final Map<String, int> unreadCounts;
+
+  BookshelfState({
+    required this.tip,
+    required this.status,
+    required this.bookcases,
+    this.currentCaseId,
+    required this.bookcaseContents,
+    this.errorMessage,
+    this.selectedBids = const {},
+    this.isSelecting = false,
+    this.isRefreshing = false,
+    this.wenku8Enabled = false,
+    this.localBooks = const {},
+    this.isLoadingLocalBooks = false,
+    this.localReadFailed = false,
+    this.unreadCounts = const {},
+  });
+
+  BookshelfState copyWith({
+    String? tip,
+    BookshelfStatus? status,
+    List<Bookcase>? bookcases,
+    String? currentCaseId,
+    Map<String, List<BookcaseItem>>? bookcaseContents,
+    String? errorMessage,
+    Set<String>? selectedBids,
+    bool? isSelecting,
+    bool? isRefreshing,
+    Map<SourceId, List<LocalShelfEntry>>? localBooks,
+    bool? isLoadingLocalBooks,
+    bool? localReadFailed,
+    Map<String, int>? unreadCounts,
+  }) {
+    return BookshelfState(
+      tip: tip ?? this.tip,
+      status: status ?? this.status,
+      bookcases: bookcases ?? this.bookcases,
+      currentCaseId:
+          bookcases?.isEmpty == true
+              ? null
+              : currentCaseId ?? this.currentCaseId,
+      bookcaseContents: bookcaseContents ?? this.bookcaseContents,
+      errorMessage: errorMessage,
+      selectedBids: selectedBids ?? this.selectedBids,
+      isSelecting: isSelecting ?? this.isSelecting,
+      isRefreshing: isRefreshing ?? this.isRefreshing,
+      wenku8Enabled: wenku8Enabled,
+      localBooks: localBooks ?? this.localBooks,
+      isLoadingLocalBooks: isLoadingLocalBooks ?? this.isLoadingLocalBooks,
+      localReadFailed: localReadFailed ?? this.localReadFailed,
+      unreadCounts: unreadCounts ?? this.unreadCounts,
+    );
+  }
+
+  List<BookcaseItem>? getCurrentBooks() {
+    if (currentCaseId == null) return null;
+    return bookcaseContents[currentCaseId];
+  }
+
+  Iterable<BookcaseItem> get wenku8Books sync* {
+    final seen = <String>{};
+    for (final group in bookcases) {
+      for (final book in bookcaseContents[group.id] ?? const <BookcaseItem>[]) {
+        if (seen.add(book.aid)) yield book;
+      }
+    }
+  }
+
+  bool isBookInBookshelf(String aid) => getBookBid(aid) != null;
+
+  bool isBookSelected(String bid) => selectedBids.contains(bid);
+
+  String? getBookBid(String aid) {
+    final source = sourceOf(aid);
+    if (source != SourceId.wenku8) {
+      for (final entry in localBooks[source] ?? const <LocalShelfEntry>[]) {
+        if (entry.book.aid == aid) return entry.book.bid;
+      }
+      return null;
+    }
+    for (final books in bookcaseContents.values) {
+      for (final book in books) {
+        if (book.aid == aid && book.bid.isNotEmpty) return book.bid;
+      }
+    }
+    return null;
+  }
+}
+
+class BookshelfCubit extends Cubit<BookshelfState> {
+  BookshelfCubit({
+    Future<List<Bookcase>> Function()? loadCases,
+    Future<BookcaseDto> Function({required String caseId})? loadCase,
+    Object Function()? scope,
+    Iterable<SourceId> Function()? localSources,
+    Future<List<LocalShelfEntry>> Function(SourceId)? loadLocal,
+    Future<Map<String, int>> Function(Iterable<String>)? loadUnread,
+    Future<void> Function(SourceId, Set<String>)? deleteLocal,
+    Future<void> Function(Wenku8ShelfAction)? writeRemote,
+    BookshelfOrganization? organization,
+    this.requestTimeout = const Duration(seconds: 40),
+  }) : _loadCases = loadCases ?? (() => bookcaseList(source: SourceId.wenku8)),
+       _loadCase = loadCase ?? wenku8BookInCase,
+       _scope = scope ?? (() => readerSessionGeneration('1')),
+       _localSources = localSources ?? (() => localShelfSources),
+       _loadLocal = loadLocal ?? loadLocalShelf,
+       _loadUnread = loadUnread ?? loadShelfUnreadCounts,
+       _deleteLocal = deleteLocal ?? deleteLocalShelfBooks,
+       _writeRemote = writeRemote ?? _writeWenku8,
+       organization = organization ?? BookshelfOrganization(),
+       super(
+         BookshelfState(
+           tip: '',
+           status: BookshelfStatus.initial,
+           bookcases: const [],
+           bookcaseContents: const {},
+         ),
+       );
+
+  final Future<List<Bookcase>> Function() _loadCases;
+  final Future<BookcaseDto> Function({required String caseId}) _loadCase;
+  final Object Function() _scope;
+  final Iterable<SourceId> Function() _localSources;
+  final Future<List<LocalShelfEntry>> Function(SourceId) _loadLocal;
+  final Future<Map<String, int>> Function(Iterable<String>) _loadUnread;
+  final Future<void> Function(SourceId, Set<String>) _deleteLocal;
+  final Future<void> Function(Wenku8ShelfAction) _writeRemote;
+  final BookshelfOrganization organization;
+  Object get wenku8Scope => _scope();
+  final Duration requestTimeout;
+  Object? _loadedScope;
+  Future<void>? _refresh;
+  final _caseLoads = <String, Future<BookcaseDto>>{};
+  int _request = 0;
+  bool _wenku8Enabled = true;
+  Future<void>? _localRefresh;
+  int? _localRevision;
+  int _localRequest = 0;
+  Future<void>? _unreadRefresh;
+  bool _unreadDirty = false;
+
+  void setWenku8Enabled(bool enabled) {
+    if (isClosed ||
+        (_wenku8Enabled == enabled && state.wenku8Enabled == enabled)) {
+      return;
+    }
+    _wenku8Enabled = enabled;
+    invalidateWenku8();
+  }
+
+  void invalidateWenku8() {
+    if (isClosed) return;
+    _request++;
+    _refresh = null;
+    _caseLoads.clear();
+    _loadedScope = null;
+    emit(
+      BookshelfState(
+        tip: '',
+        status: BookshelfStatus.initial,
+        bookcases: const [],
+        bookcaseContents: const {},
+        wenku8Enabled: _wenku8Enabled,
+        localBooks: state.localBooks,
+        isLoadingLocalBooks: state.isLoadingLocalBooks,
+        localReadFailed: state.localReadFailed,
+        unreadCounts: {
+          for (final entry in state.unreadCounts.entries)
+            if (sourceOf(entry.key) != SourceId.wenku8) entry.key: entry.value,
+        },
+      ),
+    );
+  }
+
+  Future<void> loadLocalShelves({bool refresh = false}) {
+    if (isClosed) return Future.value();
+    final revision = sourceRevision.value;
+    final sources = _localSources().toSet();
+    if (_localRevision != revision) {
+      _localRequest++;
+      _localRefresh = null;
+      _localRevision = revision;
+      emit(
+        state.copyWith(
+          localBooks: {
+            for (final entry in state.localBooks.entries)
+              if (sources.contains(entry.key)) entry.key: entry.value,
+          },
+          errorMessage: state.errorMessage,
+          unreadCounts: const {},
+        ),
+      );
+    } else {
+      if (_localRefresh case final pending?) return pending;
+      if (!refresh) return Future.value();
+    }
+    final request = _localRequest;
+    late final Future<void> pending;
+    pending = _refreshLocalShelves(sources, revision, request).whenComplete(() {
+      if (identical(_localRefresh, pending)) _localRefresh = null;
+    });
+    _localRefresh = pending;
+    return pending;
+  }
+
+  Future<void> _refreshLocalShelves(
+    Set<SourceId> sources,
+    int revision,
+    int request,
+  ) async {
+    bool current() =>
+        !isClosed &&
+        revision == sourceRevision.value &&
+        request == _localRequest;
+
+    emit(
+      state.copyWith(
+        isLoadingLocalBooks: true,
+        errorMessage: state.errorMessage,
+      ),
+    );
+    final books = Map<SourceId, List<LocalShelfEntry>>.of(state.localBooks);
+    final clock = Stopwatch()..start();
+    var failed = false;
+    for (final source in sources) {
+      final remaining = requestTimeout - clock.elapsed;
+      if (!current()) return;
+      if (remaining <= Duration.zero) {
+        failed = true;
+        break;
+      }
+      try {
+        const perSource = Duration(seconds: 2);
+        books[source] = await _loadLocal(
+          source,
+        ).timeout(remaining < perSource ? remaining : perSource);
+      } catch (_) {
+        failed = true;
+      }
+    }
+    if (!current()) return;
+    emit(
+      state.copyWith(
+        localBooks: Map.unmodifiable(books),
+        isLoadingLocalBooks: false,
+        localReadFailed: failed,
+        errorMessage: state.errorMessage,
+      ),
+    );
+    unawaited(refreshUnreadCounts());
+  }
+
+  Future<void> refreshUnreadCounts() {
+    if (isClosed) return Future.value();
+    _unreadDirty = true;
+    return _unreadRefresh ??= _refreshUnreadCounts();
+  }
+
+  Future<void> _refreshUnreadCounts() async {
+    await Future<void>.value();
+    try {
+      while (_unreadDirty && !isClosed) {
+        _unreadDirty = false;
+        final request = _request,
+            localRequest = _localRequest,
+            scope = _scope();
+        final ids = {
+          for (final book in state.wenku8Books) book.aid,
+          for (final entries in state.localBooks.values)
+            for (final entry in entries) entry.book.aid,
+        };
+        Map<String, int> counts;
+        try {
+          counts = ids.isEmpty ? const {} : await _loadUnread(ids);
+        } catch (_) {
+          counts = const {};
+        }
+        if (!_current(request, scope) ||
+            localRequest != _localRequest ||
+            _unreadDirty) {
+          continue;
+        }
+        emit(
+          state.copyWith(
+            unreadCounts: Map.unmodifiable({
+              for (final entry in counts.entries)
+                if (ids.contains(entry.key) && entry.value > 0)
+                  entry.key: entry.value,
+            }),
+            errorMessage: state.errorMessage,
+          ),
+        );
+      }
+    } finally {
+      _unreadRefresh = null;
+    }
+  }
+
+  bool _current(int request, Object scope) =>
+      !isClosed && request == _request && scope == _scope();
+
+  Future<BookcaseDto> _case(String id) => _caseLoads.putIfAbsent(id, () {
+    late final Future<BookcaseDto> pending;
+    pending = Future<BookcaseDto>.sync(
+      () => _loadCase(caseId: id),
+    ).timeout(requestTimeout).whenComplete(() {
+      if (identical(_caseLoads[id], pending)) _caseLoads.remove(id);
+    });
+    return pending;
+  });
+
+  Future<void> loadBookcases() {
+    if (isClosed || !_wenku8Enabled) return Future.value();
+    final scope = _scope();
+    if (_loadedScope != scope) {
+      invalidateWenku8();
+      _loadedScope = scope;
+    }
+    if (_refresh case final pending?) return pending;
+    final request = _request;
+    late final Future<void> pending;
+    pending = _refreshCurrent(request, scope).whenComplete(() {
+      if (identical(_refresh, pending)) _refresh = null;
+    });
+    _refresh = pending;
+    return pending;
+  }
+
+  Future<void> _refreshCurrent(int request, Object scope) async {
+    var accepting = true;
+    final hasData = state.bookcaseContents.isNotEmpty;
+    emit(
+      state.copyWith(
+        status: hasData ? BookshelfStatus.success : BookshelfStatus.loading,
+        isRefreshing: true,
+      ),
+    );
+    try {
+      // One refresh owns one group. Other groups load when selected, not as
+      // unsolicited account requests behind a foreground book opening.
+      final snapshot = await (() async {
+        final groups = await _loadCases();
+        if (!accepting || !_current(request, scope) || groups.isEmpty) {
+          return (groups, null, null);
+        }
+        final id =
+            groups.any((b) => b.id == state.currentCaseId)
+                ? state.currentCaseId!
+                : groups.first.id;
+        return (groups, id, await _case(id));
+      })().timeout(requestTimeout);
+      if (!_current(request, scope)) return;
+      final (bookcases, id, content) = snapshot;
+      if (bookcases.isEmpty) {
+        emit(
+          state.copyWith(
+            tip: '',
+            status: BookshelfStatus.success,
+            bookcases: const [],
+            bookcaseContents: const {},
+            isRefreshing: false,
+            selectedBids: const {},
+            isSelecting: false,
+          ),
+        );
+        unawaited(refreshUnreadCounts());
+        return;
+      }
+      final current = state.currentCaseId;
+      final selected =
+          bookcases.any((group) => group.id == current) ? current! : id!;
+      final contents = <String, List<BookcaseItem>>{
+        for (final entry in state.bookcaseContents.entries)
+          if (bookcases.any((b) => b.id == entry.key)) entry.key: entry.value,
+        id!: content!.items,
+      };
+      emit(
+        state.copyWith(
+          tip: selected == id ? content.tip : state.tip,
+          status: BookshelfStatus.success,
+          bookcases: bookcases,
+          currentCaseId: selected,
+          bookcaseContents: contents,
+          isRefreshing: _caseLoads.containsKey(selected),
+          selectedBids: selected == current ? null : const {},
+          isSelecting: selected == current ? null : false,
+        ),
+      );
+      unawaited(refreshUnreadCounts());
+    } catch (e) {
+      accepting = false;
+      if (!_current(request, scope)) return;
+      _readFailed(e);
+    } finally {
+      accepting = false;
+    }
+  }
+
+  void _readFailed(Object error) => emit(
+    state.copyWith(
+      status:
+          state.bookcaseContents.isEmpty
+              ? BookshelfStatus.error
+              : BookshelfStatus.success,
+      isRefreshing: false,
+      errorMessage: wenku8ReadErrorMessage(error),
+    ),
+  );
+
+  Future<void> selectBookcase(String caseId) async {
+    if (isClosed || !state.bookcases.any((b) => b.id == caseId)) return;
+    final request = _request, scope = _scope();
+    if (_loadedScope != scope) {
+      await loadBookcases();
+      return;
+    }
+    emit(
+      state.copyWith(
+        currentCaseId: caseId,
+        isRefreshing: true,
+        selectedBids: const {},
+        isSelecting: false,
+      ),
+    );
+    try {
+      final content = await _case(caseId);
+      if (!_current(request, scope) ||
+          !state.bookcases.any((group) => group.id == caseId)) {
+        return;
+      }
+      final selected = state.currentCaseId == caseId;
+      emit(
+        state.copyWith(
+          bookcaseContents: {...state.bookcaseContents, caseId: content.items},
+          isRefreshing: selected ? false : state.isRefreshing,
+          tip: selected ? content.tip : state.tip,
+          errorMessage: selected ? null : state.errorMessage,
+        ),
+      );
+      unawaited(refreshUnreadCounts());
+    } catch (error) {
+      if (_current(request, scope) && state.currentCaseId == caseId) {
+        _readFailed(error);
+      }
+    }
+  }
+
+  void toggleSelectMode() {
+    emit(
+      state.copyWith(
+        isSelecting: !state.isSelecting,
+        selectedBids: const {},
+        errorMessage: state.errorMessage,
+      ),
+    );
+  }
+
+  void toggleBookSelection(String bid) {
+    final bids = {...state.selectedBids};
+    if (!bids.remove(bid)) bids.add(bid);
+    emit(state.copyWith(selectedBids: bids, errorMessage: state.errorMessage));
+  }
+
+  Future<void> moveSelectedBooks(
+    String destination, {
+    ConfirmWenku8ShelfAction? confirm,
+  }) async {
+    final from = state.currentCaseId;
+    final selected = state.selectedBids;
+    if (!state.isSelecting || from == null || selected.isEmpty) return;
+    final ids = {
+      for (final book in state.getCurrentBooks() ?? const <BookcaseItem>[])
+        if (selected.contains(book.bid)) book.aid,
+    };
+    if (ids.isEmpty) return;
+    final moved =
+        destination == '-1'
+            ? await removeShelfBooks(ids, confirm: confirm)
+            : await moveWenku8Books(
+              ids,
+              from: from,
+              to: destination,
+              confirm: confirm,
+            );
+    if (moved.isNotEmpty &&
+        !isClosed &&
+        identical(state.selectedBids, selected)) {
+      toggleSelectMode();
+    }
+  }
+
+  static Future<void> _writeWenku8(Wenku8ShelfAction action) => moveBookcase(
+    bidList: action.bids,
+    fromBookcaseId: action.from,
+    toBookcaseId: action.to,
+  );
+
+  Future<bool> _submitWenku8(
+    Wenku8ShelfAction action,
+    int request,
+    Object scope,
+    ConfirmWenku8ShelfAction? confirm,
+  ) async {
+    if (!_wenku8Enabled || _loadedScope != scope || !_current(request, scope)) {
+      return false;
+    }
+    try {
+      await _writeRemote(action);
+    } catch (error) {
+      if (!_current(request, scope)) return false;
+      if (confirm == null ||
+          !shouldUseWenku8WebViewFallback(error) ||
+          !await confirm(action)) {
+        if (_current(request, scope)) _readFailed(error);
+        return false;
+      }
+    }
+    return _current(request, scope);
+  }
+
+  Future<Set<String>> moveWenku8Books(
+    Set<String> ids, {
+    required String from,
+    required String to,
+    ConfirmWenku8ShelfAction? confirm,
+  }) async {
+    if (from == to || !state.bookcases.any((group) => group.id == to)) {
+      return const {};
+    }
+    final books =
+        (state.bookcaseContents[from] ?? const <BookcaseItem>[])
+            .where((book) => ids.contains(book.aid))
+            .toList();
+    if (books.isEmpty || books.length != ids.length) return const {};
+    final request = _request, scope = _scope();
+    if (!await _submitWenku8(
+      (from: from, to: to, bids: books.map((book) => book.bid).toList()),
+      request,
+      scope,
+      confirm,
+    )) {
+      return const {};
+    }
+    final contents = {
+      ...state.bookcaseContents,
+      from:
+          state.bookcaseContents[from]!
+              .where((book) => !ids.contains(book.aid))
+              .toList(),
+      if (state.bookcaseContents[to] case final destination?)
+        to: [...destination.where((book) => !ids.contains(book.aid)), ...books],
+    };
+    _acceptWenku8Write(contents);
+    return ids;
+  }
+
+  Future<Set<String>> removeShelfBooks(
+    Set<String> ids, {
+    ConfirmWenku8ShelfAction? confirm,
+  }) async {
+    final request = _request, scope = _scope();
+    final revision = sourceRevision.value;
+    final local = <SourceId, Set<String>>{};
+    final remote = <String>{};
+    for (final id in ids) {
+      if (!state.isBookInBookshelf(id)) continue;
+      final source = sourceOf(id);
+      if (source == SourceId.wenku8) {
+        remote.add(id);
+      } else {
+        (local[source] ??= {}).add(id);
+      }
+    }
+
+    final removed = <String>{};
+    for (final entry in local.entries) {
+      if (isClosed || sourceRevision.value != revision) break;
+      try {
+        await _deleteLocal(entry.key, entry.value);
+        removed.addAll(entry.value);
+      } catch (_) {
+        // Other sources can still complete. Failed items remain selected.
+      }
+    }
+    if (removed.isNotEmpty && !isClosed) {
+      _hideLocalBooks(removed);
+      unawaited(_reloadLocalBooks());
+    }
+
+    final remoteRemoved = <String>{};
+    final groups = {
+      if (state.currentCaseId case final current?) current,
+      for (final group in state.bookcases) group.id,
+    };
+    for (final id in groups) {
+      if (remote.isEmpty || !_current(request, scope)) break;
+      final books =
+          (state.bookcaseContents[id] ?? const <BookcaseItem>[])
+              .where((book) => remote.contains(book.aid))
+              .toList();
+      if (books.isEmpty) continue;
+      final bookIds = books.map((book) => book.aid);
+      remote.removeAll(bookIds);
+      if (await _submitWenku8(
+        (from: id, to: '-1', bids: books.map((book) => book.bid).toList()),
+        request,
+        scope,
+        confirm,
+      )) {
+        remoteRemoved.addAll(bookIds);
+      }
+    }
+    if (remoteRemoved.isNotEmpty && _current(request, scope)) {
+      _acceptWenku8Write({
+        for (final entry in state.bookcaseContents.entries)
+          entry.key:
+              entry.value
+                  .where((book) => !remoteRemoved.contains(book.aid))
+                  .toList(),
+      });
+    }
+    return removed..addAll(remoteRemoved);
+  }
+
+  void _acceptWenku8Write(Map<String, List<BookcaseItem>> contents) {
+    _request++;
+    _refresh = null;
+    _caseLoads.clear();
+    emit(state.copyWith(bookcaseContents: contents));
+    unawaited(refreshUnreadCounts());
+    unawaited(loadBookcases());
+  }
+
+  void _hideLocalBooks(Set<String> removed) {
+    emit(
+      state.copyWith(
+        localBooks: {
+          for (final entry in state.localBooks.entries)
+            entry.key:
+                entry.value
+                    .where((item) => !removed.contains(item.book.aid))
+                    .toList(),
+        },
+        errorMessage: state.errorMessage,
+      ),
+    );
+  }
+
+  Future<void> addToBookshelf(String aid) async {
+    if (sourceOf(aid) != SourceId.wenku8) {
+      await addBookshelf(aid: aid);
+      await _reloadLocalBooks();
+      return;
+    }
+    if (!_wenku8Enabled) throw StateError('请先登录文库8');
+    final request = _request, scope = _scope();
+    try {
+      await addBookshelf(aid: aid);
+    } catch (e) {
+      if (!_current(request, scope)) return;
+      if (shouldUseWenku8WebViewFallback(e)) {
+        rethrow; // 讓 novel_info_page 用 WebView 重試
+      }
+      _readFailed(e);
+      return;
+    }
+    if (!_current(request, scope)) return;
+    _request++;
+    _refresh = null;
+    _caseLoads.clear();
+
+    // 寫入成功 → 觸發完整書架刷新（loadBookcases 有 CF 備援）
+    await loadBookcases();
+  }
+
+  Future<void> removeFromBookshelf(String aid) async {
+    final bid = state.getBookBid(aid);
+    if (bid == null) return;
+    final source = sourceOf(aid);
+    if (source != SourceId.wenku8) {
+      await _deleteLocal(source, {aid});
+      if (isClosed) return;
+      _hideLocalBooks({aid});
+      unawaited(_forgetOrganization(aid));
+      await _reloadLocalBooks();
+      return;
+    }
+    if (!_wenku8Enabled) return;
+    final request = _request, scope = _scope();
+
+    try {
+      await deleteBookcase(bid: bid);
+    } catch (e) {
+      if (!_current(request, scope)) return;
+      if (shouldUseWenku8WebViewFallback(e)) {
+        rethrow; // 讓 novel_info_page 用 WebView 重試
+      }
+      _readFailed(e);
+      return;
+    }
+    if (!_current(request, scope)) return;
+    _acceptWenku8Write({
+      for (final entry in state.bookcaseContents.entries)
+        entry.key: entry.value.where((book) => book.aid != aid).toList(),
+    });
+    unawaited(_forgetOrganization(aid));
+  }
+
+  Future<void> _forgetOrganization(String aid) async {
+    try {
+      await organization.removeItems(books: {aid});
+    } catch (_) {
+      // The source has already removed the favorite.
+    }
+  }
+
+  Future<void> _reloadLocalBooks() {
+    _localRequest++;
+    _localRefresh = null;
+    return loadLocalShelves(refresh: true);
+  }
+
+  @override
+  Future<void> close() {
+    organization.dispose();
+    return super.close();
+  }
+}

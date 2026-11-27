@@ -1,0 +1,876 @@
+import 'package:wild/widgets/platform_controls.dart';
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:wild/pages/auth_cubit.dart';
+import 'package:wild/sources/book_source.dart';
+import 'package:wild/pages/shelf_catalog_page.dart';
+import 'package:wild/settings/source_settings_page.dart';
+import 'package:wild/pages/novel/theme_cubit.dart';
+import 'package:wild/theme/material_you.dart';
+import 'package:wild/theme/horizontal_page_transitions.dart';
+import 'package:wild/theme/ios_dock_insets.dart';
+import 'package:wild/utils/wenku8_network_error.dart';
+import 'package:wild/widgets/book_grid_delegate.dart';
+import 'package:wild/widgets/ios_top_bar_backdrop.dart';
+import 'package:wild/widgets/novel_cover_card.dart';
+import 'package:wild/widgets/theme_reveal_host.dart';
+import 'package:wild/widgets/discovery_tab.dart';
+import 'package:wild/widgets/source_website.dart';
+import 'package:wild/widgets/wenku8_recovery_button.dart';
+
+import '../../src/rust/api/database.dart';
+import 'package:wild/sources/source_api.dart';
+import 'category_page.dart';
+import 'recommend_page.dart';
+import '../search_page.dart';
+
+class IndexPage extends StatefulWidget {
+  const IndexPage({super.key});
+
+  @override
+  State<IndexPage> createState() => _IndexPageState();
+}
+
+class _IndexPageState extends State<IndexPage>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+  final _themeButtonKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 4, vsync: this);
+  }
+
+  void _openSources() => Navigator.push(
+    context,
+    HorizontalCoverPageRoute(builder: (_) => const SourceSettingsPage()),
+  );
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _switchTheme() async {
+    final theme = context.read<ThemeCubit>();
+    if (usesAppleGlass) {
+      // During AnimatedTheme interpolation, brightness still represents the
+      // presentation state. Toggle the latest intent so a second tap reverses.
+      final mode = theme.state.themeMode;
+      final dark =
+          mode == ReaderThemeMode.dark ||
+          (mode == ReaderThemeMode.auto &&
+              MediaQuery.platformBrightnessOf(context) == Brightness.dark);
+      void changeTheme() => unawaited(
+        theme.setThemeMode(dark ? ReaderThemeMode.light : ReaderThemeMode.dark),
+      );
+      final reveal = ThemeRevealHost.maybeOf(context);
+      if (reveal != null) {
+        await reveal.revealFrom(
+          triggerContext: context,
+          changeTheme: changeTheme,
+        );
+      } else {
+        changeTheme();
+      }
+      return;
+    }
+    final target =
+        Theme.of(context).brightness == Brightness.dark
+            ? ReaderThemeMode.light
+            : ReaderThemeMode.dark;
+    final reveal = ThemeRevealHost.maybeOf(context);
+    if (reveal == null) {
+      await theme.setThemeMode(target);
+      return;
+    }
+    await reveal.revealFrom(
+      triggerContext: _themeButtonKey.currentContext ?? context,
+      changeTheme: () {
+        unawaited(theme.setThemeMode(target));
+      },
+    );
+  }
+
+  Widget _buildDiscoveryTabs(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final tabs = TabBar(
+      controller: _tabController,
+      indicator:
+          usesMaterialYou
+              ? BoxDecoration(
+                color: colors.primary,
+                borderRadius: BorderRadius.circular(24),
+              )
+              : null,
+      indicatorSize: usesMaterialYou ? TabBarIndicatorSize.tab : null,
+      indicatorPadding:
+          usesMaterialYou ? const EdgeInsets.all(4) : EdgeInsets.zero,
+      labelColor: usesMaterialYou ? colors.onPrimary : null,
+      unselectedLabelColor: usesMaterialYou ? colors.onSurfaceVariant : null,
+      labelStyle:
+          usesMaterialYou
+              ? Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700)
+              : null,
+      dividerColor: usesMaterialYou ? Colors.transparent : null,
+      tabs: [
+        const Tab(text: '推荐'),
+        const Tab(text: '分类'),
+        Tab(text: activeSource.value == SourceId.huanmeng ? '完结' : '排行'),
+        Tab(text: activeSource.value == SourceId.wenku8 ? '完结' : '全部'),
+      ],
+    );
+    if (!usesMaterialYou) return tabs;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+      child: Material(
+        color: materialRaisedSurface(colors),
+        shape: const StadiumBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: tabs,
+      ),
+    );
+  }
+
+  Widget _insetForTopBar(Widget child) => Builder(
+    builder:
+        (context) => Padding(
+          padding: EdgeInsets.only(
+            top: usesAppleGlass ? MediaQuery.paddingOf(context).top : 0,
+          ),
+          child: child,
+        ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final signedIn = context.select<AuthCubit, bool>(
+      (auth) => auth.state.status == AuthStatus.authenticated,
+    );
+    return ListenableBuilder(
+      listenable: _tabController,
+      builder:
+          (context, _) => IosTopBarScaffold(
+            appBar:
+                usesAppleGlass
+                    ? PreferredSize(
+                      preferredSize: const Size.fromHeight(108),
+                      child: SafeArea(
+                        bottom: false,
+                        child: Column(
+                          children: [
+                            AppleGlassToolbar(
+                              source: activeSource.value.label,
+                              onSource: _openSources,
+                              onTheme: _switchTheme,
+                              onSearch:
+                                  () => Navigator.pushNamed(context, '/search'),
+                            ),
+                            AppleGlassSegments(
+                              index: _tabController.index,
+                              thirdLabel:
+                                  activeSource.value == SourceId.huanmeng
+                                      ? '完结'
+                                      : '排行',
+                              lastLabel:
+                                  activeSource.value == SourceId.wenku8
+                                      ? '完结'
+                                      : '全部',
+                              onSelect: _tabController.animateTo,
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                        ),
+                      ),
+                    )
+                    : AppBar(
+                      leadingWidth:
+                          MediaQuery.sizeOf(context).width.clamp(0, 400) * .42,
+                      leading: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 0, 4),
+                        child: Tooltip(
+                          message: '切换书源：${activeSource.value.label}',
+                          child: AppButton.tonalIcon(
+                            key: const ValueKey('discovery-source-switch'),
+                            onPressed: _openSources,
+                            style:
+                                usesMaterialYou
+                                    ? FilledButton.styleFrom(
+                                      backgroundColor:
+                                          Theme.of(
+                                            context,
+                                          ).colorScheme.primaryContainer,
+                                      foregroundColor:
+                                          Theme.of(
+                                            context,
+                                          ).colorScheme.onPrimaryContainer,
+                                    )
+                                    : null,
+                            icon: const Icon(
+                              Icons.local_library_outlined,
+                              size: 20,
+                            ),
+                            label: Text(
+                              activeSource.value.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ),
+                      title: Text(usesMaterialYou ? '发现' : '轻小说文库'),
+                      actions: [
+                        if (usesMaterialYou)
+                          IconButton(
+                            key: _themeButtonKey,
+                            style: IconButton.styleFrom(
+                              backgroundColor:
+                                  Theme.of(
+                                    context,
+                                  ).colorScheme.surfaceContainer,
+                              foregroundColor:
+                                  Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                            ),
+                            icon: Icon(
+                              Theme.of(context).brightness == Brightness.dark
+                                  ? Icons.light_mode_rounded
+                                  : Icons.dark_mode_rounded,
+                            ),
+                            tooltip:
+                                Theme.of(context).brightness == Brightness.dark
+                                    ? '切换浅色模式'
+                                    : '切换深色模式',
+                            onPressed: _switchTheme,
+                          )
+                        else
+                          AppIconButton(
+                            icon: const Icon(Icons.search_rounded),
+                            tooltip: '搜索',
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                HorizontalCoverPageRoute(
+                                  builder: (context) => const SearchPage(),
+                                ),
+                              );
+                            },
+                          ),
+                      ],
+                      bottom: PreferredSize(
+                        preferredSize: Size.fromHeight(
+                          usesMaterialYou ? 132 : 48,
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (usesMaterialYou)
+                              Builder(
+                                builder: (context) {
+                                  final theme = Theme.of(context);
+                                  final colors = theme.colorScheme;
+                                  final dark =
+                                      theme.brightness == Brightness.dark;
+                                  return Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      20,
+                                      4,
+                                      20,
+                                      12,
+                                    ),
+                                    child: Semantics(
+                                      button: true,
+                                      label:
+                                          activeSource.value == SourceId.bili
+                                              ? '搜索书名'
+                                              : activeSource.value ==
+                                                  SourceId.lnovel
+                                              ? '按目录查找繁体书名'
+                                              : '搜索书名、作者',
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(32),
+                                        onTap:
+                                            () => Navigator.pushNamed(
+                                              context,
+                                              '/search',
+                                            ),
+                                        child: IgnorePointer(
+                                          child: SearchBar(
+                                            hintText:
+                                                activeSource.value ==
+                                                        SourceId.bili
+                                                    ? '搜索书名'
+                                                    : sourceUsesCatalogSearch(
+                                                      activeSource.value,
+                                                    )
+                                                    ? '按目录查找书名'
+                                                    : '搜索书名、作者',
+                                            leading: Icon(
+                                              Icons.search_rounded,
+                                              color: colors.primary,
+                                            ),
+                                            backgroundColor: WidgetStatePropertyAll(
+                                              dark
+                                                  ? colors
+                                                      .surfaceContainerHighest
+                                                  : colors
+                                                      .surfaceContainerLowest,
+                                            ),
+                                            side: WidgetStatePropertyAll(
+                                              BorderSide(
+                                                color: colors.outlineVariant
+                                                    .withValues(
+                                                      alpha: dark ? .36 : .65,
+                                                    ),
+                                              ),
+                                            ),
+                                            textStyle: WidgetStatePropertyAll(
+                                              TextStyle(
+                                                color: colors.onSurface,
+                                              ),
+                                            ),
+                                            hintStyle: WidgetStatePropertyAll(
+                                              TextStyle(
+                                                color: colors.onSurfaceVariant,
+                                              ),
+                                            ),
+                                            elevation:
+                                                const WidgetStatePropertyAll(0),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            _buildDiscoveryTabs(context),
+                          ],
+                        ),
+                      ),
+                    ),
+            body:
+                activeSource.value == SourceId.wenku8 && !signedIn
+                    ? _insetForTopBar(
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.auto_stories_outlined, size: 48),
+                              const SizedBox(height: 16),
+                              const Text('欢迎使用 LiteTale'),
+                              const SizedBox(height: 8),
+                              const Text(
+                                '选择书源后即可开始；需要账号的书源可在同一页面登录。',
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 16),
+                              AppButton.tonal(
+                                onPressed:
+                                    () => Navigator.push(
+                                      context,
+                                      HorizontalCoverPageRoute(
+                                        builder:
+                                            (_) => const SourceSettingsPage(),
+                                      ),
+                                    ),
+                                child: const Text('选择书源'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    )
+                    : AnimatedBuilder(
+                      animation: Listenable.merge([
+                        activeSource,
+                        sourceRevision,
+                      ]),
+                      builder:
+                          (context, _) => TabBarView(
+                            key: ValueKey((
+                              activeSource.value,
+                              sourceRevision.value,
+                            )),
+                            controller: _tabController,
+                            children:
+                                activeSource.value == SourceId.wenku8
+                                    ? [
+                                      const DiscoveryTab(
+                                        child: RecommendPage(),
+                                      ),
+                                      DiscoveryTab(
+                                        child: _insetForTopBar(
+                                          const CategoryPage(),
+                                        ),
+                                      ),
+                                      DiscoveryTab(
+                                        child: _insetForTopBar(
+                                          const ToplistPage(),
+                                        ),
+                                      ),
+                                      DiscoveryTab(
+                                        child: _insetForTopBar(
+                                          const ArticlelistPage(),
+                                        ),
+                                      ),
+                                    ]
+                                    : [
+                                      const DiscoveryTab(
+                                        child: RecommendPage(),
+                                      ),
+                                      DiscoveryTab(
+                                        child: _insetForTopBar(
+                                          const ShelfCatalogPage(
+                                            mode: 'category',
+                                          ),
+                                        ),
+                                      ),
+                                      DiscoveryTab(
+                                        child: _insetForTopBar(
+                                          const ShelfCatalogPage(mode: 'rank'),
+                                        ),
+                                      ),
+                                      DiscoveryTab(
+                                        child: _insetForTopBar(
+                                          const ShelfCatalogPage(mode: 'all'),
+                                        ),
+                                      ),
+                                    ],
+                          ),
+                    ),
+          ),
+    );
+  }
+}
+
+class ToplistPage extends StatefulWidget {
+  const ToplistPage({super.key});
+
+  @override
+  State<ToplistPage> createState() => _ToplistPageState();
+}
+
+class _ToplistPageState extends State<ToplistPage> {
+  static const _sortOptions = [
+    ('更新', 'lastupdate'),
+    ('发布', 'postdate'),
+    ('总访问', 'allvisit'),
+    ('总推荐', 'allvote'),
+    ('总收藏', 'goodnum'),
+    ('日访问', 'dayvisit'),
+    ('日推荐', 'dayvote'),
+    ('月访问', 'monthvisit'),
+    ('月推荐', 'monthvote'),
+    ('周访问', 'weekvisit'),
+    ('周推荐', 'weekvote'),
+    ('字数', 'size'),
+    ('动画', 'anime'),
+  ];
+
+  String _selectedSort = 'lastupdate';
+  PageStatsNovelCover? _currentPage;
+  bool _isLoading = false;
+  Object? _error;
+  static const _keySort = 'toplist_page_sort';
+  int _request = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedState();
+  }
+
+  Future<void> _loadSavedState() async {
+    final revision = sourceRevision.value;
+    final request = _request;
+    try {
+      final savedSort = await loadProperty(
+        key: _keySort,
+      ).timeout(const Duration(seconds: 2));
+      if (!mounted || revision != sourceRevision.value || request != _request) {
+        return;
+      }
+      if (_sortOptions.any((option) => option.$2 == savedSort)) {
+        _selectedSort = savedSort;
+      }
+    } catch (_) {
+      // A missing preference must not prevent the first list from loading.
+    }
+    if (mounted &&
+        revision == sourceRevision.value &&
+        request == _request &&
+        activeSource.value == SourceId.wenku8) {
+      await _loadToplist(refresh: true);
+    }
+  }
+
+  Future<void> _saveState() async {
+    try {
+      await saveProperty(key: _keySort, value: _selectedSort);
+    } catch (e) {
+      // 如果保存失败，继续使用当前状态
+    }
+  }
+
+  Future<void> _loadToplist({bool refresh = false}) async {
+    if (_isLoading && !refresh) return;
+    final request = ++_request;
+    final sort = _selectedSort;
+    final revision = sourceRevision.value;
+    bool current() =>
+        mounted &&
+        request == _request &&
+        sourceRevision.value == revision &&
+        activeSource.value == SourceId.wenku8;
+    setState(() {
+      _isLoading = true;
+      _error = null;
+      if (refresh) {
+        _currentPage = null;
+      }
+    });
+
+    try {
+      final page = await toplist(
+        sort: sort,
+        page: refresh ? 1 : (_currentPage?.currentPage ?? 0) + 1,
+      );
+      if (!current()) return;
+      setState(() {
+        if (refresh) {
+          _currentPage = page;
+        } else {
+          _currentPage = PageStatsNovelCover(
+            currentPage: page.currentPage,
+            maxPage: page.maxPage,
+            records: [..._currentPage!.records, ...page.records],
+          );
+        }
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!current()) return;
+      setState(() {
+        _isLoading = false;
+        _error = e;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _request++;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // Sort selector
+        if (usesAppleGlass)
+          AppleGlassFilterBar(
+            labels: _sortOptions.map((option) => option.$1).toList(),
+            index: _sortOptions.indexWhere(
+              (option) => option.$2 == _selectedSort,
+            ),
+            onSelect: (index) {
+              final value = _sortOptions[index].$2;
+              if (_selectedSort == value) return;
+              setState(() {
+                _selectedSort = value;
+                _error = null;
+              });
+              _loadToplist(refresh: true);
+              _saveState();
+            },
+          )
+        else
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children:
+                    _sortOptions.map((option) {
+                      final (label, value) = option;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          label: Text(label),
+                          selected: _selectedSort == value,
+                          onSelected: (selected) {
+                            if (selected) {
+                              setState(() {
+                                _selectedSort = value;
+                                _error = null;
+                              });
+                              _loadToplist(refresh: true);
+                              _saveState();
+                            }
+                          },
+                        ),
+                      );
+                    }).toList(),
+              ),
+            ),
+          ),
+        // Novel grid or error state
+        Expanded(
+          child:
+              _error != null && _currentPage == null
+                  ? _Wenku8CatalogError(
+                    error: _error!,
+                    onRetry: () => _loadToplist(refresh: true),
+                  )
+                  : _currentPage == null
+                  ? SourceLoadingIndicator(
+                    source: SourceId.wenku8,
+                    requestKey: _request,
+                  )
+                  : _currentPage!.records.isEmpty
+                  ? const Center(child: Text('暂无排行书目'))
+                  : NotificationListener<ScrollNotification>(
+                    onNotification: (notification) {
+                      if (notification is ScrollEndNotification &&
+                          notification.metrics.pixels >=
+                              notification.metrics.maxScrollExtent - 200 &&
+                          !_isLoading &&
+                          _error == null &&
+                          _currentPage!.currentPage < _currentPage!.maxPage) {
+                        _loadToplist();
+                      }
+                      return true;
+                    },
+                    child: GridView.builder(
+                      padding: IosDockInsets.scrollPadding(
+                        context,
+                        const EdgeInsets.all(8),
+                      ),
+                      gridDelegate: const BookGridDelegate(
+                        childAspectRatio: 207 / 307,
+                        crossAxisSpacing: 8,
+                        mainAxisSpacing: 8,
+                      ),
+                      itemCount:
+                          _currentPage!.records.length +
+                          (_currentPage!.currentPage < _currentPage!.maxPage
+                              ? 1
+                              : 0),
+                      itemBuilder: (context, index) {
+                        if (index >= _currentPage!.records.length) {
+                          if (_error case final error?) {
+                            return _Wenku8CatalogError(
+                              error: error,
+                              onRetry: _loadToplist,
+                              inline: true,
+                            );
+                          }
+                          if (_isLoading) {
+                            return SourceLoadingIndicator(
+                              source: SourceId.wenku8,
+                              requestKey: _request,
+                              size: 24,
+                            );
+                          }
+                          return const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(16.0),
+                              child: CircularProgressIndicator(),
+                            ),
+                          );
+                        }
+                        final novel = _currentPage!.records[index];
+                        return NovelCoverCard(novel: novel);
+                      },
+                    ),
+                  ),
+        ),
+      ],
+    );
+  }
+}
+
+class ArticlelistPage extends StatefulWidget {
+  const ArticlelistPage({super.key});
+
+  @override
+  State<ArticlelistPage> createState() => _ArticlelistPageState();
+}
+
+class _ArticlelistPageState extends State<ArticlelistPage> {
+  PageStatsNovelCover? _currentPage;
+  bool _isLoading = false;
+  Object? _error;
+  int _request = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadArticlelist(refresh: true);
+  }
+
+  Future<void> _loadArticlelist({bool refresh = false}) async {
+    if (_isLoading && !refresh) return;
+    final request = ++_request;
+    final revision = sourceRevision.value;
+    bool current() =>
+        mounted &&
+        request == _request &&
+        sourceRevision.value == revision &&
+        activeSource.value == SourceId.wenku8;
+    setState(() {
+      _isLoading = true;
+      _error = null;
+      if (refresh) {
+        _currentPage = null;
+      }
+    });
+
+    try {
+      final page = await articlelist(
+        fullflag: 1,
+        page: refresh ? 1 : (_currentPage?.currentPage ?? 0) + 1,
+      );
+      if (!current()) return;
+      setState(() {
+        if (refresh) {
+          _currentPage = page;
+        } else {
+          _currentPage = PageStatsNovelCover(
+            currentPage: page.currentPage,
+            maxPage: page.maxPage,
+            records: [..._currentPage!.records, ...page.records],
+          );
+        }
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!current()) return;
+      setState(() {
+        _isLoading = false;
+        _error = e;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _request++;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _error != null && _currentPage == null
+        ? _Wenku8CatalogError(
+          error: _error!,
+          onRetry: () => _loadArticlelist(refresh: true),
+        )
+        : _currentPage == null
+        ? SourceLoadingIndicator(source: SourceId.wenku8, requestKey: _request)
+        : _currentPage!.records.isEmpty
+        ? const Center(child: Text('暂无完结书目'))
+        : NotificationListener<ScrollNotification>(
+          onNotification: (notification) {
+            if (notification is ScrollEndNotification &&
+                notification.metrics.pixels >=
+                    notification.metrics.maxScrollExtent - 200 &&
+                !_isLoading &&
+                _error == null &&
+                _currentPage!.currentPage < _currentPage!.maxPage) {
+              _loadArticlelist();
+            }
+            return true;
+          },
+          child: GridView.builder(
+            padding: IosDockInsets.scrollPadding(
+              context,
+              const EdgeInsets.all(8),
+            ),
+            gridDelegate: const BookGridDelegate(
+              childAspectRatio: 207 / 307,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
+            itemCount:
+                _currentPage!.records.length +
+                (_currentPage!.currentPage < _currentPage!.maxPage ? 1 : 0),
+            itemBuilder: (context, index) {
+              if (index >= _currentPage!.records.length) {
+                if (_error case final error?) {
+                  return _Wenku8CatalogError(
+                    error: error,
+                    onRetry: _loadArticlelist,
+                    inline: true,
+                  );
+                }
+                if (_isLoading) {
+                  return SourceLoadingIndicator(
+                    source: SourceId.wenku8,
+                    requestKey: _request,
+                    size: 24,
+                  );
+                }
+                return const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: CircularProgressIndicator(),
+                  ),
+                );
+              }
+              final novel = _currentPage!.records[index];
+              return NovelCoverCard(novel: novel);
+            },
+          ),
+        );
+  }
+}
+
+class _Wenku8CatalogError extends StatelessWidget {
+  const _Wenku8CatalogError({
+    required this.error,
+    required this.onRetry,
+    this.inline = false,
+  });
+
+  final Object error;
+  final Future<void> Function() onRetry;
+  final bool inline;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding:
+          inline
+              ? const EdgeInsets.all(4)
+              : IosDockInsets.scrollPadding(context, const EdgeInsets.all(16)),
+      children: [
+        Text(wenku8ReadErrorMessage(error), textAlign: TextAlign.center),
+        const SizedBox(height: 8),
+        AppButton.text(onPressed: onRetry, child: const Text('重试')),
+        Wenku8RecoveryButton(
+          error: error,
+          source: SourceId.wenku8,
+          siteVerificationOnly: true,
+          onRecovered: onRetry,
+        ),
+        const SourceWebsiteLink(source: SourceId.wenku8, showAddress: false),
+      ],
+    );
+    return inline
+        ? content
+        : RefreshIndicator(onRefresh: onRetry, child: content);
+  }
+}
