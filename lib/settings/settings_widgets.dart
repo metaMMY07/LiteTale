@@ -17,9 +17,6 @@ AppBar settingsAppBar(
   return AppBar(
     toolbarHeight: 48,
     leadingWidth: 60,
-    backgroundColor: Colors.transparent,
-    surfaceTintColor: Colors.transparent,
-    scrolledUnderElevation: 0,
     leading:
         ModalRoute.of(context)?.impliesAppBarDismissal == true
             ? Padding(
@@ -405,7 +402,9 @@ class _SettingsGroupState extends State<SettingsGroup> {
                                   ?.copyWith(fontWeight: FontWeight.w600),
                             ),
                           ),
-                          Icon(expanded ? Icons.expand_less : Icons.expand_more),
+                          Icon(
+                            expanded ? Icons.expand_less : Icons.expand_more,
+                          ),
                         ],
                       ),
                     ),
@@ -469,36 +468,38 @@ class SettingsEntry extends StatelessWidget {
         enabled: onTap != null,
         borderRadius: BorderRadius.zero,
         child: ListTile(
-        leading: Icon(
-          icon,
-          color: usesAppleGlass ? colors.onSurface : colors.onSurfaceVariant,
-          size: 22,
+          leading: Icon(
+            icon,
+            color: usesAppleGlass ? colors.onSurface : colors.onSurfaceVariant,
+            size: 22,
+          ),
+          title: Text(title, style: Theme.of(context).textTheme.bodyLarge),
+          subtitle:
+              description == null && option == null
+                  ? null
+                  : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (description != null)
+                        Text(
+                          description!,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      if (option != null)
+                        Text(
+                          option!,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: colors.primary),
+                        ),
+                    ],
+                  ),
+          trailing: trailing,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 2,
+          ),
+          onTap: onTap,
         ),
-        title: Text(title, style: Theme.of(context).textTheme.bodyLarge),
-        subtitle:
-            description == null && option == null
-                ? null
-                : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (description != null)
-                      Text(
-                        description!,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    if (option != null)
-                      Text(
-                        option!,
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodySmall?.copyWith(color: colors.primary),
-                      ),
-                  ],
-                ),
-        trailing: trailing,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
-        onTap: onTap,
-      ),
       ),
     );
   }

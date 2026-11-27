@@ -25,6 +25,7 @@ import 'package:wild/widgets/bookshelf_tile.dart';
 import 'package:wild/widgets/cf_action_loader.dart';
 import 'package:wild/widgets/ios_solid_surface.dart';
 import 'package:wild/widgets/ios_top_bar_backdrop.dart';
+import 'package:wild/theme/ios_glass_theme.dart' show iosHomeTitleStyle;
 import 'package:wild/widgets/novel_card.dart';
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/source_website.dart';
@@ -261,18 +262,14 @@ class _OrganizedBookshelfPageState extends State<_OrganizedBookshelfPage> {
 
     return IosTopBarScaffold(
       appBar: AppBar(
-        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        title: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: apple ? iosHomeTitleStyle : null,
+        ),
         centerTitle: apple && !editing,
         automaticallyImplyLeading: folderId != null,
-        backgroundColor: apple ? Colors.transparent : null,
-        surfaceTintColor: apple ? Colors.transparent : null,
-        scrolledUnderElevation: apple ? 0 : null,
-        titleTextStyle:
-            apple
-                ? Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)
-                : null,
         leading:
             apple && folderId != null
                 ? Padding(
@@ -349,158 +346,146 @@ class _OrganizedBookshelfPageState extends State<_OrganizedBookshelfPage> {
           ),
         ),
       ),
-      body: Builder(
-        builder: (bodyContext) {
-          final topBarInset =
-              apple ? MediaQuery.paddingOf(bodyContext).top : 0.0;
-          return RefreshIndicator(
-            edgeOffset: topBarInset,
-            onRefresh:
-                () => _refresh(showWenku8: showWenku8, wenku8Only: wenku8Only),
-            child: CustomScrollView(
-              key: PageStorageKey('bookshelf/$routeScope'),
-              physics: const AlwaysScrollableScrollPhysics(),
-              slivers: [
-                if (topBarInset > 0)
-                  SliverToBoxAdapter(child: SizedBox(height: topBarInset)),
-                if (_organization.loadFailed)
-                  SliverToBoxAdapter(
-                    child: _notice('书架文件夹暂时无法读取', _organization.load),
+      body: RefreshIndicator(
+        onRefresh:
+            () => _refresh(showWenku8: showWenku8, wenku8Only: wenku8Only),
+        child: CustomScrollView(
+          key: PageStorageKey('bookshelf/$routeScope'),
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            if (_organization.loadFailed)
+              SliverToBoxAdapter(
+                child: _notice('书架文件夹暂时无法读取', _organization.load),
+              ),
+            if (showWenku8 && state.errorMessage != null)
+              SliverToBoxAdapter(
+                child: _notice(
+                  '文库8 · ${state.errorMessage!}',
+                  refreshing ? null : _cubit.loadBookcases,
+                  source: wenku8Only ? SourceId.wenku8 : null,
+                ),
+              ),
+            if (!wenku8Only && state.localReadFailed)
+              SliverToBoxAdapter(
+                child: _notice(
+                  '部分本机收藏暂时无法读取',
+                  state.isLoadingLocalBooks
+                      ? null
+                      : () => _cubit.loadLocalShelves(refresh: true),
+                ),
+              ),
+            if (showWenku8 &&
+                folderId == null &&
+                state.status == BookshelfStatus.initial)
+              SliverToBoxAdapter(
+                child: Center(
+                  child: AppButton.text(
+                    onPressed: _cubit.loadBookcases,
+                    child: const Text('加载文库8书架'),
                   ),
-                if (showWenku8 && state.errorMessage != null)
-                  SliverToBoxAdapter(
-                    child: _notice(
-                      '文库8 · ${state.errorMessage!}',
-                      refreshing ? null : _cubit.loadBookcases,
-                      source: wenku8Only ? SourceId.wenku8 : null,
-                    ),
+                ),
+              ),
+            if (ids.isEmpty)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Center(
+                    child:
+                        refreshing || (!wenku8Only && state.isLoadingLocalBooks)
+                            ? const CircularProgressIndicator()
+                            : Text(folderId == null ? '书架为空' : '文件夹为空'),
                   ),
-                if (!wenku8Only && state.localReadFailed)
-                  SliverToBoxAdapter(
-                    child: _notice(
-                      '部分本机收藏暂时无法读取',
-                      state.isLoadingLocalBooks
+                ),
+              ),
+            if (ids.isNotEmpty)
+              SliverPadding(
+                padding: padding,
+                sliver: BookshelfGrid(
+                  key: ValueKey(scope),
+                  ids: ids,
+                  showSource: source == null,
+                  gridDelegate:
+                      apple
                           ? null
-                          : () => _cubit.loadLocalShelves(refresh: true),
-                    ),
-                  ),
-                if (showWenku8 &&
-                    folderId == null &&
-                    state.status == BookshelfStatus.initial)
-                  SliverToBoxAdapter(
-                    child: Center(
-                      child: AppButton.text(
-                        onPressed: _cubit.loadBookcases,
-                        child: const Text('加载文库8书架'),
+                          : const BookGridDelegate(childAspectRatio: 0.7),
+                  reordering: mode == _ShelfMode.reorder && !_busy,
+                  onReorder:
+                      (order) => _save(
+                        () => _organization.reorder(
+                          order,
+                          folderId: folderId,
+                          allRootKeys: _organization.rootKeys(allBooks.keys),
+                        ),
                       ),
-                    ),
-                  ),
-                if (ids.isEmpty)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Center(
-                        child:
-                            refreshing ||
-                                    (!wenku8Only && state.isLoadingLocalBooks)
-                                ? const CircularProgressIndicator()
-                                : Text(folderId == null ? '书架为空' : '文件夹为空'),
-                      ),
-                    ),
-                  ),
-                if (ids.isNotEmpty)
-                  SliverPadding(
-                    padding: padding,
-                    sliver: BookshelfGrid(
-                      key: ValueKey(scope),
-                      ids: ids,
-                      showSource: source == null,
-                      gridDelegate:
-                          apple
+                  tile: (context, id) {
+                    final selecting = mode == _ShelfMode.select;
+                    final book = books[id];
+                    if (book != null) {
+                      final cover = _shelfCover(book);
+                      final onTap =
+                          _busy
                               ? null
-                              : const BookGridDelegate(childAspectRatio: 0.7),
-                      reordering: mode == _ShelfMode.reorder && !_busy,
-                      onReorder:
-                          (order) => _save(
-                            () => _organization.reorder(
-                              order,
-                              folderId: folderId,
-                              allRootKeys: _organization.rootKeys(
-                                allBooks.keys,
-                              ),
-                            ),
-                          ),
-                      tile: (context, id) {
-                        final selecting = mode == _ShelfMode.select;
-                        final book = books[id];
-                        if (book != null) {
-                          final cover = _shelfCover(book);
-                          final onTap =
-                              _busy
-                                  ? null
-                                  : selecting
-                                  ? () => _toggle(id)
-                                  : editing
-                                  ? null
-                                  : () => _openBook(book);
-                          if (!apple) {
-                            return _ShelfNovelCard(
-                              title: book.book.title,
-                              cover: cover,
-                              showSource: source == null,
-                              unreadCount: state.unreadCounts[id],
-                              selecting: selecting,
-                              selected: selected.contains(id),
-                              onTap: onTap,
-                              onLongPress:
-                                  wenku8Only && !editing && editAvailable
-                                      ? () => _setMode(
-                                        scope,
-                                        _ShelfMode.select,
-                                        selectedId: id,
-                                      )
-                                      : null,
-                            );
-                          }
-                          return BookshelfTile(
-                            title: book.book.title,
-                            cover: BookshelfBookCover(cover),
-                            showSource: source == null,
-                            sourceLabel: sourceOf(id).label,
-                            unreadCount: state.unreadCounts[id],
-                            selected: selected.contains(id),
-                            onTap: onTap,
-                          );
-                        }
-                        final tileFolder = _organization.folder(id)!;
-                        final previews =
-                            tileFolder.books
-                                .where(books.containsKey)
-                                .take(4)
-                                .map((bookId) => _shelfCover(books[bookId]!))
-                                .toList();
-                        return BookshelfTile(
-                          title: tileFolder.title,
-                          cover: BookshelfFolderCover(previews),
-                          folder: true,
+                              : selecting
+                              ? () => _toggle(id)
+                              : editing
+                              ? null
+                              : () => _openBook(book);
+                      if (!apple) {
+                        return _ShelfNovelCard(
+                          title: book.book.title,
+                          cover: cover,
                           showSource: source == null,
+                          unreadCount: state.unreadCounts[id],
+                          selecting: selecting,
                           selected: selected.contains(id),
-                          onTap:
-                              _busy
-                                  ? null
-                                  : selecting
-                                  ? () => _toggle(id)
-                                  : editing
-                                  ? null
-                                  : () => _openFolder(tileFolder, source),
+                          onTap: onTap,
+                          onLongPress:
+                              wenku8Only && !editing && editAvailable
+                                  ? () => _setMode(
+                                    scope,
+                                    _ShelfMode.select,
+                                    selectedId: id,
+                                  )
+                                  : null,
                         );
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          );
-        },
+                      }
+                      return BookshelfTile(
+                        title: book.book.title,
+                        cover: BookshelfBookCover(cover),
+                        showSource: source == null,
+                        sourceLabel: sourceOf(id).label,
+                        unreadCount: state.unreadCounts[id],
+                        selected: selected.contains(id),
+                        onTap: onTap,
+                      );
+                    }
+                    final tileFolder = _organization.folder(id)!;
+                    final previews =
+                        tileFolder.books
+                            .where(books.containsKey)
+                            .take(4)
+                            .map((bookId) => _shelfCover(books[bookId]!))
+                            .toList();
+                    return BookshelfTile(
+                      title: tileFolder.title,
+                      cover: BookshelfFolderCover(previews),
+                      folder: true,
+                      showSource: source == null,
+                      selected: selected.contains(id),
+                      onTap:
+                          _busy
+                              ? null
+                              : selecting
+                              ? () => _toggle(id)
+                              : editing
+                              ? null
+                              : () => _openFolder(tileFolder, source),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

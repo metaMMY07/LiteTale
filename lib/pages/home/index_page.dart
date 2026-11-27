@@ -139,16 +139,6 @@ class _IndexPageState extends State<IndexPage>
     );
   }
 
-  Widget _insetForTopBar(Widget child) => Builder(
-    builder:
-        (context) => Padding(
-          padding: EdgeInsets.only(
-            top: usesAppleGlass ? MediaQuery.paddingOf(context).top : 0,
-          ),
-          child: child,
-        ),
-  );
-
   @override
   Widget build(BuildContext context) {
     final signedIn = context.select<AuthCubit, bool>(
@@ -358,35 +348,33 @@ class _IndexPageState extends State<IndexPage>
                     ),
             body:
                 activeSource.value == SourceId.wenku8 && !signedIn
-                    ? _insetForTopBar(
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.auto_stories_outlined, size: 48),
-                              const SizedBox(height: 16),
-                              const Text('欢迎使用 LiteTale'),
-                              const SizedBox(height: 8),
-                              const Text(
-                                '选择书源后即可开始；需要账号的书源可在同一页面登录。',
-                                textAlign: TextAlign.center,
-                              ),
-                              const SizedBox(height: 16),
-                              AppButton.tonal(
-                                onPressed:
-                                    () => Navigator.push(
-                                      context,
-                                      HorizontalCoverPageRoute(
-                                        builder:
-                                            (_) => const SourceSettingsPage(),
-                                      ),
+                    ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.auto_stories_outlined, size: 48),
+                            const SizedBox(height: 16),
+                            const Text('欢迎使用 LiteTale'),
+                            const SizedBox(height: 8),
+                            const Text(
+                              '选择书源后即可开始；需要账号的书源可在同一页面登录。',
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 16),
+                            AppButton.tonal(
+                              onPressed:
+                                  () => Navigator.push(
+                                    context,
+                                    HorizontalCoverPageRoute(
+                                      builder:
+                                          (_) => const SourceSettingsPage(),
                                     ),
-                                child: const Text('选择书源'),
-                              ),
-                            ],
-                          ),
+                                  ),
+                              child: const Text('选择书源'),
+                            ),
+                          ],
                         ),
                       ),
                     )
@@ -408,20 +396,10 @@ class _IndexPageState extends State<IndexPage>
                                       const DiscoveryTab(
                                         child: RecommendPage(),
                                       ),
+                                      DiscoveryTab(child: const CategoryPage()),
+                                      DiscoveryTab(child: const ToplistPage()),
                                       DiscoveryTab(
-                                        child: _insetForTopBar(
-                                          const CategoryPage(),
-                                        ),
-                                      ),
-                                      DiscoveryTab(
-                                        child: _insetForTopBar(
-                                          const ToplistPage(),
-                                        ),
-                                      ),
-                                      DiscoveryTab(
-                                        child: _insetForTopBar(
-                                          const ArticlelistPage(),
-                                        ),
+                                        child: const ArticlelistPage(),
                                       ),
                                     ]
                                     : [
@@ -429,20 +407,18 @@ class _IndexPageState extends State<IndexPage>
                                         child: RecommendPage(),
                                       ),
                                       DiscoveryTab(
-                                        child: _insetForTopBar(
-                                          const ShelfCatalogPage(
-                                            mode: 'category',
-                                          ),
+                                        child: const ShelfCatalogPage(
+                                          mode: 'category',
                                         ),
                                       ),
                                       DiscoveryTab(
-                                        child: _insetForTopBar(
-                                          const ShelfCatalogPage(mode: 'rank'),
+                                        child: const ShelfCatalogPage(
+                                          mode: 'rank',
                                         ),
                                       ),
                                       DiscoveryTab(
-                                        child: _insetForTopBar(
-                                          const ShelfCatalogPage(mode: 'all'),
+                                        child: const ShelfCatalogPage(
+                                          mode: 'all',
                                         ),
                                       ),
                                     ],

@@ -6,6 +6,7 @@ import 'package:wild/theme/material_you.dart';
 import 'package:wild/settings/settings_widgets.dart';
 import 'package:wild/settings/reader_settings_page.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
+import 'package:wild/theme/ios_glass_theme.dart' show iosHomeTitleStyle;
 import 'package:wild/theme/ios_dock_insets.dart';
 import 'package:wild/pages/auth_cubit.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -127,7 +128,6 @@ class MorePage extends StatelessWidget {
   }
 
   Widget _iosPage(BuildContext context, UpdateState state) {
-    final theme = Theme.of(context);
     final canPop = ModalRoute.of(context)?.canPop ?? false;
     void open(Widget page) => openSettingsPage(context, page);
 
@@ -164,13 +164,7 @@ class MorePage extends StatelessWidget {
               children: [
                 Semantics(
                   header: true,
-                  child: Text(
-                    '我的',
-                    style: theme.textTheme.headlineLarge?.copyWith(
-                      fontSize: 34,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  child: const Text('我的', style: iosHomeTitleStyle),
                 ),
                 IosSettingsSection(
                   key: const ValueKey('more-navigation-card'),

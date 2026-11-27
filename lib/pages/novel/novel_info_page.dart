@@ -198,8 +198,10 @@ class _IosNovelInfoScaffold extends StatelessWidget {
     );
 
     return IosTopBarScaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('小说详情'),
+        title: const Text('小说详情', maxLines: 1),
+        centerTitle: apple ? true : null,
         backgroundColor: apple ? Colors.transparent : null,
         surfaceTintColor: apple ? Colors.transparent : null,
         scrolledUnderElevation: apple ? 0 : null,

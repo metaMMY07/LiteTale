@@ -3,6 +3,7 @@ import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/ios_solid_surface.dart';
 import 'package:wild/widgets/ios_top_bar_backdrop.dart';
+import 'package:wild/theme/ios_glass_theme.dart' show iosHomeTitleStyle;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -43,10 +44,7 @@ class HistoryPage extends StatelessWidget {
     final localOnly = context.select((HistoryCubit value) => value.localOnly);
     return IosTopBarScaffold(
       appBar: AppBar(
-        title: const Text('阅读历史'),
-        backgroundColor: apple ? Colors.transparent : null,
-        surfaceTintColor: apple ? Colors.transparent : null,
-        scrolledUnderElevation: apple ? 0 : null,
+        title: Text('阅读历史', style: apple ? iosHomeTitleStyle : null),
         actions: [
           AppIconButton(
             tooltip: '清空历史',
@@ -110,32 +108,21 @@ class HistoryPage extends StatelessWidget {
       ),
       body: BlocBuilder<HistoryCubit, HistoryState>(
         builder: (context, state) {
-          final topBarInset = apple ? MediaQuery.paddingOf(context).top : 0.0;
           if (state is HistoryLoading) {
-            return Padding(
-              padding: EdgeInsets.only(top: topBarInset),
-              child: const CenteredLoadingIndicator(),
-            );
+            return const CenteredLoadingIndicator();
           }
           if (state is HistoryError) {
-            return Padding(
-              padding: EdgeInsets.only(top: topBarInset),
-              child: Center(child: Text('加载失败: ${state.message}')),
-            );
+            return Center(child: Text('加载失败: ${state.message}'));
           }
           if (state is HistoryLoaded) {
             if (state.histories.isEmpty) {
-              return Padding(
-                padding: EdgeInsets.only(top: topBarInset),
-                child: const Center(child: Text('暂无阅读历史')),
-              );
+              return const Center(child: Text('暂无阅读历史'));
             }
             final indexes = {
               for (var i = 0; i < state.histories.length; i++)
                 state.histories[i].novelId: i,
             };
             return RefreshIndicator(
-              edgeOffset: topBarInset,
               onRefresh: () => context.read<HistoryCubit>().load(),
               child: ListView.builder(
                 cacheExtent: apple ? 160 : null,
@@ -143,7 +130,7 @@ class HistoryPage extends StatelessWidget {
                     apple
                         ? IosDockInsets.scrollPadding(
                           context,
-                          EdgeInsets.only(top: topBarInset + 4, bottom: 12),
+                          const EdgeInsets.only(top: 4, bottom: 12),
                         )
                         : null,
                 itemCount: state.histories.length,

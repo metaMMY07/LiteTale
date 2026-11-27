@@ -6,6 +6,9 @@ import 'package:flutter/services.dart';
 import 'package:wild/theme/ios_system_colors.dart';
 import 'package:wild/theme/horizontal_page_transitions.dart';
 
+// Matches the native Discover toolbar's UIFont.TextStyle.headline.
+const iosHomeTitleStyle = TextStyle(fontSize: 17, fontWeight: FontWeight.w600);
+
 /// Continuous squircle card border matching iOS 26 inset-grouped surfaces
 /// (`01-card-reference.png`), preserving a full ~26pt corner radius on both
 /// multi-row groups and 56pt single-row cards without Flutter's

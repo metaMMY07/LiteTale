@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 
-/// Lets content scroll under the transparent iOS title and controls.
+/// Places the iOS title bar above the body, with an opt-in for the detail header.
 class IosTopBarScaffold extends StatelessWidget {
   const IosTopBarScaffold({
     super.key,
@@ -11,6 +11,7 @@ class IosTopBarScaffold extends StatelessWidget {
     this.backgroundColor,
     this.floatingActionButton,
     this.bottomNavigationBar,
+    this.extendBodyBehindAppBar = false,
   });
 
   final PreferredSizeWidget? appBar;
@@ -18,18 +19,19 @@ class IosTopBarScaffold extends StatelessWidget {
   final Color? backgroundColor;
   final Widget? floatingActionButton;
   final Widget? bottomNavigationBar;
+  final bool extendBodyBehindAppBar;
 
   @override
   Widget build(BuildContext context) {
     final bar = appBar;
-    final extend = usesAppleGlass && bar != null;
+    final apple = usesAppleGlass && bar != null;
     return Scaffold(
-      extendBodyBehindAppBar: extend,
+      extendBodyBehindAppBar: apple && extendBodyBehindAppBar,
       backgroundColor: backgroundColor,
       floatingActionButton: floatingActionButton,
       bottomNavigationBar: bottomNavigationBar,
       appBar:
-          extend
+          apple
               ? PreferredSize(
                 preferredSize: bar.preferredSize,
                 child: AnnotatedRegion<SystemUiOverlayStyle>(

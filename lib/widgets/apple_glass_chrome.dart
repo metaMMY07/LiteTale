@@ -7,6 +7,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:wild/theme/ios_glass_theme.dart' show iosHomeTitleStyle;
 import 'package:wild/theme/ios_page_arrival.dart';
 import 'package:wild/theme/ios_system_colors.dart';
 import 'package:wild/widgets/app_launch_screen.dart';
@@ -575,7 +576,7 @@ class AppleGlassToolbar extends StatelessWidget {
             label: Text(source),
           ),
           const Spacer(),
-          const Text('发现', style: TextStyle(fontWeight: FontWeight.w600)),
+          const Text('发现', style: iosHomeTitleStyle),
           const Spacer(),
           IconButton(
             onPressed: onTheme,
@@ -789,7 +790,7 @@ class _ToolbarPreview extends StatelessWidget {
                   '发现',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium,
+                  style: iosHomeTitleStyle,
                 ),
               ),
             ),
