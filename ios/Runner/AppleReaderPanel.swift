@@ -94,6 +94,7 @@ final class AppleReaderPanelChannel: NSObject {
         controller.onInteractiveDismiss = { [weak self] in self?.finish(session, selection: nil) }
         navigation.presentationController?.delegate = controller
         activeSession = session; activeController = navigation
+        AppleGlassModalCoordinator.shared.begin(session: session)
         presenter.present(navigation, animated: true)
         result(nil)
       } else {
@@ -102,9 +103,16 @@ final class AppleReaderPanelChannel: NSObject {
     }
   }
 
+  deinit {
+    if let activeSession {
+      AppleGlassModalCoordinator.shared.end(session: activeSession)
+    }
+  }
+
   private func finish(_ session: Int, selection: [String: Any]?) {
     guard activeSession == session else { return }
     activeSession = nil; activeController = nil
+    AppleGlassModalCoordinator.shared.end(session: session)
     var args: [String: Any] = ["session": session]
     if let selection { args["selection"] = selection }
     channel.invokeMethod("dismissed", arguments: args)

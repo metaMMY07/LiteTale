@@ -232,7 +232,10 @@ class IosAppDockHost extends StatelessWidget {
                           radius:
                               media.disableAnimations
                                   ? BorderRadius.zero
-                                  : iosSlidingPageRadius(media.size),
+                                  : iosSlidingPageRadius(
+                                    media.size,
+                                    textDirection: direction,
+                                  ),
                         ),
                         child: SlideTransition(
                           position: progress.drive(_dockParallax),

@@ -1,4 +1,5 @@
 import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:wild/widgets/ios_top_bar_backdrop.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/sources/book_source.dart';
@@ -131,30 +132,32 @@ class MorePage extends StatelessWidget {
     final canPop = ModalRoute.of(context)?.canPop ?? false;
     void open(Widget page) => openSettingsPage(context, page);
 
-    return Scaffold(
-      appBar:
-          canPop
-              ? AppBar(
-                toolbarHeight: 48,
-                leadingWidth: 60,
-                leading: Padding(
+    return IosTopBarScaffold(
+      appBar: AppBar(
+        title: const Text('我的', style: iosHomeTitleStyle),
+        centerTitle: true,
+        automaticallyImplyLeading: false,
+        leadingWidth: canPop ? 60 : null,
+        leading:
+            canPop
+                ? Padding(
                   padding: const EdgeInsetsDirectional.only(start: 16),
                   child: Center(
                     child: IosReaderBackButton(
                       onPressed: () => Navigator.maybePop(context),
                     ),
                   ),
-                ),
-              )
-              : null,
+                )
+                : null,
+      ),
       body: RepaintBoundary(
         child: SafeArea(
-          top: !canPop,
+          top: false,
           bottom: false,
           child: LeftAlignedScrollView(
             key: const PageStorageKey('ios-more-scroll'),
             phoneInset: 16,
-            topInset: 16,
+            topInset: 8,
             bottomInset:
                 20 +
                 MediaQuery.paddingOf(context).bottom -
@@ -162,10 +165,6 @@ class MorePage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Semantics(
-                  header: true,
-                  child: const Text('我的', style: iosHomeTitleStyle),
-                ),
                 IosSettingsSection(
                   key: const ValueKey('more-navigation-card'),
                   title: '账号',

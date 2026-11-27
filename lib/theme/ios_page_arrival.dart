@@ -4,9 +4,15 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/theme/ios_dock_insets.dart';
 
-// A 64-point arc matches the visible silhouette of the phone reference.
-BorderRadius iosSlidingPageRadius(Size viewport) =>
-    BorderRadius.circular(viewport.shortestSide >= 600 ? 32 : 64);
+// Only round the leading edge sliding over the previous page; rounding the
+// trailing edge exposes the window background at the top-right corner while
+// the predecessor parallax-slides to the left.
+BorderRadius iosSlidingPageRadius(
+  Size viewport, {
+  TextDirection textDirection = TextDirection.ltr,
+}) => BorderRadiusDirectional.horizontal(
+  start: Radius.circular(viewport.shortestSide >= 600 ? 32 : 64),
+).resolve(textDirection);
 
 /// Preserves the Cupertino slide and edge swipe while exposing the first
 /// settled frame to work that should not compete with the entrance.
@@ -253,7 +259,10 @@ class _IosPageArrivalState extends State<_IosPageArrival> {
     child:
         widget.roundWhileSliding
             ? ClipRRect(
-              borderRadius: iosSlidingPageRadius(MediaQuery.sizeOf(context)),
+              borderRadius: iosSlidingPageRadius(
+                MediaQuery.sizeOf(context),
+                textDirection: Directionality.of(context),
+              ),
               clipBehavior:
                   widget.animation.isCompleted ? Clip.none : Clip.antiAlias,
               child: widget.child,

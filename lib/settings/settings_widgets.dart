@@ -308,7 +308,7 @@ void openSettingsPage(BuildContext context, Widget page) => Navigator.push(
   context,
   HorizontalCoverPageRoute(
     builder: (_) => page,
-    cachePageDuringTransition: true,
+    cachePageDuringTransition: !usesAppleGlass,
   ),
 );
 

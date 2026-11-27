@@ -61,12 +61,14 @@ class BookDetailsView extends StatefulWidget {
 }
 
 class _BookDetailsViewState extends State<BookDetailsView> {
+  final _scrollController = ScrollController();
   final _open = <int>{};
   final _volumeStarts = <int>[];
   Chapter? _firstChapter, _resumeChapter;
   int _chapterCount = 0, _rowCount = 0;
   bool _busy = false;
   String _description = '';
+  ui.Image? _backdropImage;
   @override
   void initState() {
     super.initState();
@@ -88,11 +90,36 @@ class _BookDetailsViewState extends State<BookDetailsView> {
     if (changedBook) {
       _open.clear();
     }
+    if (changedBook ||
+        old.info?.imgUrl != widget.info?.imgUrl ||
+        old.hint?.coverUrl != widget.hint?.coverUrl) {
+      _replaceBackdrop(null);
+    }
     if (changedBook || !identical(old.volumes, widget.volumes)) {
       _indexCatalog();
     } else if (old.resumeChapterId != widget.resumeChapterId) {
       _findResume(openVolume: false);
     }
+  }
+
+  void _onBackdropChanged(ui.Image? image) {
+    if (!mounted || (image == null && _backdropImage == null)) return;
+    setState(() => _replaceBackdrop(image?.clone()));
+  }
+
+  void _replaceBackdrop(ui.Image? image) {
+    final previous = _backdropImage;
+    _backdropImage = image;
+    if (previous != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _backdropImage?.dispose();
+    super.dispose();
   }
 
   String _readDescription() {
@@ -169,9 +196,13 @@ class _BookDetailsViewState extends State<BookDetailsView> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final apple = theme.platform == TargetPlatform.iOS;
     final info = widget.info;
-    return CustomScrollView(
+    final topBoundary = apple ? MediaQuery.paddingOf(context).top : 0.0;
+    final scrollView = CustomScrollView(
       key: const PageStorageKey('book-detail-scroll'),
+      controller: apple ? _scrollController : null,
       slivers: [
         SliverToBoxAdapter(
           child:
@@ -184,6 +215,8 @@ class _BookDetailsViewState extends State<BookDetailsView> {
                     volumes: info == null ? null : widget.volumes.length,
                     chapters: info == null ? null : _chapterCount,
                     onAuthor: widget.onAuthor,
+                    renderBackdrop: !apple,
+                    onBackdropChanged: apple ? _onBackdropChanged : null,
                   ),
         ),
         if (info == null)
@@ -191,6 +224,86 @@ class _BookDetailsViewState extends State<BookDetailsView> {
         else
           ..._details(context, info),
       ],
+    );
+    if (!apple) return scrollView;
+    final pageBg = theme.scaffoldBackgroundColor;
+    final dark = theme.brightness == Brightness.dark;
+    final coverUrl = info?.imgUrl ?? '';
+    final cover = coverUrl.isEmpty ? widget.hint?.coverUrl ?? '' : coverUrl;
+    final showBackdrop = cover.isNotEmpty && _backdropImage != null;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final headerWidth =
+            constraints.maxWidth >= 700
+                ? 166.0
+                : constraints.maxWidth < 350
+                ? 96.0
+                : 112.0;
+        final baseBackdropHeight = topBoundary + headerWidth * 1.5 + 48;
+        return ColoredBox(
+          color: pageBg,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: ClipRect(
+                    child: AnimatedBuilder(
+                      animation: _scrollController,
+                      builder: (context, child) {
+                        final offset =
+                            _scrollController.hasClients
+                                ? _scrollController.offset
+                                : 0.0;
+                        final top = offset > 0 ? -offset : 0.0;
+                        final height =
+                            baseBackdropHeight + (offset < 0 ? -offset : 0.0);
+                        return Stack(
+                          children: [
+                            Positioned(
+                              top: top,
+                              left: 0,
+                              right: 0,
+                              height: height,
+                              child: child!,
+                            ),
+                          ],
+                        );
+                      },
+                      child: AnimatedOpacity(
+                        duration:
+                            MediaQuery.disableAnimationsOf(context)
+                                ? Duration.zero
+                                : const Duration(milliseconds: 200),
+                        curve: Curves.easeOutCubic,
+                        opacity: showBackdrop ? 1 : 0,
+                        child:
+                            !showBackdrop
+                                ? const SizedBox.expand()
+                                : _BookDetailsCoverBackdrop(
+                                  image: _backdropImage!,
+                                  pageBg: pageBg,
+                                  dark: dark,
+                                ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned.fill(
+                top: topBoundary,
+                child: ClipRect(
+                  child: MediaQuery.removePadding(
+                    context: context,
+                    removeTop: true,
+                    child: scrollView,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -776,6 +889,8 @@ class BookDetailsHeader extends StatefulWidget {
     this.chapters,
     this.onAuthor,
     this.coverImageProvider,
+    this.renderBackdrop = true,
+    this.onBackdropChanged,
   });
   final NovelInfo? info;
   final BookDetailHint? hint;
@@ -783,6 +898,8 @@ class BookDetailsHeader extends StatefulWidget {
   final int? volumes, chapters;
   final VoidCallback? onAuthor;
   final ImageProvider? coverImageProvider;
+  final bool renderBackdrop;
+  final ValueChanged<ui.Image?>? onBackdropChanged;
   String get _coverUrl {
     final url = info?.imgUrl ?? '';
     return url.isEmpty ? hint?.coverUrl ?? '' : url;
@@ -823,9 +940,12 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
             old._coverUrl != widget._coverUrl);
     if (switchedBook) {
       ++_backdropGeneration;
-      _backdropImage?.dispose();
+      final previous = _backdropImage;
       _backdropImage = null;
       _backdropIdentity = nextIdentity;
+      if (previous != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+      }
     }
   }
 
@@ -834,10 +954,18 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
     final identity = _currentIdentity();
     if (sourceImage == null) {
       if (!mounted) return;
-      setState(() {
-        _backdropImage?.dispose();
+      final previous = _backdropImage;
+      if (widget.renderBackdrop) {
+        setState(() {
+          _backdropImage = null;
+        });
+      } else {
         _backdropImage = null;
-      });
+      }
+      widget.onBackdropChanged?.call(null);
+      if (previous != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+      }
       return;
     }
     ui.Image? baked;
@@ -893,10 +1021,17 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
         return;
       }
       final previous = _backdropImage;
-      setState(() {
+      if (widget.renderBackdrop) {
+        setState(() {
+          _backdropImage = baked;
+        });
+      } else {
         _backdropImage = baked;
-      });
-      previous?.dispose();
+      }
+      widget.onBackdropChanged?.call(baked);
+      if (previous != null && !identical(previous, baked)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+      }
     } catch (_) {
       baked?.dispose();
     } finally {
@@ -907,8 +1042,9 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
   @override
   void dispose() {
     ++_backdropGeneration;
-    _backdropImage?.dispose();
+    final previous = _backdropImage;
     _backdropImage = null;
+    previous?.dispose();
     super.dispose();
   }
 
@@ -922,7 +1058,10 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
     final cover = widget._coverUrl;
     final author = info?.author.trim() ?? '',
         status = info?.status.trim() ?? '';
-    final topInset = apple ? MediaQuery.paddingOf(context).top : 0.0;
+    final topInset =
+        apple && widget.renderBackdrop
+            ? MediaQuery.paddingOf(context).top
+            : 0.0;
     return LayoutBuilder(
       builder: (context, constraints) {
         final width =
@@ -1053,6 +1192,9 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
             child: content,
           );
         }
+        if (!widget.renderBackdrop) {
+          return content;
+        }
         final pageBg = theme.scaffoldBackgroundColor;
         final dark = theme.brightness == Brightness.dark;
         final hasCoverSource =
@@ -1077,40 +1219,10 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
                       child:
                           !showBackdrop
                               ? const SizedBox.expand()
-                              : Stack(
-                                key: const ValueKey(
-                                  'ios-detail-cover-backdrop',
-                                ),
-                                fit: StackFit.expand,
-                                children: [
-                                  RawImage(
-                                    image: backdrop,
-                                    fit: BoxFit.cover,
-                                    alignment: const Alignment(0, -0.2),
-                                    filterQuality: FilterQuality.medium,
-                                  ),
-                                  DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      gradient: LinearGradient(
-                                        begin: Alignment.topCenter,
-                                        end: Alignment.bottomCenter,
-                                        stops: const [0.0, 0.46, 0.78, 1.0],
-                                        colors: [
-                                          pageBg.withValues(
-                                            alpha: dark ? 0.26 : 0.18,
-                                          ),
-                                          pageBg.withValues(
-                                            alpha: dark ? 0.34 : 0.26,
-                                          ),
-                                          pageBg.withValues(
-                                            alpha: dark ? 0.68 : 0.64,
-                                          ),
-                                          pageBg,
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                              : _BookDetailsCoverBackdrop(
+                                image: backdrop,
+                                pageBg: pageBg,
+                                dark: dark,
                               ),
                     ),
                   ),
@@ -1123,6 +1235,47 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
       },
     );
   }
+}
+
+class _BookDetailsCoverBackdrop extends StatelessWidget {
+  const _BookDetailsCoverBackdrop({
+    required this.image,
+    required this.pageBg,
+    required this.dark,
+  });
+
+  final ui.Image image;
+  final Color pageBg;
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    key: const ValueKey('ios-detail-cover-backdrop'),
+    fit: StackFit.expand,
+    children: [
+      RawImage(
+        image: image,
+        fit: BoxFit.cover,
+        alignment: const Alignment(0, -0.2),
+        filterQuality: FilterQuality.medium,
+      ),
+      DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            stops: const [0.0, 0.46, 0.78, 1.0],
+            colors: [
+              pageBg.withValues(alpha: dark ? 0.26 : 0.18),
+              pageBg.withValues(alpha: dark ? 0.34 : 0.26),
+              pageBg.withValues(alpha: dark ? 0.68 : 0.64),
+              pageBg,
+            ],
+          ),
+        ),
+      ),
+    ],
+  );
 }
 
 class _DetailMetadata extends StatelessWidget {

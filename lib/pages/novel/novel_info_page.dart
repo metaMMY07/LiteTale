@@ -133,61 +133,73 @@ class _IosNovelInfoScaffold extends StatelessWidget {
             return _NovelInfoContent(novelId: novelId, state: state);
           }
           if (state is NovelInfoError) {
+            final topInset = apple ? MediaQuery.paddingOf(context).top : 0.0;
             if (state.loginRequired) {
-              return Center(
+              return Padding(
+                padding: EdgeInsets.only(top: topInset),
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(state.message, textAlign: TextAlign.center),
+                        SourceWebsiteLink(source: sourceOf(novelId)),
+                        const SizedBox(height: 16),
+                        AppButton.filled(
+                          onPressed: () async {
+                            final loggedIn = await Navigator.of(
+                              context,
+                            ).push<bool>(
+                              HorizontalCoverPageRoute(
+                                builder: (_) => const ShelfLoginPage(),
+                              ),
+                            );
+                            if (loggedIn == true && context.mounted) {
+                              context.read<NovelInfoCubit>().load();
+                            }
+                          },
+                          child: const Text('登录轻书架'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
+            return Padding(
+              padding: EdgeInsets.only(top: topInset),
+              child: Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(state.message, textAlign: TextAlign.center),
-                      SourceWebsiteLink(source: sourceOf(novelId)),
+                      Text(
+                        '加载失败: ${state.message}',
+                        textAlign: TextAlign.center,
+                      ),
                       const SizedBox(height: 16),
-                      AppButton.filled(
-                        onPressed: () async {
-                          final loggedIn = await Navigator.of(
-                            context,
-                          ).push<bool>(
-                            HorizontalCoverPageRoute(
-                              builder: (_) => const ShelfLoginPage(),
-                            ),
-                          );
-                          if (loggedIn == true && context.mounted) {
-                            context.read<NovelInfoCubit>().load();
-                          }
-                        },
-                        child: const Text('登录轻书架'),
+                      AppButton.filledIcon(
+                        onPressed: () => context.read<NovelInfoCubit>().load(),
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('重新加载'),
+                      ),
+                      SourceWebsiteLink(source: sourceOf(novelId)),
+                      Wenku8RecoveryButton(
+                        error: state.cause ?? state.message,
+                        source: sourceOf(novelId),
+                        onRecovered:
+                            () => context.read<NovelInfoCubit>().load(),
+                      ),
+                      BiliRecoveryButton(
+                        error: state.cause,
+                        source: sourceOf(novelId),
+                        onRecovered:
+                            () => context.read<NovelInfoCubit>().load(),
                       ),
                     ],
                   ),
-                ),
-              );
-            }
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('加载失败: ${state.message}', textAlign: TextAlign.center),
-                    const SizedBox(height: 16),
-                    AppButton.filledIcon(
-                      onPressed: () => context.read<NovelInfoCubit>().load(),
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('重新加载'),
-                    ),
-                    SourceWebsiteLink(source: sourceOf(novelId)),
-                    Wenku8RecoveryButton(
-                      error: state.cause ?? state.message,
-                      source: sourceOf(novelId),
-                      onRecovered: () => context.read<NovelInfoCubit>().load(),
-                    ),
-                    BiliRecoveryButton(
-                      error: state.cause,
-                      source: sourceOf(novelId),
-                      onRecovered: () => context.read<NovelInfoCubit>().load(),
-                    ),
-                  ],
                 ),
               ),
             );

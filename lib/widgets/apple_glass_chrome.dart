@@ -170,11 +170,29 @@ class AppleGlassButton extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!usesAppleGlass) return fallback;
     final appearance = brightness ?? Theme.of(context).brightness;
+    final previewSurface =
+        tint ??
+        Color.alphaBlend(
+          IosSystemColors.color(
+            'surface',
+            appearance,
+          ).withValues(alpha: appearance == Brightness.dark ? .36 : .58),
+          IosSystemColors.color('background', appearance),
+        );
     final preview = DecoratedBox(
       decoration: ShapeDecoration(
-        shape: const StadiumBorder(),
-        color: (tint ?? IosSystemColors.color('surface', appearance))
-            .withValues(alpha: tint?.a ?? .86),
+        shape: StadiumBorder(
+          side:
+              tint == null
+                  ? BorderSide(
+                    color: IosSystemColors.color(
+                      'separator',
+                      appearance,
+                    ).withValues(alpha: .18),
+                  )
+                  : BorderSide.none,
+        ),
+        color: previewSurface.withValues(alpha: tint?.a ?? .88),
       ),
       child: fallback,
     );
@@ -790,7 +808,9 @@ class _ToolbarPreview extends StatelessWidget {
                   '发现',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: iosHomeTitleStyle,
+                  style: iosHomeTitleStyle.copyWith(
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
                 ),
               ),
             ),
