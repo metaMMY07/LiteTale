@@ -154,6 +154,8 @@ class AppleGlassButton extends StatelessWidget {
   const AppleGlassButton({
     super.key,
     this.symbol,
+    this.glyph,
+    this.glyphSize = 24,
     required this.label,
     required this.onPressed,
     required this.fallback,
@@ -164,6 +166,8 @@ class AppleGlassButton extends StatelessWidget {
   });
 
   final String? symbol;
+  final IconData? glyph;
+  final double glyphSize;
   final String label;
   final VoidCallback? onPressed;
   final Widget fallback;
@@ -200,6 +204,11 @@ class AppleGlassButton extends StatelessWidget {
         'enabled': onPressed != null,
         'selected': selected,
         if (symbol != null) 'symbol': symbol!,
+        if (glyph != null) ...{
+          'iconCodePoint': glyph!.codePoint,
+          'iconFontFamily': appleGlassFontManifestFamily(glyph!),
+          'iconSize': glyphSize,
+        },
         if (tint != null) 'tint': tint!.toARGB32(),
         if (foreground != null) 'foreground': foreground!.toARGB32(),
       },
@@ -450,9 +459,12 @@ class AppleGlassAction {
   final String id, label, symbol;
   final IconData fallbackIcon;
   final VoidCallback? onPressed;
+
+  IconData get resolvedIcon =>
+      resolveAppleGlassActionIcon(symbol, fallbackIcon);
 }
 
-/// A single neutral glass capsule with system symbols and native hit targets.
+/// A single neutral glass capsule with unified icon glyphs and native hit targets.
 class AppleGlassActions extends StatelessWidget {
   const AppleGlassActions({
     super.key,
@@ -460,13 +472,17 @@ class AppleGlassActions extends StatelessWidget {
     this.brightness,
     this.tint,
     this.buttonSize = 44,
+    this.iconSize = defaultIconSize,
     this.fallback,
   });
+
+  static const double defaultIconSize = 20;
 
   final List<AppleGlassAction> actions;
   final Brightness? brightness;
   final Color? tint;
   final double buttonSize;
+  final double iconSize;
   final Widget? fallback;
 
   @override
@@ -490,9 +506,9 @@ class AppleGlassActions extends StatelessWidget {
                     tooltip: action.label,
                     padding: EdgeInsets.zero,
                     color: foregroundColor,
-                    iconSize: 20,
+                    iconSize: iconSize,
                     onPressed: action.onPressed,
-                    icon: Icon(action.fallbackIcon),
+                    icon: Icon(action.resolvedIcon),
                   ),
                 ),
             ],
@@ -506,8 +522,8 @@ class AppleGlassActions extends StatelessWidget {
             Expanded(
               child: Center(
                 child: Icon(
-                  _previewIconForSymbol(action.symbol, action.fallbackIcon),
-                  size: 20,
+                  action.resolvedIcon,
+                  size: iconSize,
                   color:
                       action.onPressed == null
                           ? foregroundColor.withValues(alpha: .38)
@@ -526,6 +542,7 @@ class AppleGlassActions extends StatelessWidget {
           'kind': 'actions',
           'capsule': true,
           'dark': appearance == Brightness.dark,
+          'foreground': foregroundColor.toARGB32(),
           if (tint != null) 'tint': tint!.toARGB32(),
           'actions': [
             for (final action in actions)
@@ -533,6 +550,11 @@ class AppleGlassActions extends StatelessWidget {
                 'id': action.id,
                 'label': action.label,
                 'symbol': action.symbol,
+                'iconCodePoint': action.resolvedIcon.codePoint,
+                'iconFontFamily': appleGlassFontManifestFamily(
+                  action.resolvedIcon,
+                ),
+                'iconSize': iconSize,
                 'enabled': action.onPressed != null,
               },
           ],
@@ -550,6 +572,12 @@ class AppleGlassActions extends StatelessWidget {
       ),
     );
   }
+}
+
+String appleGlassFontManifestFamily(IconData icon) {
+  final family = icon.fontFamily ?? 'CupertinoIcons';
+  final pkg = icon.fontPackage;
+  return pkg == null ? family : 'packages/$pkg/$family';
 }
 
 ShapeDecoration _glassCapsulePreviewDecoration(
@@ -581,14 +609,23 @@ ShapeDecoration _glassCapsulePreviewDecoration(
   );
 }
 
-IconData _previewIconForSymbol(String symbol, IconData fallbackIcon) =>
+IconData resolveAppleGlassActionIcon(String symbol, IconData fallbackIcon) =>
     switch (symbol) {
       'tag' => CupertinoIcons.tag,
       'bubble.left' => CupertinoIcons.chat_bubble,
       'arrow.down.to.line' => CupertinoIcons.arrow_down_to_line,
+      'list.bullet' => CupertinoIcons.list_bullet,
+      'play.fill' => CupertinoIcons.play_fill,
+      'gearshape' => CupertinoIcons.gear,
+      'headphones' => CupertinoIcons.headphones,
       'chevron.left' => CupertinoIcons.chevron_left,
+      'square.and.arrow.up' => CupertinoIcons.share,
+      'xmark' => CupertinoIcons.xmark,
+      'folder' => CupertinoIcons.folder,
       'folder.badge.plus' => CupertinoIcons.folder_badge_plus,
+      'pencil' => CupertinoIcons.pencil,
       'square.and.pencil' => CupertinoIcons.square_pencil,
+      'arrow.up.arrow.down' => CupertinoIcons.arrow_up_arrow_down,
       'checkmark.circle' => CupertinoIcons.check_mark_circled,
       'trash' => CupertinoIcons.trash,
       'ellipsis' => CupertinoIcons.ellipsis,

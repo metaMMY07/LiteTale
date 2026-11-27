@@ -665,11 +665,13 @@ class BookDetailTagsButton extends StatelessWidget {
     required this.tags,
     this.onTag,
     this.color,
+    this.iconSize,
   });
 
   final List<String> tags;
   final ValueChanged<String>? onTag;
   final Color? color;
+  final double? iconSize;
 
   Set<String> get _labels => {
     for (final tag in tags)
@@ -747,6 +749,7 @@ class BookDetailTagsButton extends StatelessWidget {
     return AppIconButton(
       tooltip: '书籍标签',
       color: color,
+      iconSize: iconSize,
       icon: Icon(usesAppleGlass ? CupertinoIcons.tag : Icons.sell_outlined),
       onPressed: () => showTags(context),
     );

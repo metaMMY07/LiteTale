@@ -125,6 +125,7 @@ class ReaderToolbar extends StatelessWidget {
         key: const ValueKey('reader-catalog'),
         label: '目录',
         size: apple ? iosBarHeight : 48,
+        iconSize: apple ? AppleGlassActions.defaultIconSize : null,
         grouped: apple,
         color: apple ? neutralColor : null,
         onPressed: onCatalog,
@@ -136,6 +137,7 @@ class ReaderToolbar extends StatelessWidget {
         ReaderRoundAction(
           label: '自动滚动',
           size: apple ? iosBarHeight : 48,
+          iconSize: apple ? AppleGlassActions.defaultIconSize : null,
           grouped: apple,
           color: apple ? neutralColor : null,
           onPressed: onAutoScroll,
@@ -147,6 +149,7 @@ class ReaderToolbar extends StatelessWidget {
         key: const ValueKey('reader-settings'),
         label: '阅读设置',
         size: apple ? iosBarHeight : 48,
+        iconSize: apple ? AppleGlassActions.defaultIconSize : null,
         grouped: apple,
         color: apple ? neutralColor : null,
         onPressed: onSettings,
@@ -159,6 +162,7 @@ class ReaderToolbar extends StatelessWidget {
           key: const ValueKey('reader-speech'),
           label: '听书',
           size: apple ? iosBarHeight : 48,
+          iconSize: apple ? AppleGlassActions.defaultIconSize : null,
           grouped: apple,
           color:
               apple
@@ -301,6 +305,8 @@ class IosReaderBackButton extends StatelessWidget {
     this.brightness,
   });
 
+  static const double iosIconSize = 24;
+
   final VoidCallback onPressed;
   final String label;
   final Color? color;
@@ -310,7 +316,9 @@ class IosReaderBackButton extends StatelessWidget {
   Widget build(BuildContext context) => ReaderRoundAction(
     label: label,
     icon: CupertinoIcons.chevron_back,
+    iconSize: iosIconSize,
     symbol: 'chevron.left',
+    useIconGlyphInGlass: true,
     size: 44,
     color: color ?? Theme.of(context).colorScheme.onSurface,
     brightness: brightness,
@@ -324,7 +332,9 @@ class ReaderRoundAction extends StatelessWidget {
     super.key,
     required this.label,
     required this.icon,
+    this.iconSize,
     this.symbol,
+    this.useIconGlyphInGlass = false,
     required this.onPressed,
     this.size = 48,
     this.selected = false,
@@ -337,7 +347,9 @@ class ReaderRoundAction extends StatelessWidget {
   });
   final String label;
   final IconData icon;
+  final double? iconSize;
   final String? symbol;
+  final bool useIconGlyphInGlass;
   final VoidCallback? onPressed;
   final double size;
   final bool selected;
@@ -357,6 +369,7 @@ class ReaderRoundAction extends StatelessWidget {
           tooltip: label,
           padding: EdgeInsets.zero,
           color: color,
+          iconSize: iconSize,
           onPressed: onPressed,
           icon: Icon(icon),
         ),
@@ -372,6 +385,8 @@ class ReaderRoundAction extends StatelessWidget {
                   ? AppleGlassButton(
                     label: label,
                     symbol: symbol,
+                    glyph: useIconGlyphInGlass ? icon : null,
+                    glyphSize: iconSize ?? 24,
                     onPressed: onPressed,
                     foreground: color,
                     brightness: brightness,

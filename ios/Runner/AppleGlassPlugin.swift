@@ -1,3 +1,4 @@
+import CoreText
 import Flutter
 import UIKit
 
@@ -43,6 +44,128 @@ final class AppleGlassModalCoordinator {
     if removed && activeSessions.isEmpty {
       NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
     }
+  }
+}
+
+/// Renders bundled Flutter icon-font glyphs (such as CupertinoIcons) with the
+/// exact advance-width and even-leading baseline centering used by Flutter's
+/// `Icon` widget, so live UIKit Liquid Glass controls match Flutter's preview
+/// glyphs without shape, stroke-weight, or size jumps across state changes.
+private final class AppleGlassIconGlyphRenderer {
+  static let shared = AppleGlassIconGlyphRenderer()
+
+  private struct CacheKey: Hashable {
+    let family: String
+    let codePoint: Int
+    let sizeMilliPoints: Int
+    let scaleMilli: Int
+  }
+
+  private lazy var fontAssetsByFamily: [String: String] = {
+    var mapping: [String: String] = [
+      "packages/cupertino_icons/CupertinoIcons": "packages/cupertino_icons/assets/CupertinoIcons.ttf",
+      "CupertinoIcons": "packages/cupertino_icons/assets/CupertinoIcons.ttf",
+      "MaterialIcons": "fonts/MaterialIcons-Regular.otf",
+    ]
+    let manifestKey = FlutterDartProject.lookupKey(forAsset: "FontManifest.json")
+    if let path = Bundle.main.path(forResource: manifestKey, ofType: nil),
+       let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+       let entries = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
+      for entry in entries {
+        if let family = entry["family"] as? String,
+           let fonts = entry["fonts"] as? [[String: Any]],
+           let asset = fonts.first?["asset"] as? String {
+          mapping[family] = asset
+        }
+      }
+    }
+    return mapping
+  }()
+
+  private var cgFonts: [String: CGFont] = [:]
+  private var images: [CacheKey: UIImage] = [:]
+
+  private func cgFont(forFamily family: String) -> CGFont? {
+    if let cached = cgFonts[family] { return cached }
+    guard let asset = fontAssetsByFamily[family] else { return nil }
+    let resourceKey = FlutterDartProject.lookupKey(forAsset: asset)
+    guard let path = Bundle.main.path(forResource: resourceKey, ofType: nil),
+          let provider = CGDataProvider(url: URL(fileURLWithPath: path) as CFURL),
+          let font = CGFont(provider) else {
+      return nil
+    }
+    cgFonts[family] = font
+    return font
+  }
+
+  func image(family: String?, codePoint: Int?, pointSize: CGFloat, scale: CGFloat) -> UIImage? {
+    guard let family, !family.isEmpty,
+          let codePoint, codePoint > 0,
+          pointSize > 0,
+          let scalar = UnicodeScalar(codePoint) else {
+      return nil
+    }
+    let resolvedScale = scale > 0 ? scale : UIScreen.main.scale
+    let key = CacheKey(
+      family: family,
+      codePoint: codePoint,
+      sizeMilliPoints: Int((pointSize * 1000).rounded()),
+      scaleMilli: Int((resolvedScale * 1000).rounded())
+    )
+    if let cached = images[key] { return cached }
+    guard let baseFont = cgFont(forFamily: family) else { return nil }
+
+    let ctFont = CTFontCreateWithGraphicsFont(baseFont, pointSize, nil, nil)
+    let characters = Array(String(scalar).utf16)
+    var glyphs = [CGGlyph](repeating: 0, count: characters.count)
+    guard CTFontGetGlyphsForCharacters(ctFont, characters, &glyphs, characters.count),
+          var glyph = glyphs.first, glyph != 0 else {
+      return nil
+    }
+
+    let ascent = CTFontGetAscent(ctFont)
+    let descent = CTFontGetDescent(ctFont)
+    var advance = CGSize.zero
+    CTFontGetAdvancesForGlyphs(ctFont, .horizontal, &glyph, &advance, 1)
+    var boundingRect = CGRect.zero
+    CTFontGetBoundingRectsForGlyphs(ctFont, .horizontal, &glyph, &boundingRect, 1)
+
+    let advanceWidth = advance.width
+    let midX = advanceWidth / 2
+    let midY = (ascent - descent) / 2
+    let halfSpanX = min(
+      18,
+      max(
+        pointSize / 2,
+        max(abs(boundingRect.minX - midX), abs(boundingRect.maxX - midX)) + 1
+      )
+    )
+    let halfSpanY = min(
+      18,
+      max(
+        pointSize / 2,
+        max(abs(boundingRect.minY - midY), abs(boundingRect.maxY - midY)) + 1
+      )
+    )
+    let canvasSize = CGSize(width: ceil(halfSpanX * 2), height: ceil(halfSpanY * 2))
+
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = resolvedScale
+    format.opaque = false
+    let rendered = UIGraphicsImageRenderer(size: canvasSize, format: format).image { context in
+      let cg = context.cgContext
+      cg.translateBy(x: 0, y: canvasSize.height)
+      cg.scaleBy(x: 1, y: -1)
+      cg.setFillColor(UIColor.black.cgColor)
+      var position = CGPoint(
+        x: (canvasSize.width - advanceWidth) / 2,
+        y: (canvasSize.height - ascent + descent) / 2
+      )
+      CTFontDrawGlyphs(ctFont, &glyph, &position, 1, cg)
+    }.withRenderingMode(.alwaysTemplate)
+
+    images[key] = rendered
+    return rendered
   }
 }
 
@@ -184,14 +307,26 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
   private func prepare(
     _ button: UIButton,
     symbol: String?,
+    glyphImage: UIImage? = nil,
     title: String? = nil,
     tint: UIColor? = nil,
     foreground: UIColor = .label
   ) {
-    let symbolImage = symbol.flatMap { UIImage(systemName: $0) }
-    let image = tint == nil
-      ? symbolImage
-      : symbolImage?.withTintColor(foreground, renderingMode: .alwaysOriginal)
+    let traits = UITraitCollection(traitsFrom: [
+      traitCollection,
+      UITraitCollection(userInterfaceStyle: isDark ? .dark : .light),
+    ])
+    let effectiveForeground = (button.isEnabled ? foreground : foreground.withAlphaComponent(0.38))
+      .resolvedColor(with: traits)
+    let image: UIImage?
+    if let glyphImage {
+      image = glyphImage.withTintColor(effectiveForeground, renderingMode: .alwaysOriginal)
+    } else {
+      let symbolImage = symbol.flatMap { UIImage(systemName: $0) }
+      image = tint == nil
+        ? symbolImage
+        : symbolImage?.withTintColor(foreground, renderingMode: .alwaysOriginal)
+    }
     button.tintColor = tint
     if #available(iOS 15.0, *) {
       var style: UIButton.Configuration
@@ -202,7 +337,10 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       }
       style.image = image
       style.title = title
-      style.imagePadding = 4
+      style.imagePadding = (glyphImage != nil && title == nil) ? 0 : 4
+      if glyphImage != nil && title == nil {
+        style.contentInsets = .zero
+      }
       style.titleLineBreakMode = .byTruncatingTail
       if title != nil {
         style.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 16)
@@ -217,6 +355,8 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       if let tint {
         style.baseBackgroundColor = tint
         style.imageColorTransformer = UIConfigurationColorTransformer { _ in foreground }
+      } else if glyphImage != nil {
+        style.imageColorTransformer = UIConfigurationColorTransformer { _ in effectiveForeground }
       }
       button.configuration = style
     } else {
@@ -349,8 +489,20 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       }
       let resolvedTint = colorFromARGB(config["tint"])
       buttonTint = resolvedTint
-      prepare(button, symbol: config["symbol"] as? String,
-        tint: resolvedTint, foreground: colorFromARGB(config["foreground"]) ?? .label)
+      let displayScale = window?.screen.scale ?? UIScreen.main.scale
+      let glyphImage = AppleGlassIconGlyphRenderer.shared.image(
+        family: config["iconFontFamily"] as? String,
+        codePoint: (config["iconCodePoint"] as? NSNumber)?.intValue,
+        pointSize: CGFloat((config["iconSize"] as? NSNumber)?.doubleValue ?? 24),
+        scale: displayScale
+      )
+      prepare(
+        button,
+        symbol: config["symbol"] as? String,
+        glyphImage: glyphImage,
+        tint: resolvedTint,
+        foreground: colorFromARGB(config["foreground"]) ?? .label
+      )
       syncModalBackdrop(animated: false)
       return
     }
@@ -486,13 +638,32 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       button.addTarget(self, action: #selector(activateAction(_:)), for: .touchUpInside)
       stack.addArrangedSubview(button)
     }
+    let traits = UITraitCollection(traitsFrom: [
+      traitCollection,
+      UITraitCollection(userInterfaceStyle: isDark ? .dark : .light),
+    ])
+    let baseForeground = colorFromARGB(config["foreground"]) ?? .label
+    let displayScale = window?.screen.scale ?? UIScreen.main.scale
     let symbolStyle = UIImage.SymbolConfiguration(pointSize: 19, weight: .regular)
     for (view, action) in zip(stack.arrangedSubviews, actions) {
       guard let button = view as? UIButton else { continue }
+      let enabled = action["enabled"] as? Bool ?? false
       button.accessibilityIdentifier = action["id"] as? String
       button.accessibilityLabel = action["label"] as? String
-      button.isEnabled = action["enabled"] as? Bool ?? false
-      if let symbol = action["symbol"] as? String {
+      button.isEnabled = enabled
+      button.tintColor = baseForeground.resolvedColor(with: traits)
+      if let glyphImage = AppleGlassIconGlyphRenderer.shared.image(
+        family: action["iconFontFamily"] as? String,
+        codePoint: (action["iconCodePoint"] as? NSNumber)?.intValue,
+        pointSize: CGFloat((action["iconSize"] as? NSNumber)?.doubleValue ?? 20),
+        scale: displayScale
+      ) {
+        let normalColor = baseForeground.resolvedColor(with: traits)
+        let disabledColor = baseForeground.withAlphaComponent(0.38).resolvedColor(with: traits)
+        button.setImage(glyphImage.withTintColor(normalColor, renderingMode: .alwaysOriginal), for: .normal)
+        button.setImage(glyphImage.withTintColor(disabledColor, renderingMode: .alwaysOriginal), for: .disabled)
+      } else if let symbol = action["symbol"] as? String {
+        button.setImage(nil, for: .disabled)
         button.setImage(UIImage(systemName: symbol, withConfiguration: symbolStyle), for: .normal)
       }
     }

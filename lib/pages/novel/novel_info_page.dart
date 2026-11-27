@@ -2,6 +2,7 @@ import 'package:wild/widgets/platform_controls.dart';
 import 'package:wild/widgets/android_detail_insets.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/ios_top_bar_backdrop.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/widgets/wenku8_recovery_button.dart';
 import 'package:wild/widgets/bili_recovery_button.dart';
@@ -241,6 +242,7 @@ class _IosNovelInfoScaffold extends StatelessWidget {
               final tags = BookDetailTagsButton(
                 tags: state.novelInfo.tags,
                 color: actionColor,
+                iconSize: apple ? AppleGlassActions.defaultIconSize : null,
                 onTag:
                     wenku8
                         ? (tag) => Navigator.pushNamed(
@@ -266,13 +268,23 @@ class _IosNovelInfoScaffold extends StatelessWidget {
                     key: const ValueKey('detail-comments'),
                     tooltip: '书评',
                     color: actionColor,
-                    icon: const Icon(Icons.chat_bubble_outline_rounded),
+                    iconSize: apple ? AppleGlassActions.defaultIconSize : null,
+                    icon: Icon(
+                      apple
+                          ? CupertinoIcons.chat_bubble
+                          : Icons.chat_bubble_outline_rounded,
+                    ),
                     onPressed: openComments,
                   ),
                 if (wenku8)
                   AppIconButton(
                     color: actionColor,
-                    icon: const Icon(Icons.download_outlined),
+                    iconSize: apple ? AppleGlassActions.defaultIconSize : null,
+                    icon: Icon(
+                      apple
+                          ? CupertinoIcons.arrow_down_to_line
+                          : Icons.download_outlined,
+                    ),
                     tooltip: '离线下载',
                     onPressed: download,
                   ),
@@ -293,7 +305,7 @@ class _IosNovelInfoScaffold extends StatelessWidget {
                           id: 'tags',
                           label: '书籍标签',
                           symbol: 'tag',
-                          fallbackIcon: Icons.sell_outlined,
+                          fallbackIcon: CupertinoIcons.tag,
                           onPressed: () => tags.showTags(context),
                         ),
                       if (hasComments)
@@ -301,7 +313,7 @@ class _IosNovelInfoScaffold extends StatelessWidget {
                           id: 'comments',
                           label: '书评',
                           symbol: 'bubble.left',
-                          fallbackIcon: Icons.chat_bubble_outline_rounded,
+                          fallbackIcon: CupertinoIcons.chat_bubble,
                           onPressed: openComments,
                         ),
                       if (wenku8)
@@ -309,7 +321,7 @@ class _IosNovelInfoScaffold extends StatelessWidget {
                           id: 'download',
                           label: '离线下载',
                           symbol: 'arrow.down.to.line',
-                          fallbackIcon: Icons.download_outlined,
+                          fallbackIcon: CupertinoIcons.arrow_down_to_line,
                           onPressed: download,
                         ),
                     ],

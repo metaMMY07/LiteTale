@@ -687,6 +687,7 @@ class _PreviewActions extends StatelessWidget {
         ios
             ? AppleGlassButton(
               symbol: 'xmark',
+              glyph: CupertinoIcons.xmark,
               label: '关闭预览',
               brightness: Brightness.dark,
               foreground: Colors.white,
