@@ -371,15 +371,11 @@ class _HistoryItem extends StatelessWidget {
                           );
                           return Align(
                             alignment: AlignmentDirectional.centerStart,
-                            child: IosAccentGlassCapsuleButton(
+                            child: IosAccentPillButton(
                               key: ValueKey(
                                 'history-chapter-capsule-${history.novelId}',
                               ),
-                              glassKey: ValueKey(
-                                'history-chapter-glass-${history.novelId}',
-                              ),
                               label: chapterLabel,
-                              parkWhenCovered: true,
                               minHeight: 36,
                               fontSize: 14,
                               padding: const EdgeInsets.symmetric(

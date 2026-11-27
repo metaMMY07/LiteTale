@@ -40,8 +40,7 @@ class AboutPage extends StatelessWidget {
   Widget _iosCheckUpdateButton(
     BuildContext context, {
     required bool checking,
-  }) => IosAccentGlassCapsuleButton(
-    glassKey: const ValueKey('about-check-update-glass'),
+  }) => IosAccentPillButton(
     buttonKey: const ValueKey('about-check-update-button'),
     label: checking ? '正在检查更新…' : '检查更新',
     icon: CupertinoIcons.refresh,
@@ -97,10 +96,7 @@ class AboutPage extends StatelessWidget {
                       style: bodyStyle,
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      '本版本基于开源项目 Wild 开发，感谢原作者和所有贡献者。',
-                      style: bodyStyle,
-                    ),
+                    Text('本版本基于开源项目 Wild 开发，感谢原作者和所有贡献者。', style: bodyStyle),
                   ],
                 ),
               ),
@@ -112,7 +108,8 @@ class AboutPage extends StatelessWidget {
                 icon: CupertinoIcons.chevron_left_slash_chevron_right,
                 title: '查看 LiteTale 源代码',
                 trailing: externalTrailing,
-                onTap: () => _launchUrl('https://github.com/metaMMY07/LiteTale'),
+                onTap:
+                    () => _launchUrl('https://github.com/metaMMY07/LiteTale'),
               ),
               iosGroupedDivider(
                 context,
@@ -220,7 +217,10 @@ class AboutPage extends StatelessWidget {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(CupertinoIcons.arrow_down_circle, size: 19),
+                          const Icon(
+                            CupertinoIcons.arrow_down_circle,
+                            size: 19,
+                          ),
                           const SizedBox(width: 8),
                           Flexible(
                             child: Text(
@@ -254,7 +254,9 @@ class AboutPage extends StatelessWidget {
                           checking
                               ? const SizedBox.square(
                                 dimension: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                               : const Icon(Icons.refresh),
                       label: Text(checking ? '正在检查更新…' : '检查更新'),
@@ -315,8 +317,9 @@ class AboutPage extends StatelessWidget {
                           ),
                           AppButton.textIcon(
                             onPressed:
-                                () =>
-                                    _launchUrl('https://github.com/niuhuan/wild'),
+                                () => _launchUrl(
+                                  'https://github.com/niuhuan/wild',
+                                ),
                             icon: const Icon(Icons.account_tree_outlined),
                             label: const Text('查看上游 Wild 项目'),
                           ),

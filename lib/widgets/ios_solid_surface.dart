@@ -4,7 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/theme/ios_glass_theme.dart';
 import 'package:wild/theme/ios_system_colors.dart';
-import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart' show usesAppleGlass;
 
 const double iosGroupedDividerThickness = 0.5;
 
@@ -640,9 +640,8 @@ class IosSolidPillButton extends StatelessWidget {
   }
 }
 
-/// Accent-tinted version of the native Discover toolbar button.
-class IosAccentGlassCapsuleButton extends StatelessWidget {
-  const IosAccentGlassCapsuleButton({
+class IosAccentPillButton extends StatelessWidget {
+  const IosAccentPillButton({
     super.key,
     required this.label,
     this.icon,
@@ -653,12 +652,9 @@ class IosAccentGlassCapsuleButton extends StatelessWidget {
     this.fullWidth = false,
     this.minHeight = 48,
     this.fontSize = 17,
-    this.maxLines = 1,
     this.padding = const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
     this.semanticsLabel,
-    this.glassKey,
     this.buttonKey,
-    this.parkWhenCovered = false,
   });
 
   final String label;
@@ -670,12 +666,9 @@ class IosAccentGlassCapsuleButton extends StatelessWidget {
   final bool fullWidth;
   final double minHeight;
   final double fontSize;
-  final int maxLines;
   final EdgeInsetsGeometry padding;
   final String? semanticsLabel;
-  final Key? glassKey;
   final Key? buttonKey;
-  final bool parkWhenCovered;
 
   @override
   Widget build(BuildContext context) {
@@ -688,7 +681,7 @@ class IosAccentGlassCapsuleButton extends StatelessWidget {
             : const Color(0xFF111114);
     final contentColor =
         enabled ? foreground : foreground.withValues(alpha: busy ? 0.9 : 0.65);
-    final tint = enabled || busy ? accent : accent.withValues(alpha: 0.52);
+    final fill = enabled || busy ? accent : accent.withValues(alpha: 0.52);
 
     final row = Row(
       mainAxisSize: fullWidth ? MainAxisSize.max : MainAxisSize.min,
@@ -710,7 +703,7 @@ class IosAccentGlassCapsuleButton extends StatelessWidget {
         Flexible(
           child: Text(
             label,
-            maxLines: maxLines,
+            maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: contentColor,
@@ -726,37 +719,26 @@ class IosAccentGlassCapsuleButton extends StatelessWidget {
       ],
     );
 
-    final symbol = switch (trailingIcon ?? icon) {
-      CupertinoIcons.refresh => 'arrow.clockwise',
-      CupertinoIcons.doc_on_doc => 'doc.on.doc',
-      CupertinoIcons.chevron_down => 'chevron.down',
-      _ => null,
-    };
-    return AppleGlassButton(
-      key: glassKey,
-      label: semanticsLabel ?? label,
-      title: label,
-      symbol: symbol,
-      fontSize: fontSize,
-      symbolSize: trailingIcon != null ? trailingIconSize : 19,
-      horizontalPadding: padding.resolve(Directionality.of(context)).left,
-      trailingSymbol: trailingIcon != null,
-      busy: busy,
-      tint: tint,
-      foreground: contentColor,
-      onPressed: enabled ? onPressed : null,
-      parkWhenCovered: parkWhenCovered,
-      fallback: ConstrainedBox(
-        constraints: BoxConstraints(minHeight: minHeight),
-        child: CupertinoButton(
-          key: buttonKey,
-          padding: padding,
-          minSize: minHeight,
-          borderRadius: BorderRadius.circular(999),
-          onPressed: enabled ? onPressed : null,
-          child: row,
-        ),
+    final pill = DecoratedBox(
+      decoration: ShapeDecoration(color: fill, shape: const StadiumBorder()),
+      child: CupertinoButton(
+        key: buttonKey,
+        padding: padding,
+        minSize: minHeight,
+        pressedOpacity: 0.9,
+        onPressed: enabled ? onPressed : null,
+        child: row,
       ),
+    );
+    if (semanticsLabel == null) return pill;
+    return Semantics(
+      container: true,
+      label: semanticsLabel,
+      button: true,
+      enabled: enabled,
+      onTap: enabled ? onPressed : null,
+      excludeSemantics: true,
+      child: pill,
     );
   }
 }

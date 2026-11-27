@@ -138,15 +138,11 @@ class FontSettingsPage extends StatelessWidget {
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             if (usesAppleGlass)
-                              IosAccentGlassCapsuleButton(
+                              IosAccentPillButton(
                                 key: ValueKey('font-import-${scope.name}'),
-                                glassKey: ValueKey(
-                                  'font-import-glass-${scope.name}',
-                                ),
                                 icon: CupertinoIcons.doc_on_doc,
                                 busy: state.busy == scope,
-                                label:
-                                    state.busy == scope ? '正在处理…' : '导入字体',
+                                label: state.busy == scope ? '正在处理…' : '导入字体',
                                 onPressed:
                                     state.busy != null
                                         ? null

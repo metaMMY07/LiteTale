@@ -152,14 +152,12 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     symbol: String?,
     title: String? = nil,
     tint: UIColor? = nil,
-    foreground: UIColor = .label,
-    fontSize: CGFloat? = nil,
-    symbolSize: CGFloat? = nil,
-    horizontalPadding: CGFloat? = nil,
-    trailingSymbol: Bool = false,
-    busy: Bool = false
+    foreground: UIColor = .label
   ) {
-    let image = symbol.flatMap { UIImage(systemName: $0) }
+    let symbolImage = symbol.flatMap { UIImage(systemName: $0) }
+    let image = tint == nil
+      ? symbolImage
+      : symbolImage?.withTintColor(foreground, renderingMode: .alwaysOriginal)
     button.tintColor = tint
     if #available(iOS 15.0, *) {
       var style: UIButton.Configuration
@@ -172,30 +170,20 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       style.title = title
       style.imagePadding = 4
       style.titleLineBreakMode = .byTruncatingTail
-      if let size = symbolSize ?? (title == nil ? nil : 16) {
-        style.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: size)
-      }
       if title != nil {
+        style.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 16)
         style.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { input in
           var output = input
-          if let fontSize {
-            let font = UIFont.systemFont(ofSize: fontSize, weight: .semibold)
-            output.font = UIFontMetrics(forTextStyle: .subheadline).scaledFont(for: font)
-          } else {
-            output.font = UIFont.preferredFont(forTextStyle: .subheadline)
-          }
+          output.font = UIFont.preferredFont(forTextStyle: .subheadline)
           return output
         }
       }
-      if let horizontalPadding {
-        style.contentInsets = NSDirectionalEdgeInsets(
-          top: 0, leading: horizontalPadding, bottom: 0, trailing: horizontalPadding)
-      }
-      if trailingSymbol { style.imagePlacement = .trailing }
       style.cornerStyle = .capsule
-      style.showsActivityIndicator = busy
       style.baseForegroundColor = foreground
-      if let tint { style.baseBackgroundColor = tint }
+      if let tint {
+        style.baseBackgroundColor = tint
+        style.imageColorTransformer = UIConfigurationColorTransformer { _ in foreground }
+      }
       button.configuration = style
     } else {
       button.setImage(image, for: .normal)
@@ -247,13 +235,8 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       } else {
         button.accessibilityTraits.remove(.selected)
       }
-      prepare(button, symbol: config["symbol"] as? String, title: config["title"] as? String,
-        tint: colorFromARGB(config["tint"]), foreground: colorFromARGB(config["foreground"]) ?? .label,
-        fontSize: (config["fontSize"] as? NSNumber).map { CGFloat($0.doubleValue) },
-        symbolSize: (config["symbolSize"] as? NSNumber).map { CGFloat($0.doubleValue) },
-        horizontalPadding: (config["horizontalPadding"] as? NSNumber).map { CGFloat($0.doubleValue) },
-        trailingSymbol: config["trailingSymbol"] as? Bool ?? false,
-        busy: config["busy"] as? Bool ?? false)
+      prepare(button, symbol: config["symbol"] as? String,
+        tint: colorFromARGB(config["tint"]), foreground: colorFromARGB(config["foreground"]) ?? .label)
       return
     }
     if let slider {

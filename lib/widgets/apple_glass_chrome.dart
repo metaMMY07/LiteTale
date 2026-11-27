@@ -147,37 +147,23 @@ class AppleGlassButton extends StatelessWidget {
   const AppleGlassButton({
     super.key,
     this.symbol,
-    this.title,
     required this.label,
     required this.onPressed,
     required this.fallback,
     this.tint,
     this.foreground,
     this.brightness,
-    this.fontSize,
-    this.symbolSize,
-    this.horizontalPadding,
-    this.trailingSymbol = false,
-    this.busy = false,
     this.selected = false,
-    this.parkWhenCovered = false,
   });
 
   final String? symbol;
-  final String? title;
   final String label;
   final VoidCallback? onPressed;
   final Widget fallback;
   final Color? tint;
   final Color? foreground;
   final Brightness? brightness;
-  final double? fontSize;
-  final double? symbolSize;
-  final double? horizontalPadding;
-  final bool trailingSymbol;
-  final bool busy;
   final bool selected;
-  final bool parkWhenCovered;
 
   @override
   Widget build(BuildContext context) {
@@ -192,18 +178,15 @@ class AppleGlassButton extends StatelessWidget {
       child: fallback,
     );
     if (kIsWeb || !Platform.isIOS) {
-      final covered =
-          parkWhenCovered && ModalRoute.isCurrentOf(context) == false;
-      final enabled = !covered && onPressed != null && !busy;
       return Semantics(
         container: true,
         label: label,
         button: true,
-        enabled: enabled,
+        enabled: onPressed != null,
         selected: selected,
-        onTap: enabled ? onPressed : null,
+        onTap: onPressed,
         excludeSemantics: true,
-        child: IgnorePointer(ignoring: covered, child: preview),
+        child: preview,
       );
     }
     return _AppleChrome(
@@ -211,22 +194,15 @@ class AppleGlassButton extends StatelessWidget {
         'kind': 'button',
         'dark': appearance == Brightness.dark,
         'label': label,
-        'enabled': onPressed != null && !busy,
+        'enabled': onPressed != null,
         'selected': selected,
-        'busy': busy,
         if (symbol != null) 'symbol': symbol!,
-        if (title != null) 'title': title!,
-        if (fontSize != null) 'fontSize': fontSize!,
-        if (symbolSize != null) 'symbolSize': symbolSize!,
-        if (horizontalPadding != null) 'horizontalPadding': horizontalPadding!,
-        if (trailingSymbol) 'trailingSymbol': true,
         if (tint != null) 'tint': tint!.toARGB32(),
         if (foreground != null) 'foreground': foreground!.toARGB32(),
       },
       onAction: (action, _) {
-        if (action == 'press' && !busy) onPressed?.call();
+        if (action == 'press') onPressed?.call();
       },
-      parkWhenCovered: parkWhenCovered,
       sizeToFallback: true,
       fallback: preview,
       attachmentFallback: preview,
@@ -1037,14 +1013,12 @@ class _AppleChrome extends StatefulWidget {
     required this.onAction,
     required this.fallback,
     required this.attachmentFallback,
-    this.parkWhenCovered = false,
     this.sizeToFallback = false,
   });
   final Map<String, Object> parameters;
   final void Function(String action, Object? value) onAction;
   final Widget fallback;
   final Widget attachmentFallback;
-  final bool parkWhenCovered;
   final bool sizeToFallback;
   @override
   State<_AppleChrome> createState() => _AppleChromeState();
@@ -1142,28 +1116,24 @@ class _AppleChromeState extends State<_AppleChrome> {
     final onstage = TickerMode.of(context) && _route?.offstage != true;
     final atRest = IosPageArrival.chromeAtRestOf(context);
     final interactive = current && onstage && atRest;
-    final parked = widget.parkWhenCovered && !current;
     if (kIsWeb || !Platform.isIOS) {
       return Offstage(
         offstage: !onstage,
         child: IgnorePointer(
           ignoring: !interactive,
-          child: ExcludeFocus(
-            excluding: !interactive,
-            child: parked ? widget.attachmentFallback : widget.fallback,
-          ),
+          child: ExcludeFocus(excluding: !interactive, child: widget.fallback),
         ),
       );
     }
     // Start attachment in the destination's first layout. Once attached, a
     // live glass view follows its page even while an adjacent page slides.
     // Only the Navigator's fully covered routes and inactive tabs are parked.
-    if (_nativeView == null && onstage && !parked) {
+    if (_nativeView == null && onstage) {
       _finishStartupAttachment = IosStartupTransition.waitForGlass(context);
       _nativeView = _createView();
     }
     _acceptActions = interactive && _nativeReady;
-    final showingPreview = !_nativeReady || parked;
+    final showingPreview = !_nativeReady;
     final preview = IgnorePointer(
       child: ExcludeFocus(
         child: ExcludeSemantics(child: widget.attachmentFallback),
@@ -1190,17 +1160,11 @@ class _AppleChromeState extends State<_AppleChrome> {
           if (_nativeView case final view?)
             Positioned.fill(
               key: const ValueKey('glass-native'),
-              child: Offstage(
-                offstage: parked,
-                child: IgnorePointer(
-                  ignoring: !_acceptActions,
-                  child: ExcludeSemantics(
-                    excluding: !_acceptActions,
-                    child: ExcludeFocus(
-                      excluding: !_acceptActions,
-                      child: view,
-                    ),
-                  ),
+              child: IgnorePointer(
+                ignoring: !_acceptActions,
+                child: ExcludeSemantics(
+                  excluding: !_acceptActions,
+                  child: ExcludeFocus(excluding: !_acceptActions, child: view),
                 ),
               ),
             ),

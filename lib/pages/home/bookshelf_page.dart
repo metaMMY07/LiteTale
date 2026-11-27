@@ -769,9 +769,8 @@ class _ShelfSourcePicker extends StatelessWidget {
           alignment: AlignmentDirectional.centerStart,
           child: Padding(
             padding: const EdgeInsetsDirectional.only(start: 16, end: 16),
-            child: IosAccentGlassCapsuleButton(
+            child: IosAccentPillButton(
               key: const ValueKey('bookshelf-source-filter-capsule'),
-              glassKey: const ValueKey('bookshelf-source-filter-glass'),
               label: labelText,
               trailingIcon: CupertinoIcons.chevron_down,
               trailingIconSize: 14,
