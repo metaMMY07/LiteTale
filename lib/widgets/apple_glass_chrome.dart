@@ -191,6 +191,21 @@ class AppleGlassButton extends StatelessWidget {
       ),
       child: fallback,
     );
+    if (kIsWeb || !Platform.isIOS) {
+      final covered =
+          parkWhenCovered && ModalRoute.isCurrentOf(context) == false;
+      final enabled = !covered && onPressed != null && !busy;
+      return Semantics(
+        container: true,
+        label: label,
+        button: true,
+        enabled: enabled,
+        selected: selected,
+        onTap: enabled ? onPressed : null,
+        excludeSemantics: true,
+        child: IgnorePointer(ignoring: covered, child: preview),
+      );
+    }
     return _AppleChrome(
       parameters: {
         'kind': 'button',

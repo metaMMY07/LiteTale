@@ -748,20 +748,13 @@ class IosAccentGlassCapsuleButton extends StatelessWidget {
       parkWhenCovered: parkWhenCovered,
       fallback: ConstrainedBox(
         constraints: BoxConstraints(minHeight: minHeight),
-        child: Semantics(
-          label: semanticsLabel,
-          button: true,
-          enabled: enabled,
-          excludeSemantics: semanticsLabel != null,
-          onTap: semanticsLabel != null && enabled ? onPressed : null,
-          child: CupertinoButton(
-            key: buttonKey,
-            padding: padding,
-            minSize: minHeight,
-            borderRadius: BorderRadius.circular(999),
-            onPressed: enabled ? onPressed : null,
-            child: row,
-          ),
+        child: CupertinoButton(
+          key: buttonKey,
+          padding: padding,
+          minSize: minHeight,
+          borderRadius: BorderRadius.circular(999),
+          onPressed: enabled ? onPressed : null,
+          child: row,
         ),
       ),
     );
