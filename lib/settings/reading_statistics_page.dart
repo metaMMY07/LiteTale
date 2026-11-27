@@ -9,6 +9,7 @@ import 'package:wild/settings/settings_widgets.dart';
 import 'package:wild/sources/book_source.dart';
 import 'package:wild/widgets/app_loading_indicator.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
+import 'package:wild/widgets/ios_solid_surface.dart';
 import 'package:wild/widgets/ios_top_bar_backdrop.dart';
 import 'package:wild/widgets/left_aligned_scrollable.dart';
 import 'package:wild/widgets/platform_controls.dart';
@@ -207,14 +208,6 @@ class _StatisticsOverview extends StatelessWidget {
             onSelectDate: onSelectDate,
             onOpenDetails: onOpenDetails,
           ),
-          const SizedBox(height: 10),
-          Text(
-            '统计数据只保存在这台设备；没有历史阅读数据时会从今天开始记录。',
-            textAlign: TextAlign.center,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
-          ),
         ],
       ),
     );
@@ -263,7 +256,6 @@ class _StatisticsActivityAndHourlyState
           children: [
             _SectionCard(
               title: '阅读活动',
-              subtitle: '本地记录 · 只统计阅读器实际开启的时间',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -307,27 +299,31 @@ class _StatisticsActivityAndHourlyState
             const SizedBox(height: 14),
             _SectionCard(
               title: '阅读时段',
-              subtitle:
-                  '${_relativeDayTitle(selectedDate, widget.today)} · 按本地时间统计',
+              subtitle: _relativeDayTitle(selectedDate, widget.today),
               child: _HourlyChart(values: dayHours),
             ),
             const SizedBox(height: 14),
             _SectionCard(
               title: '按书籍查看趋势',
               subtitle: '选中日期：${_dateLabel(selectedDate)}',
-              child: Wrap(
-                spacing: 16,
-                runSpacing: 10,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  const Text('每日、每周与每月阅读时长'),
-                  AppButton.tonalIcon(
-                    onPressed: widget.onOpenDetails,
-                    icon: const Icon(Icons.bar_chart_rounded),
-                    label: const Text('查看详情'),
-                  ),
-                ],
-              ),
+              child:
+                  usesAppleGlass
+                      ? IosAccentPillButton(
+                        buttonKey: const ValueKey('statistics-open-details'),
+                        label: '查看详情',
+                        icon: CupertinoIcons.chart_bar,
+                        fullWidth: true,
+                        minHeight: 48,
+                        onPressed: widget.onOpenDetails,
+                      )
+                      : Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: AppButton.tonalIcon(
+                          onPressed: widget.onOpenDetails,
+                          icon: const Icon(Icons.bar_chart_rounded),
+                          label: const Text('查看详情'),
+                        ),
+                      ),
             ),
           ],
         );
@@ -563,11 +559,7 @@ class _ActivityHeatmap extends StatelessWidget {
               runSpacing: 6,
               children: [
                 Text(
-                  isEmptySnapshot
-                      ? '开始阅读后，活动格子会逐步点亮'
-                      : metrics.scrollable
-                      ? '近 1 年 · 左右滑动查看更早记录'
-                      : '近 1 年阅读活动',
+                  isEmptySnapshot ? '开始阅读后，活动格子会逐步点亮' : '近 1 年',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: colors.onSurfaceVariant,
                   ),
@@ -1067,17 +1059,18 @@ class _Metric extends StatelessWidget {
 class _SectionCard extends StatelessWidget {
   const _SectionCard({
     required this.title,
-    required this.subtitle,
+    this.subtitle,
     required this.child,
   });
   final String title;
-  final String subtitle;
+  final String? subtitle;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final colors = Theme.of(context).colorScheme;
+    final subtitleText = subtitle;
     return SettingsCard(
       color:
           usesAppleGlass
@@ -1094,13 +1087,15 @@ class _SectionCard extends StatelessWidget {
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 2),
-            Text(
-              subtitle,
-              style: textTheme.bodySmall?.copyWith(
-                color: colors.onSurfaceVariant,
+            if (subtitleText != null && subtitleText.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                subtitleText,
+                style: textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
               ),
-            ),
+            ],
             const SizedBox(height: 14),
             child,
           ],

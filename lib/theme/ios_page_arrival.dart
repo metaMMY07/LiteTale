@@ -4,6 +4,67 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:wild/theme/ios_dock_insets.dart';
 
+/// Counts the UIKit glass views a destination page is still waiting for.
+///
+/// A pushed page keeps its entrance at the off-screen origin until these
+/// views exist, so the solid attachment placeholder never becomes visible and
+/// the native glass does not swap in mid-slide. Pages without glass resolve
+/// once their first layout completes and keep the normal first frame.
+class IosPageChromeWarmup {
+  IosPageChromeWarmup({this.maximumHold = const Duration(milliseconds: 100)});
+
+  /// Upper bound for a missed or stuck platform-view callback.
+  final Duration maximumHold;
+
+  int _pending = 0;
+  bool _sawChrome = false;
+  bool _pageBuilt = false;
+  bool _released = false;
+  bool _entranceStarted = false;
+
+  /// True until layout has run and every glass view in the page has attached.
+  bool get waiting => !_released && (!_pageBuilt || _pending > 0);
+
+  /// True once the entrance slide has started (after warmup or [maximumHold]).
+  bool get entranceStarted => _entranceStarted;
+
+  /// True when this page has no UIKit glass at all, so its entrance may reuse
+  /// the elapsed animation time instead of starting a delayed spring. A page
+  /// whose glass has already attached is not empty and starts its slide at
+  /// the current frame.
+  bool get empty => !_released && _pageBuilt && _pending == 0 && !_sawChrome;
+
+  void register() {
+    if (_released) return;
+    _sawChrome = true;
+    _pending++;
+  }
+
+  void attached() {
+    if (_pending > 0) _pending--;
+  }
+
+  void abandon() => attached();
+
+  void pageLaidOut() => _pageBuilt = true;
+
+  void markEntranceStarted() => _entranceStarted = true;
+
+  void release() {
+    _released = true;
+    _pending = 0;
+  }
+
+  @visibleForTesting
+  int get pending => _pending;
+
+  @visibleForTesting
+  bool get sawChrome => _sawChrome;
+
+  @visibleForTesting
+  bool get pageBuilt => _pageBuilt;
+}
+
 // Only round the leading edge sliding over the previous page; rounding the
 // trailing edge exposes the window background at the top-right corner while
 // the predecessor parallax-slides to the left.
@@ -21,10 +82,12 @@ class LiteTaleCupertinoTransitionsBuilder
   const LiteTaleCupertinoTransitionsBuilder({
     this.useLinearProgress = false,
     this.cachePageDuringTransition = false,
+    this.chromeWarmup,
   });
 
   final bool useLinearProgress;
   final bool cachePageDuringTransition;
+  final IosPageChromeWarmup? chromeWarmup;
 
   @override
   Widget buildTransitions<T>(
@@ -42,6 +105,7 @@ class LiteTaleCupertinoTransitionsBuilder
       route: route,
       animation: animation,
       secondary: secondary,
+      chromeWarmup: chromeWarmup,
       roundWhileSliding:
           !route.fullscreenDialog && !route.isFirst && !reduceMotion,
       child: IosDockInsets.applyToPage(
@@ -148,16 +212,27 @@ class IosPageArrival extends InheritedWidget {
   const IosPageArrival._({
     required this.pending,
     required this.chromeAtRest,
+    required this.onstage,
+    required this.chromeWarmup,
     required super.child,
   });
 
   final Future<bool>? pending;
   final bool chromeAtRest;
 
+  /// The Navigator hides a freshly pushed route for one frame while it
+  /// measures Hero destinations. Dependents must rebuild when it is shown.
+  final bool onstage;
+  final IosPageChromeWarmup? chromeWarmup;
+
   /// Null once the page is visible at rest, or outside a Cupertino route.
   /// A pending arrival resolves false if the route is removed first.
   static Future<bool>? pendingOf(BuildContext context) =>
       context.getInheritedWidgetOfExactType<IosPageArrival>()?.pending;
+
+  /// The UIKit glass this route has to attach before its entrance is shown.
+  static IosPageChromeWarmup? chromeWarmupOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<IosPageArrival>()?.chromeWarmup;
 
   /// Observe the boundaries of a slide in either direction, including the
   /// page underneath it. This does not rebuild listeners for each tick.
@@ -169,7 +244,9 @@ class IosPageArrival extends InheritedWidget {
 
   @override
   bool updateShouldNotify(IosPageArrival oldWidget) =>
-      oldWidget.pending != pending || oldWidget.chromeAtRest != chromeAtRest;
+      oldWidget.pending != pending ||
+      oldWidget.chromeAtRest != chromeAtRest ||
+      oldWidget.onstage != onstage;
 }
 
 class _IosPageArrival extends StatefulWidget {
@@ -179,6 +256,7 @@ class _IosPageArrival extends StatefulWidget {
     required this.secondary,
     required this.roundWhileSliding,
     required this.child,
+    this.chromeWarmup,
   });
 
   final ModalRoute<Object?> route;
@@ -186,6 +264,7 @@ class _IosPageArrival extends StatefulWidget {
   final Animation<double> secondary;
   final bool roundWhileSliding;
   final Widget child;
+  final IosPageChromeWarmup? chromeWarmup;
 
   @override
   State<_IosPageArrival> createState() => _IosPageArrivalState();
@@ -208,6 +287,13 @@ class _IosPageArrivalState extends State<_IosPageArrival> {
     _chromeAtRest = _atRest;
     widget.animation.addStatusListener(_onStatus);
     widget.secondary.addStatusListener(_onStatus);
+    // Registration happens while the page builds during this frame. Mark the
+    // page as laid out afterwards even when the Navigator keeps this first
+    // frame offstage for Hero measurement, so an empty page keeps its normal
+    // entrance timing.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.chromeWarmup?.pageLaidOut();
+    });
   }
 
   @override
@@ -248,25 +334,34 @@ class _IosPageArrivalState extends State<_IosPageArrival> {
   void dispose() {
     widget.animation.removeStatusListener(_onStatus);
     widget.secondary.removeStatusListener(_onStatus);
+    widget.chromeWarmup?.release();
     _pending?.complete(false);
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => IosPageArrival._(
-    pending: _pending?.future,
-    chromeAtRest: _chromeAtRest && _pending == null,
-    child:
-        widget.roundWhileSliding
-            ? ClipRRect(
-              borderRadius: iosSlidingPageRadius(
-                MediaQuery.sizeOf(context),
-                textDirection: Directionality.of(context),
-              ),
-              clipBehavior:
-                  widget.animation.isCompleted ? Clip.none : Clip.antiAlias,
-              child: widget.child,
-            )
-            : widget.child,
-  );
+  Widget build(BuildContext context) {
+    // A newly pushed route can be offstage for its first frame while Hero
+    // destinations are measured. Dependents still need to know when it is
+    // shown so their native views start accepting input.
+    final onstage = !widget.route.offstage;
+    return IosPageArrival._(
+      pending: _pending?.future,
+      chromeAtRest: _chromeAtRest && _pending == null,
+      onstage: onstage,
+      chromeWarmup: widget.chromeWarmup,
+      child:
+          widget.roundWhileSliding
+              ? ClipRRect(
+                borderRadius: iosSlidingPageRadius(
+                  MediaQuery.sizeOf(context),
+                  textDirection: Directionality.of(context),
+                ),
+                clipBehavior:
+                    widget.animation.isCompleted ? Clip.none : Clip.antiAlias,
+                child: widget.child,
+              )
+              : widget.child,
+    );
+  }
 }

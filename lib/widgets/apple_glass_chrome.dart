@@ -14,6 +14,11 @@ import 'package:wild/widgets/app_launch_screen.dart';
 
 bool get usesAppleGlass => defaultTargetPlatform == TargetPlatform.iOS;
 
+/// Whether this process can create UIKit glass views. Tests flip this to
+/// exercise the attachment handshake without an iOS host.
+@visibleForTesting
+bool appleGlassPlatformViews = !kIsWeb && Platform.isIOS;
+
 class AppleGlassCard extends StatelessWidget {
   const AppleGlassCard({
     super.key,
@@ -196,7 +201,7 @@ class AppleGlassButton extends StatelessWidget {
       ),
       child: fallback,
     );
-    if (kIsWeb || !Platform.isIOS) {
+    if (!appleGlassPlatformViews) {
       return Semantics(
         container: true,
         label: label,
@@ -1050,7 +1055,10 @@ class _AppleChromeState extends State<_AppleChrome> {
   ModalRoute<Object?>? _route;
   UiKitView? _nativeView;
   bool _nativeReady = false;
+  bool _deferPreviewHandoff = false;
   bool _acceptActions = false;
+  IosPageChromeWarmup? _chromeWarmup;
+  bool _warmupPending = false;
   VoidCallback? _finishStartupAttachment;
 
   bool get _isDecorative => widget.parameters['kind'] == 'surface';
@@ -1059,6 +1067,21 @@ class _AppleChromeState extends State<_AppleChrome> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _route = ModalRoute.of(context);
+    _chromeWarmup = IosPageArrival.chromeWarmupOf(context);
+  }
+
+  void _registerChromeWarmup() {
+    final warmup = _chromeWarmup;
+    if (_warmupPending || warmup == null) return;
+    if (!appleGlassPlatformViews) return;
+    _warmupPending = true;
+    warmup.register();
+  }
+
+  void _finishChromeWarmup() {
+    if (!_warmupPending) return;
+    _warmupPending = false;
+    _chromeWarmup?.attached();
   }
 
   void _created(int id) {
@@ -1082,7 +1105,16 @@ class _AppleChromeState extends State<_AppleChrome> {
     if (!_sameParameter(_nativeView?.creationParams, widget.parameters)) {
       _update();
     }
-    setState(() => _nativeReady = true);
+    final atRestNow =
+        context.getInheritedWidgetOfExactType<IosPageArrival>()?.chromeAtRest ??
+        true;
+    final lateDuringSlide =
+        _chromeWarmup != null && _chromeWarmup!.entranceStarted && !atRestNow;
+    setState(() {
+      _nativeReady = true;
+      if (lateDuringSlide) _deferPreviewHandoff = true;
+    });
+    _finishChromeWarmup();
     _finishStartupAttachment?.call();
     _finishStartupAttachment = null;
   }
@@ -1127,6 +1159,10 @@ class _AppleChromeState extends State<_AppleChrome> {
   @override
   void dispose() {
     _finishStartupAttachment?.call();
+    if (_warmupPending) {
+      _warmupPending = false;
+      _chromeWarmup?.abandon();
+    }
     _channel?.setMethodCallHandler(null);
     super.dispose();
   }
@@ -1134,10 +1170,15 @@ class _AppleChromeState extends State<_AppleChrome> {
   @override
   Widget build(BuildContext context) {
     final current = _route?.isCurrent != false;
-    final onstage = TickerMode.of(context) && _route?.offstage != true;
+    final tickerEnabled = TickerMode.of(context);
+    final onstage = tickerEnabled && _route?.offstage != true;
+    // A freshly pushed route is offstage for one frame while Hero targets are
+    // measured. Its current route still has to start attaching there, so the
+    // native glass exists before the first visible entrance frame.
+    final canAttach = tickerEnabled && (onstage || _route?.isCurrent != false);
     final atRest = IosPageArrival.chromeAtRestOf(context);
     final interactive = current && onstage && atRest;
-    if (kIsWeb || !Platform.isIOS) {
+    if (!appleGlassPlatformViews) {
       return Offstage(
         offstage: !onstage,
         child: IgnorePointer(
@@ -1149,12 +1190,14 @@ class _AppleChromeState extends State<_AppleChrome> {
     // Start attachment in the destination's first layout. Once attached, a
     // live glass view follows its page even while an adjacent page slides.
     // Only the Navigator's fully covered routes and inactive tabs are parked.
-    if (_nativeView == null && onstage) {
+    if (_nativeView == null && canAttach) {
+      _registerChromeWarmup();
       _finishStartupAttachment = IosStartupTransition.waitForGlass(context);
       _nativeView = _createView();
     }
-    _acceptActions = interactive && _nativeReady;
-    final showingPreview = !_nativeReady;
+    if (_deferPreviewHandoff && atRest) _deferPreviewHandoff = false;
+    final showingPreview = !_nativeReady || _deferPreviewHandoff;
+    _acceptActions = interactive && _nativeReady && !_deferPreviewHandoff;
     final preview = IgnorePointer(
       child: ExcludeFocus(
         child: ExcludeSemantics(child: widget.attachmentFallback),
@@ -1165,6 +1208,17 @@ class _AppleChromeState extends State<_AppleChrome> {
       child: Stack(
         fit: widget.sizeToFallback ? StackFit.loose : StackFit.expand,
         children: [
+          if (_nativeView case final view?)
+            Positioned.fill(
+              key: const ValueKey('glass-native'),
+              child: IgnorePointer(
+                ignoring: !_acceptActions,
+                child: ExcludeSemantics(
+                  excluding: !_acceptActions,
+                  child: ExcludeFocus(excluding: !_acceptActions, child: view),
+                ),
+              ),
+            ),
           if (widget.sizeToFallback)
             Visibility(
               visible: showingPreview,
@@ -1177,17 +1231,6 @@ class _AppleChromeState extends State<_AppleChrome> {
             Positioned.fill(
               key: const ValueKey('glass-preview'),
               child: preview,
-            ),
-          if (_nativeView case final view?)
-            Positioned.fill(
-              key: const ValueKey('glass-native'),
-              child: IgnorePointer(
-                ignoring: !_acceptActions,
-                child: ExcludeSemantics(
-                  excluding: !_acceptActions,
-                  child: ExcludeFocus(excluding: !_acceptActions, child: view),
-                ),
-              ),
             ),
         ],
       ),

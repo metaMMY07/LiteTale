@@ -69,9 +69,15 @@ class _BookDetailsViewState extends State<BookDetailsView> {
   bool _busy = false;
   String _description = '';
   ui.Image? _backdropImage;
+  String _backdropIdentity = '';
+
+  String _backdropIdentityFor() =>
+      '${widget.source.name}:${sourceRevision.value}:${_effectiveCoverUrl(widget.info, widget.hint)}';
+
   @override
   void initState() {
     super.initState();
+    _backdropIdentity = _backdropIdentityFor();
     _description = _readDescription();
     _indexCatalog();
   }
@@ -90,9 +96,9 @@ class _BookDetailsViewState extends State<BookDetailsView> {
     if (changedBook) {
       _open.clear();
     }
-    if (changedBook ||
-        old.info?.imgUrl != widget.info?.imgUrl ||
-        old.hint?.coverUrl != widget.hint?.coverUrl) {
+    final nextBackdropIdentity = _backdropIdentityFor();
+    if (nextBackdropIdentity != _backdropIdentity) {
+      _backdropIdentity = nextBackdropIdentity;
       _replaceBackdrop(null);
     }
     if (changedBook || !identical(old.volumes, widget.volumes)) {
@@ -103,7 +109,9 @@ class _BookDetailsViewState extends State<BookDetailsView> {
   }
 
   void _onBackdropChanged(ui.Image? image) {
-    if (!mounted || (image == null && _backdropImage == null)) return;
+    if (!mounted) return;
+    _backdropIdentity = _backdropIdentityFor();
+    if (image == null && _backdropImage == null) return;
     setState(() => _replaceBackdrop(image?.clone()));
   }
 
@@ -228,8 +236,7 @@ class _BookDetailsViewState extends State<BookDetailsView> {
     if (!apple) return scrollView;
     final pageBg = theme.scaffoldBackgroundColor;
     final dark = theme.brightness == Brightness.dark;
-    final coverUrl = info?.imgUrl ?? '';
-    final cover = coverUrl.isEmpty ? widget.hint?.coverUrl ?? '' : coverUrl;
+    final cover = _effectiveCoverUrl(info, widget.hint);
     final showBackdrop = cover.isNotEmpty && _backdropImage != null;
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -879,6 +886,11 @@ String _plainIntroduction(String raw) {
       .trim();
 }
 
+String _effectiveCoverUrl(NovelInfo? info, BookDetailHint? hint) {
+  final url = info?.imgUrl ?? '';
+  return url.isEmpty ? hint?.coverUrl ?? '' : url;
+}
+
 class BookDetailsHeader extends StatefulWidget {
   const BookDetailsHeader({
     super.key,
@@ -900,10 +912,7 @@ class BookDetailsHeader extends StatefulWidget {
   final ImageProvider? coverImageProvider;
   final bool renderBackdrop;
   final ValueChanged<ui.Image?>? onBackdropChanged;
-  String get _coverUrl {
-    final url = info?.imgUrl ?? '';
-    return url.isEmpty ? hint?.coverUrl ?? '' : url;
-  }
+  String get _coverUrl => _effectiveCoverUrl(info, hint);
 
   @override
   State<BookDetailsHeader> createState() => _BookDetailsHeaderState();
@@ -925,6 +934,23 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
   void initState() {
     super.initState();
     _backdropIdentity = _currentIdentity();
+    sourceRevision.addListener(_onSourceRevisionChanged);
+  }
+
+  void _onSourceRevisionChanged() {
+    final nextIdentity = _currentIdentity();
+    if (nextIdentity == _backdropIdentity) return;
+    ++_backdropGeneration;
+    _backdropIdentity = nextIdentity;
+    final previous = _backdropImage;
+    _backdropImage = null;
+    if (mounted) {
+      if (widget.renderBackdrop) setState(() {});
+      widget.onBackdropChanged?.call(null);
+    }
+    if (previous != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+    }
   }
 
   @override
@@ -933,11 +959,7 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
     final nextIdentity = _currentIdentity();
     final switchedBook =
         nextIdentity != _backdropIdentity ||
-        old.coverImageProvider != widget.coverImageProvider ||
-        (old.info != null &&
-            widget.info != null &&
-            old.info?.title != widget.info?.title &&
-            old._coverUrl != widget._coverUrl);
+        old.coverImageProvider != widget.coverImageProvider;
     if (switchedBook) {
       ++_backdropGeneration;
       final previous = _backdropImage;
@@ -1041,6 +1063,7 @@ class _BookDetailsHeaderState extends State<BookDetailsHeader> {
 
   @override
   void dispose() {
+    sourceRevision.removeListener(_onSourceRevisionChanged);
     ++_backdropGeneration;
     final previous = _backdropImage;
     _backdropImage = null;

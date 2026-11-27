@@ -247,8 +247,8 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     searchButton.addTarget(self, action: #selector(openSearch), for: .touchUpInside)
     titleLabel.text = "发现"
     titleLabel.textAlignment = .center
-    let boldTitle = UIFont.systemFont(ofSize: 17, weight: .bold)
-    titleLabel.font = UIFontMetrics(forTextStyle: .headline).scaledFont(for: boldTitle)
+    let semiboldTitle = UIFont.systemFont(ofSize: 17, weight: .semibold)
+    titleLabel.font = UIFontMetrics(forTextStyle: .headline).scaledFont(for: semiboldTitle)
     titleLabel.adjustsFontForContentSizeCategory = true
     titleLabel.textColor = .label
     addSubview(titleLabel)
