@@ -13,6 +13,7 @@ typedef _DockState =
       bool mounted,
       bool fullscreen,
       bool blocked,
+      int overlayRevision,
       Animation<double>? readerAnimation,
     });
 
@@ -24,12 +25,14 @@ class IosDockController extends NavigatorObserver {
 
   final Set<String> fullscreenRoutes;
   final _routes = <Route<dynamic>>[];
-  final _dismissing = <TransitionRoute<dynamic>>{};
+  final _dismissing = <TransitionRoute<dynamic>, Set<Route<dynamic>>>{};
   final _selection = ValueNotifier<int>(0);
+  int _overlayRevision = 0;
   final _dock = ValueNotifier<_DockState>((
     mounted: false,
     fullscreen: false,
     blocked: false,
+    overlayRevision: 0,
     readerAnimation: null,
   ));
   bool _publishQueued = false;
@@ -45,7 +48,7 @@ class IosDockController extends NavigatorObserver {
   );
 
   bool get _modal =>
-      _dismissing.any((route) => route is PopupRoute) ||
+      _dismissing.keys.any((route) => route is PopupRoute) ||
       _routes.lastOrNull is! PageRoute;
   bool _isFullscreen(Route<dynamic> route) =>
       fullscreenRoutes.contains(route.settings.name) ||
@@ -53,16 +56,30 @@ class IosDockController extends NavigatorObserver {
       route is ModalBottomSheetRoute ||
       route is CupertinoModalPopupRoute;
   bool get _fullscreen =>
-      _dismissing.any(_isFullscreen) || _routes.any(_isFullscreen);
+      _dismissing.keys.any(_isFullscreen) || _routes.any(_isFullscreen);
 
   Animation<double>? get _readerAnimation {
-    final fullscreen = [..._routes, ..._dismissing].where(_isFullscreen);
+    final fullscreen = [
+      ..._routes,
+      ..._dismissing.keys,
+    ].where(_isFullscreen);
     if (fullscreen.length != 1) return null;
     final route = fullscreen.single;
     if (route is PageRoute && fullscreenRoutes.contains(route.settings.name)) {
       return route.animation;
     }
     return null;
+  }
+
+  bool _hasOverlayAbove(ModalRoute<dynamic> route) {
+    if (_disposed) return false;
+    if (_dismissing.entries.any(
+      (entry) => entry.key is PopupRoute && entry.value.contains(route),
+    )) {
+      return true;
+    }
+    final index = _routes.lastIndexOf(route);
+    return index >= 0 && index < _routes.length - 1;
   }
 
   void select(int index) {
@@ -98,10 +115,12 @@ class IosDockController extends NavigatorObserver {
     scheduleMicrotask(() {
       _publishQueued = false;
       if (!_disposed) {
+        _overlayRevision++;
         _dock.value = (
           mounted: _homeIndex >= 0,
           fullscreen: _fullscreen,
           blocked: _modal || navigator?.userGestureInProgress == true,
+          overlayRevision: _overlayRevision,
           readerAnimation: _readerAnimation,
         );
       }
@@ -119,7 +138,7 @@ class IosDockController extends NavigatorObserver {
     _routes.remove(route);
     if (route is TransitionRoute<dynamic> &&
         (route is PopupRoute || _isFullscreen(route))) {
-      _dismissing.add(route);
+      _dismissing[route] = _routes.toSet();
       unawaited(
         route.completed.then((_) {
           _dismissing.remove(route);
@@ -179,6 +198,15 @@ class IosAppDockHost extends StatelessWidget {
   final Widget child;
   final bool revealHomeOnStartup;
 
+  static bool hasOverlayAboveOf(
+    BuildContext context,
+    ModalRoute<dynamic> route,
+  ) {
+    final scope =
+        context.dependOnInheritedWidgetOfExactType<_IosOverlayScope>();
+    return scope != null && scope.controller._hasOverlayAbove(route);
+  }
+
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<_DockState>(
     valueListenable: controller._dock,
@@ -194,13 +222,17 @@ class IosAppDockHost extends StatelessWidget {
       final content = Stack(
         fit: StackFit.expand,
         children: [
-          IosDockInsets(
-            height:
-                state.mounted && !keyboard
-                    ? AppleGlassBottomBar.heightFor(media)
-                    : 0,
-            fullscreenRoutes: controller.fullscreenRoutes,
-            child: child!,
+          _IosOverlayScope(
+            controller: controller,
+            revision: state.overlayRevision,
+            child: IosDockInsets(
+              height:
+                  state.mounted && !keyboard
+                      ? AppleGlassBottomBar.heightFor(media)
+                      : 0,
+              fullscreenRoutes: controller.fullscreenRoutes,
+              child: child!,
+            ),
           ),
           if (state.mounted)
             Positioned(
@@ -269,6 +301,21 @@ final _dockParallax = Tween<Offset>(
   begin: Offset.zero,
   end: const Offset(-1 / 3, 0),
 );
+
+class _IosOverlayScope extends InheritedWidget {
+  const _IosOverlayScope({
+    required this.controller,
+    required this.revision,
+    required super.child,
+  });
+
+  final IosDockController controller;
+  final int revision;
+
+  @override
+  bool updateShouldNotify(_IosOverlayScope oldWidget) =>
+      oldWidget.controller != controller || oldWidget.revision != revision;
+}
 
 class _ReaderDockClipper extends CustomClipper<Path> {
   _ReaderDockClipper(

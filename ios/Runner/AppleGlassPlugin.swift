@@ -409,6 +409,8 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
           style.titleLineBreakMode = .byTruncatingTail
           style.contentInsets = .zero
           style.baseForegroundColor = color
+          style.background.backgroundColor = .clear
+          style.background.backgroundColorTransformer = UIConfigurationColorTransformer { _ in .clear }
           button.configuration = style
         } else {
           button.setImage(nil, for: .normal)
@@ -478,7 +480,9 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     }
     while stack.arrangedSubviews.count < actions.count {
       let button = UIButton(type: .system)
+      button.backgroundColor = .clear
       button.tintColor = .label
+      if #available(iOS 13.4, *) { button.isPointerInteractionEnabled = false }
       button.addTarget(self, action: #selector(activateAction(_:)), for: .touchUpInside)
       stack.addArrangedSubview(button)
     }
@@ -522,9 +526,15 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
         surface.layer.cornerRadius = radius
         surface.layer.cornerCurve = .circular
         surface.clipsToBounds = kind == "surface"
+        surface.contentView.layer.cornerRadius = radius
+        surface.contentView.layer.cornerCurve = .circular
+        surface.contentView.clipsToBounds = true
       } else {
         layer.cornerRadius = 20
         surface.layer.cornerRadius = 0
+        surface.contentView.layer.cornerRadius = 20
+        surface.contentView.layer.cornerCurve = .continuous
+        surface.contentView.clipsToBounds = true
       }
     }
     else if let slider {

@@ -253,6 +253,18 @@ ThemeData iosGlassTheme(Brightness brightness, {Color? accent}) {
     ),
     splashFactory: NoSplash.splashFactory,
     highlightColor: Colors.transparent,
+    hoverColor: Colors.transparent,
+    focusColor: Colors.transparent,
+    iconButtonTheme: const IconButtonThemeData(
+      style: ButtonStyle(
+        overlayColor: WidgetStatePropertyAll(Colors.transparent),
+      ),
+    ),
+    textButtonTheme: const TextButtonThemeData(
+      style: ButtonStyle(
+        overlayColor: WidgetStatePropertyAll(Colors.transparent),
+      ),
+    ),
     progressIndicatorTheme: ProgressIndicatorThemeData(color: tint),
     textSelectionTheme: TextSelectionThemeData(
       cursorColor: tint,

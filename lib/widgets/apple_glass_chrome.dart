@@ -11,6 +11,7 @@ import 'package:wild/theme/ios_glass_theme.dart' show iosHomeTitleStyle;
 import 'package:wild/theme/ios_page_arrival.dart';
 import 'package:wild/theme/ios_system_colors.dart';
 import 'package:wild/widgets/app_launch_screen.dart';
+import 'package:wild/widgets/ios_app_dock.dart' show IosAppDockHost;
 
 bool get usesAppleGlass => defaultTargetPlatform == TargetPlatform.iOS;
 
@@ -175,30 +176,8 @@ class AppleGlassButton extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!usesAppleGlass) return fallback;
     final appearance = brightness ?? Theme.of(context).brightness;
-    final previewSurface =
-        tint ??
-        Color.alphaBlend(
-          IosSystemColors.color(
-            'surface',
-            appearance,
-          ).withValues(alpha: appearance == Brightness.dark ? .36 : .58),
-          IosSystemColors.color('background', appearance),
-        );
     final preview = DecoratedBox(
-      decoration: ShapeDecoration(
-        shape: StadiumBorder(
-          side:
-              tint == null
-                  ? BorderSide(
-                    color: IosSystemColors.color(
-                      'separator',
-                      appearance,
-                    ).withValues(alpha: .18),
-                  )
-                  : BorderSide.none,
-        ),
-        color: previewSurface.withValues(alpha: tint?.a ?? .88),
-      ),
+      decoration: _glassCapsulePreviewDecoration(appearance, tint: tint),
       child: fallback,
     );
     if (!appleGlassPlatformViews) {
@@ -494,18 +473,13 @@ class AppleGlassActions extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final appearance = brightness ?? Theme.of(context).brightness;
-    final preview = DecoratedBox(
-      decoration: BoxDecoration(
-        color:
-            tint ??
-            (brightness == null
-                ? colors.surfaceContainerHigh
-                : IosSystemColors.color(
-                  'surface',
-                  appearance,
-                ).withValues(alpha: .86)),
-        borderRadius: BorderRadius.circular(buttonSize / 2),
-      ),
+    final decoration = _glassCapsulePreviewDecoration(appearance, tint: tint);
+    final foregroundColor =
+        brightness == null
+            ? colors.onSurface
+            : IosSystemColors.color('label', appearance);
+    final testFallback = DecoratedBox(
+      decoration: decoration,
       child:
           fallback ??
           Row(
@@ -515,7 +489,7 @@ class AppleGlassActions extends StatelessWidget {
                   child: IconButton(
                     tooltip: action.label,
                     padding: EdgeInsets.zero,
-                    color: colors.onSurface,
+                    color: foregroundColor,
                     iconSize: 20,
                     onPressed: action.onPressed,
                     icon: Icon(action.fallbackIcon),
@@ -523,6 +497,26 @@ class AppleGlassActions extends StatelessWidget {
                 ),
             ],
           ),
+    );
+    final visualPreview = DecoratedBox(
+      decoration: decoration,
+      child: Row(
+        children: [
+          for (final action in actions)
+            Expanded(
+              child: Center(
+                child: Icon(
+                  _previewIconForSymbol(action.symbol, action.fallbackIcon),
+                  size: 20,
+                  color:
+                      action.onPressed == null
+                          ? foregroundColor.withValues(alpha: .38)
+                          : foregroundColor,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
     return SizedBox(
       width: actions.length * buttonSize,
@@ -551,12 +545,55 @@ class AppleGlassActions extends StatelessWidget {
             }
           }
         },
-        fallback: preview,
-        attachmentFallback: preview,
+        fallback: testFallback,
+        attachmentFallback: visualPreview,
       ),
     );
   }
 }
+
+ShapeDecoration _glassCapsulePreviewDecoration(
+  Brightness appearance, {
+  Color? tint,
+}) {
+  final previewSurface =
+      tint ??
+      Color.alphaBlend(
+        IosSystemColors.color(
+          'surface',
+          appearance,
+        ).withValues(alpha: appearance == Brightness.dark ? .36 : .58),
+        IosSystemColors.color('background', appearance),
+      );
+  return ShapeDecoration(
+    shape: StadiumBorder(
+      side:
+          tint == null
+              ? BorderSide(
+                color: IosSystemColors.color(
+                  'separator',
+                  appearance,
+                ).withValues(alpha: .18),
+              )
+              : BorderSide.none,
+    ),
+    color: previewSurface.withValues(alpha: tint?.a ?? .88),
+  );
+}
+
+IconData _previewIconForSymbol(String symbol, IconData fallbackIcon) =>
+    switch (symbol) {
+      'tag' => CupertinoIcons.tag,
+      'bubble.left' => CupertinoIcons.chat_bubble,
+      'arrow.down.to.line' => CupertinoIcons.arrow_down_to_line,
+      'chevron.left' => CupertinoIcons.chevron_left,
+      'folder.badge.plus' => CupertinoIcons.folder_badge_plus,
+      'square.and.pencil' => CupertinoIcons.square_pencil,
+      'checkmark.circle' => CupertinoIcons.check_mark_circled,
+      'trash' => CupertinoIcons.trash,
+      'ellipsis' => CupertinoIcons.ellipsis,
+      _ => fallbackIcon,
+    };
 
 class AppleGlassToolbar extends StatelessWidget {
   const AppleGlassToolbar({
@@ -1053,6 +1090,8 @@ class _AppleChrome extends StatefulWidget {
 class _AppleChromeState extends State<_AppleChrome> {
   MethodChannel? _channel;
   ModalRoute<Object?>? _route;
+  Animation<double>? _primaryAnimation;
+  Animation<double>? _secondaryAnimation;
   UiKitView? _nativeView;
   bool _nativeReady = false;
   bool _deferPreviewHandoff = false;
@@ -1063,10 +1102,31 @@ class _AppleChromeState extends State<_AppleChrome> {
 
   bool get _isDecorative => widget.parameters['kind'] == 'surface';
 
+  void _onRouteAnimationStatus(AnimationStatus _) {
+    if (mounted) setState(() {});
+  }
+
+  void _bindRouteAnimations(ModalRoute<Object?>? route) {
+    final nextPrimary = route?.animation;
+    if (_primaryAnimation != nextPrimary) {
+      _primaryAnimation?.removeStatusListener(_onRouteAnimationStatus);
+      _primaryAnimation = nextPrimary;
+      _primaryAnimation?.addStatusListener(_onRouteAnimationStatus);
+    }
+    final nextSecondary = route?.secondaryAnimation;
+    if (_secondaryAnimation != nextSecondary) {
+      _secondaryAnimation?.removeStatusListener(_onRouteAnimationStatus);
+      _secondaryAnimation = nextSecondary;
+      _secondaryAnimation?.addStatusListener(_onRouteAnimationStatus);
+    }
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _route = ModalRoute.of(context);
+    final route = ModalRoute.of(context);
+    _route = route;
+    _bindRouteAnimations(route);
     _chromeWarmup = IosPageArrival.chromeWarmupOf(context);
   }
 
@@ -1158,6 +1218,8 @@ class _AppleChromeState extends State<_AppleChrome> {
 
   @override
   void dispose() {
+    _primaryAnimation?.removeStatusListener(_onRouteAnimationStatus);
+    _secondaryAnimation?.removeStatusListener(_onRouteAnimationStatus);
     _finishStartupAttachment?.call();
     if (_warmupPending) {
       _warmupPending = false;
@@ -1172,12 +1234,27 @@ class _AppleChromeState extends State<_AppleChrome> {
     final current = _route?.isCurrent != false;
     final tickerEnabled = TickerMode.of(context);
     final onstage = tickerEnabled && _route?.offstage != true;
+    final secondary = _route?.secondaryAnimation;
+    final coveredByPage = secondary != null && !secondary.isDismissed;
+    final routePopping = _route?.animation?.status == AnimationStatus.reverse;
+    final coveredByActiveRoute =
+        _route != null && !_route!.isCurrent && !routePopping;
+    final coveredByDismissingPopup =
+        _route != null && IosAppDockHost.hasOverlayAboveOf(context, _route!);
+    // Any Flutter layer drawn above a live UIKit glass view (an incoming/popping
+    // upper PageRoute or a modal sheet/dialog scrim) forces rectangular
+    // FlutterOverlayView tiles while UIGlassEffect shadows and interactive
+    // expansion bleed outside the rectangle. Park the native view Offstage and
+    // render the matching Flutter preview while covered.
+    final covered =
+        coveredByPage || coveredByActiveRoute || coveredByDismissingPopup;
     // A freshly pushed route is offstage for one frame while Hero targets are
     // measured. Its current route still has to start attaching there, so the
     // native glass exists before the first visible entrance frame.
-    final canAttach = tickerEnabled && (onstage || _route?.isCurrent != false);
+    final canAttach =
+        tickerEnabled && !covered && (onstage || _route?.isCurrent != false);
     final atRest = IosPageArrival.chromeAtRestOf(context);
-    final interactive = current && onstage && atRest;
+    final interactive = current && onstage && atRest && !covered;
     if (!appleGlassPlatformViews) {
       return Offstage(
         offstage: !onstage,
@@ -1188,15 +1265,14 @@ class _AppleChromeState extends State<_AppleChrome> {
       );
     }
     // Start attachment in the destination's first layout. Once attached, a
-    // live glass view follows its page even while an adjacent page slides.
-    // Only the Navigator's fully covered routes and inactive tabs are parked.
+    // live glass view follows its page until an upper route or modal covers it.
     if (_nativeView == null && canAttach) {
       _registerChromeWarmup();
       _finishStartupAttachment = IosStartupTransition.waitForGlass(context);
       _nativeView = _createView();
     }
     if (_deferPreviewHandoff && atRest) _deferPreviewHandoff = false;
-    final showingPreview = !_nativeReady || _deferPreviewHandoff;
+    final showingPreview = !_nativeReady || _deferPreviewHandoff || covered;
     _acceptActions = interactive && _nativeReady && !_deferPreviewHandoff;
     final preview = IgnorePointer(
       child: ExcludeFocus(
@@ -1211,11 +1287,17 @@ class _AppleChromeState extends State<_AppleChrome> {
           if (_nativeView case final view?)
             Positioned.fill(
               key: const ValueKey('glass-native'),
-              child: IgnorePointer(
-                ignoring: !_acceptActions,
-                child: ExcludeSemantics(
-                  excluding: !_acceptActions,
-                  child: ExcludeFocus(excluding: !_acceptActions, child: view),
+              child: Offstage(
+                offstage: covered,
+                child: IgnorePointer(
+                  ignoring: !_acceptActions,
+                  child: ExcludeSemantics(
+                    excluding: !_acceptActions,
+                    child: ExcludeFocus(
+                      excluding: !_acceptActions,
+                      child: view,
+                    ),
+                  ),
                 ),
               ),
             ),
