@@ -1,0 +1,257 @@
+use crate::database::entities::active::{
+    chapter_cache, image_cache, novel_download, novel_download_chapter, novel_download_picture,
+    web_cache,
+};
+use crate::database::entities::WebCacheEntity;
+use crate::{get_image_cache_dir, CLIENT, DOWNLOAD_FOLDER, IMAGE_LOCKS};
+use chrono::Utc;
+use image::io::Reader as ImageReader;
+use image::GenericImageView;
+use std::future::Future;
+use std::path::Path;
+use std::pin::Pin;
+use std::time::Duration;
+use tokio::fs as async_fs;
+use once_cell::sync::Lazy;
+
+// Cover downloads must not own a detail/catalog or chapter cache lock. Use a
+// full-key hash within separate pools rather than the last digit of a book ID.
+static WEB_READ_LOCKS: Lazy<Vec<tokio::sync::Mutex<()>>> =
+    Lazy::new(|| (0..64).map(|_| tokio::sync::Mutex::new(())).collect());
+static CHAPTER_READ_LOCKS: Lazy<Vec<tokio::sync::Mutex<()>>> =
+    Lazy::new(|| (0..64).map(|_| tokio::sync::Mutex::new(())).collect());
+
+fn read_lock_index(key: &str) -> usize {
+    usize::from(md5::compute(key.as_bytes()).0[0]) % 64
+}
+
+// Database rows and download status can outlive the actual file (interrupted
+// writes, storage cleanup). Validate off the async worker before reusing it.
+async fn is_usable_image(path: std::path::PathBuf) -> bool {
+    tokio::task::spawn_blocking(move || {
+        ImageReader::open(path)
+            .ok()
+            .and_then(|reader| reader.with_guessed_format().ok())
+            .and_then(|reader| reader.decode().ok())
+            .is_some()
+    })
+    .await
+    .unwrap_or(false)
+}
+
+// Cached chapter text written before this parser version has no illustration
+// markers because the old HTML extractor discarded every <img> node.
+const CHAPTER_IMAGE_PARSER_V2_EPOCH: i64 = 1_788_248_849;
+
+pub async fn cleanup_image_cache() -> crate::Result<()> {
+    let image_cache_dir = get_image_cache_dir();
+    let seven_days_ago = Utc::now().timestamp() - (7 * 24 * 60 * 60);
+    let expired_records = image_cache::Entity::expired_images(seven_days_ago).await?;
+    // 删除过期的文件
+    for record in &expired_records {
+        let file_path = format!("{}/{}", image_cache_dir, record.url_md5);
+        if Path::new(&file_path).exists() {
+            let _ = async_fs::remove_file(file_path).await;
+        }
+    }
+    // 删除过期的数据库记录
+    image_cache::Entity::delete_by_url_list(
+        expired_records
+            .iter()
+            .map(|record| record.img_url.clone())
+            .collect(),
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn get_cached_image(img_url: String) -> crate::Result<String> {
+    let image_cache_dir = get_image_cache_dir();
+    let url_md5 = md5::compute(img_url.as_bytes()).0;
+    let url_md5 = hex::encode(url_md5);
+    let file_path = format!("{}/{}", image_cache_dir, url_md5);
+
+    // 根据MD5最后一位选择锁
+    let lock_index = (url_md5.as_bytes()[url_md5.len() - 1] % 64) as usize;
+    let _guard = IMAGE_LOCKS[lock_index].lock().await;
+
+    if let Some(a) = novel_download::Entity::find_by_image_url(img_url.as_str()).await? {
+        if a.cover_download_status == 1 {
+            let novel_dir = Path::new(DOWNLOAD_FOLDER.get().unwrap()).join(&a.novel_id);
+            let picture_file_path = novel_dir.join("cover");
+            let path = picture_file_path.to_str().unwrap().to_string();
+            if is_usable_image(picture_file_path).await {
+                return Ok(path);
+            }
+        }
+    }
+
+    if let Some(a) = novel_download_picture::Entity::find_by_url(img_url.as_str()).await? {
+        if a.download_status == 1 {
+            let novel_dir = Path::new(DOWNLOAD_FOLDER.get().unwrap()).join(&a.aid);
+            let picture_file_path = novel_dir.join(format!("picture_{}", a.url_md5));
+            let path = picture_file_path.to_str().unwrap().to_string();
+            if is_usable_image(picture_file_path).await {
+                return Ok(path);
+            }
+        }
+    }
+
+    // 检查缓存记录
+    if let Some(_cache) = image_cache::Entity::find_by_url(img_url.as_str()).await? {
+        // 如果缓存记录存在，尝试读取文件
+        if is_usable_image(Path::new(&file_path).to_path_buf()).await {
+            return Ok(file_path);
+        }
+    }
+
+    // 缓存未命中，下载图片
+    let buff = CLIENT.download_image(img_url.as_str()).await?;
+
+    // 获取图片尺寸
+    let img = ImageReader::new(std::io::Cursor::new(&buff))
+        .with_guessed_format()?
+        .decode()?;
+    let (width, height) = img.dimensions();
+
+    // 保存文件
+    async_fs::create_dir_all(image_cache_dir).await?;
+    async_fs::write(&file_path, &buff).await?;
+
+    // 保存数据库记录
+    let cache = image_cache::Model {
+        img_url,
+        url_md5,
+        width: width as i32,
+        height: height as i32,
+        file_size: buff.len() as i64,
+        download_time: Utc::now().timestamp(),
+    };
+    image_cache::Entity::save_image_cache(cache).await?;
+
+    Ok(file_path)
+}
+
+pub(crate) async fn get_chapter_content(aid: &str, cid: &str) -> anyhow::Result<String> {
+    let _guard = tokio::time::timeout(
+        Duration::from_secs(2), CHAPTER_READ_LOCKS[read_lock_index(&format!("{aid}:{cid}"))].lock()
+    ).await.map_err(|_| anyhow::anyhow!("Wenku8 chapter cache wait timed out"))?;
+
+    // 如果章节已下载，则直接从本地文件读取
+    if let Some(a) = novel_download_chapter::Entity::find_by_id(cid).await? {
+        if a.download_status == 1 {
+            let novel_dir = Path::new(DOWNLOAD_FOLDER.get().unwrap()).join(&a.aid);
+            let chapter_file_path = novel_dir.join(format!("chapter_{}", cid));
+            let content = tokio::fs::read_to_string(&chapter_file_path).await?;
+            let is_current_parser = tokio::fs::metadata(&chapter_file_path)
+                .await
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|modified| modified.as_secs() as i64 >= CHAPTER_IMAGE_PARSER_V2_EPOCH)
+                .unwrap_or(false);
+            if is_current_parser {
+                return Ok(content);
+            }
+
+            // Refresh old downloaded chapter text once so illustrations appear.
+            // If the network is unavailable, keep the existing offline text.
+            return match CLIENT.c_content(aid, cid).await {
+                Ok(refreshed) => {
+                    tokio::fs::write(&chapter_file_path, &refreshed).await?;
+                    Ok(refreshed)
+                }
+                Err(_) => Ok(content),
+            };
+        }
+    }
+
+    // 先尝试从缓存获取（跳过无效的缓存内容）
+    if let Some(cache) = chapter_cache::Entity::get_chapter_content(aid, cid).await? {
+        if cache.download_time >= CHAPTER_IMAGE_PARSER_V2_EPOCH
+            && !cache.content.trim().is_empty()
+            && cache.content.trim() != "0"
+        {
+            return Ok(cache.content);
+        }
+    }
+
+    // 下载章节内容
+    let content = CLIENT.c_content(aid, cid).await?;
+
+    // 保存到缓存
+    chapter_cache::Entity::save_chapter_content(aid.to_string(), cid.to_string(), content.clone())
+        .await?;
+
+    Ok(content)
+}
+
+// 清理过期的章节缓存
+pub(crate) async fn cleanup_expired_chapters() -> anyhow::Result<()> {
+    // 清理7天前的缓存
+    let expire_time = Utc::now().timestamp() - 7 * 24 * 60 * 60;
+    chapter_cache::Entity::delete_expired_chapters(expire_time).await?;
+    Ok(())
+}
+
+// 清理过期的web缓存
+pub(crate) async fn cleanup_expired_web_cache() -> anyhow::Result<()> {
+    // 清理7天前的缓存
+    let expire_time = Utc::now().timestamp() - 7 * 24 * 60 * 60;
+    web_cache::Entity::delete_expired_cache(expire_time).await?;
+    Ok(())
+}
+
+pub(crate) async fn clean_all_web_cache() -> anyhow::Result<()> {
+    web_cache::Entity::delete_all().await?;
+    Ok(())
+}
+
+pub(crate) async fn cache_first<T: for<'de> serde::Deserialize<'de> + serde::Serialize>(
+    key: String,
+    expire: Duration,
+    pin: Pin<Box<dyn Future<Output = anyhow::Result<T>> + Send>>,
+) -> anyhow::Result<T> {
+    crate::request_policy::with_operation_timeout(
+        cache_first_inner(key, expire, pin),
+        crate::request_policy::READ_OPERATION_TIMEOUT,
+        "Wenku8 cached read",
+    ).await
+}
+
+async fn cache_first_inner<T: for<'de> serde::Deserialize<'de> + serde::Serialize>(
+    key: String,
+    expire: Duration,
+    pin: Pin<Box<dyn Future<Output = anyhow::Result<T>> + Send>>,
+) -> anyhow::Result<T> {
+    let _guard = WEB_READ_LOCKS[read_lock_index(&key)].lock().await;
+    let time = chrono::Local::now().timestamp();
+    if let Some(ref model) = WebCacheEntity::get_web_cache(key.as_str()).await? {
+        if time < (model.cache_time + expire.as_secs() as i64) {
+            Ok(serde_json::from_str(&model.cache_content)?)
+        } else {
+            let t = pin.await?;
+            let content = serde_json::to_string(&t)?;
+            WebCacheEntity::update_web_cache(key, content).await?;
+            Ok(t)
+        }
+    } else {
+        let t = pin.await?;
+        let content = serde_json::to_string(&t)?;
+        WebCacheEntity::save_web_cache(key, content).await?;
+        Ok(t)
+    }
+}
+
+#[cfg(test)]
+mod read_lock_tests {
+    use super::*;
+    #[tokio::test]
+    async fn a_slow_cover_does_not_block_metadata_or_chapter_cache_admission() {
+        let key = "NOVEL_INFO$4343";
+        let index = (key.as_bytes()[key.len()-1] % 64) as usize;
+        let _cover = IMAGE_LOCKS[index].lock().await;
+        let _metadata = tokio::time::timeout(Duration::from_millis(50), WEB_READ_LOCKS[read_lock_index(key)].lock()).await.unwrap();
+        let _chapter = tokio::time::timeout(Duration::from_millis(50), CHAPTER_READ_LOCKS[read_lock_index("4343:177990")].lock()).await.unwrap();
+    }
+}

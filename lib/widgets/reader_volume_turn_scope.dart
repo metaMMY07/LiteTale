@@ -1,0 +1,119 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:wild/cubits/volume_control_cubit.dart';
+import 'package:wild/services/reader_speech.dart';
+import 'package:wild/utils/controller_event.dart';
+
+/// Hardware volume belongs to the current, foreground reading route only.
+/// ModalRoute also covers dialogs and bottom sheets, so their controls never
+/// turn the page hidden underneath or keep intercepting normal volume keys.
+class ReaderVolumeTurnScope extends StatefulWidget {
+  const ReaderVolumeTurnScope({
+    super.key,
+    required this.onTurn,
+    required this.child,
+    this.active = true,
+  });
+
+  final ValueChanged<ReaderControllerEventArgs> onTurn;
+  final Widget child;
+  final bool active;
+
+  @override
+  State<ReaderVolumeTurnScope> createState() => _ReaderVolumeTurnScopeState();
+}
+
+class _ReaderVolumeTurnScopeState extends State<ReaderVolumeTurnScope>
+    with WidgetsBindingObserver {
+  VolumeControlCubit? _preferences;
+  ModalRoute<dynamic>? _route;
+  StreamSubscription<ReaderControllerEventArgs>? _subscription;
+  late AppLifecycleState _lifecycle;
+
+  bool get _canListen =>
+      mounted &&
+      widget.active &&
+      _preferences?.isSupported == true &&
+      _preferences?.isEnabled == true &&
+      !ReaderSpeechController.isAnyPlaying &&
+      _route?.isCurrent == true &&
+      _lifecycle == AppLifecycleState.resumed;
+
+  @override
+  void initState() {
+    super.initState();
+    _lifecycle =
+        WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed;
+    WidgetsBinding.instance.addObserver(this);
+    ReaderSpeechController.playbackChanges.addListener(_syncListener);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _preferences = context.read<VolumeControlCubit>();
+    _route = ModalRoute.of(context);
+    _syncListener();
+  }
+
+  @override
+  void didUpdateWidget(ReaderVolumeTurnScope oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncListener();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycle = state;
+    _syncListener();
+  }
+
+  void _syncListener() {
+    if (!_canListen) {
+      _stopListener();
+      return;
+    }
+    if (_subscription != null) return;
+    _subscription = readerVolumeEvents.listen(
+      (event) {
+        // A platform event may already be queued when a modal opens or a
+        // preference changes. Never dispatch it to the covered reader.
+        if (_canListen) widget.onTurn(event);
+      },
+      onError: (Object error, StackTrace _) {
+        if (mounted &&
+            _canListen &&
+            error is PlatformException &&
+            error.code == 'reader_volume_unavailable') {
+          ScaffoldMessenger.maybeOf(
+            context,
+          )?.showSnackBar(const SnackBar(content: Text('音量键翻页暂不可用，请关闭后重新开启')));
+        }
+        // A missing/closed platform stream must not break the reading route.
+      },
+    );
+  }
+
+  void _stopListener() {
+    final subscription = _subscription;
+    _subscription = null;
+    if (subscription != null) unawaited(subscription.cancel());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    ReaderSpeechController.playbackChanges.removeListener(_syncListener);
+    _stopListener();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => BlocListener<VolumeControlCubit, bool>(
+    listener: (_, _) => _syncListener(),
+    child: widget.child,
+  );
+}

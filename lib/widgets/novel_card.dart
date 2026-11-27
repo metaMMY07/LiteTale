@@ -1,0 +1,193 @@
+import 'package:flutter/material.dart';
+import 'book_card_ink.dart';
+import 'apple_book_cover.dart';
+import 'package:wild/theme/material_you.dart';
+import 'package:wild/sources/book_source.dart';
+import 'package:wild/widgets/book_cover_image.dart';
+import 'package:wild/models/book_detail_hint.dart';
+import 'package:wild/src/rust/wenku8/models.dart';
+
+class NovelCard extends StatelessWidget {
+  final String title;
+  final String coverUrl;
+  final String? author;
+  final VoidCallback? onTap;
+  final double? width;
+  final double? height;
+  final BoxFit fit;
+  final BorderRadius? borderRadius;
+  final double elevation;
+  final EdgeInsetsGeometry? padding;
+  final bool showAuthor;
+  final SourceId source;
+  final Widget? coverBadge;
+
+  const NovelCard({
+    super.key,
+    required this.title,
+    required this.coverUrl,
+    this.author,
+    this.onTap,
+    this.width,
+    this.height,
+    this.fit = BoxFit.cover,
+    this.borderRadius,
+    this.elevation = 0.5,
+    this.padding,
+    this.showAuthor = true,
+    this.coverBadge,
+    required this.source,
+  });
+
+  factory NovelCard.fromNovel({
+    required Novel novel,
+    VoidCallback? onTap,
+    double? width,
+    double? height,
+    BoxFit fit = BoxFit.cover,
+    BorderRadius? borderRadius,
+    double elevation = 0.5,
+    EdgeInsetsGeometry? padding,
+    bool showAuthor = true,
+    required SourceId source,
+  }) {
+    return NovelCard(
+      title: novel.title,
+      coverUrl: novel.coverUrl,
+      author: novel.author,
+      onTap:
+          onTap == null
+              ? null
+              : () {
+                BookDetailHint.remember(novel.id, novel.title, novel.coverUrl);
+                onTap();
+              },
+      width: width,
+      height: height,
+      fit: fit,
+      borderRadius: borderRadius,
+      elevation: usesMaterialYou ? 0 : elevation,
+      padding: padding,
+      showAuthor: showAuthor,
+      source: source,
+    );
+  }
+
+  factory NovelCard.fromNovelCover({
+    required NovelCover novel,
+    VoidCallback? onTap,
+    double? width,
+    double? height,
+    BoxFit fit = BoxFit.cover,
+    BorderRadius? borderRadius,
+    double elevation = 0.5,
+    EdgeInsetsGeometry? padding,
+    bool showAuthor = false,
+    required SourceId source,
+  }) {
+    return NovelCard(
+      title: novel.title,
+      coverUrl: novel.img,
+      onTap:
+          onTap == null
+              ? null
+              : () {
+                BookDetailHint.remember(novel.aid, novel.title, novel.img);
+                onTap();
+              },
+      width: width,
+      height: height,
+      fit: fit,
+      borderRadius: borderRadius,
+      elevation: elevation,
+      padding: padding,
+      showAuthor: showAuthor,
+      source: source,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (Theme.of(context).platform == TargetPlatform.iOS) {
+      return AppleBookCover(
+        title: title,
+        url: coverUrl,
+        source: source,
+        author: showAuthor ? author : null,
+        showAuthor: showAuthor,
+        onTap: onTap,
+        coverBadge: coverBadge,
+      );
+    }
+    final cardRadius =
+        borderRadius ?? BorderRadius.circular(usesMaterialYou ? 16 : 4);
+    final logicalCoverWidth =
+        width != null && width!.isFinite && width! > 0 ? width! : 220.0;
+    final cover = BookCoverImage(
+      url: coverUrl,
+      source: source,
+      fit: fit,
+      width: width ?? double.infinity,
+      height: height,
+      cacheWidth:
+          (logicalCoverWidth * MediaQuery.devicePixelRatioOf(context)).ceil(),
+    );
+    final badge = coverBadge;
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      elevation: elevation,
+      shape: RoundedRectangleBorder(borderRadius: cardRadius),
+      child: BookCardInk(
+        borderRadius: cardRadius,
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child:
+                  badge == null
+                      ? cover
+                      : Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          cover,
+                          Positioned(top: 0, left: 0, child: badge),
+                        ],
+                      ),
+            ),
+            Padding(
+              padding: padding ?? EdgeInsets.all(usesMaterialYou ? 10 : 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: showAuthor ? 2 : 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: showAuthor ? null : 12,
+                      fontWeight:
+                          showAuthor ? FontWeight.bold : FontWeight.w500,
+                    ),
+                  ),
+                  if (showAuthor && author != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      author!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.secondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
