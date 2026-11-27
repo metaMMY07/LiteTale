@@ -1,0 +1,1068 @@
+import 'package:wild/widgets/reader_chapter_sheet.dart';
+import 'package:wild/widgets/reader_controls.dart';
+import 'package:wild/widgets/reader_settings_panel.dart';
+import 'package:wild/widgets/platform_controls.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:wild/services/hardware_turn_buffer.dart';
+import 'package:wild/services/reader_speech.dart';
+import 'package:wild/models/reader_mark.dart' show ReaderMarkAxis;
+import 'package:wild/models/reader_page.dart'
+    show ReaderCssPage, ReaderCssImageRegion;
+import 'package:wild/widgets/reader_speech_scope.dart';
+import 'package:wild/services/reader_listening_chapter.dart';
+import 'package:wild/cubits/volume_control_cubit.dart';
+import 'package:wild/widgets/wenku8_recovery_button.dart';
+import 'package:wild/widgets/app_loading_indicator.dart';
+import 'package:wild/widgets/source_website.dart';
+import 'package:wild/cubits/font_settings_cubit.dart';
+import 'package:wild/sources/book_source.dart';
+import 'package:wild/widgets/bili_recovery_button.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:wild/pages/novel/paragraph_spacing_cubit.dart';
+import 'package:wild/pages/novel/reader_cubit.dart';
+import 'package:wild/pages/novel/theme_cubit.dart';
+import 'package:wild/services/reader_typography.dart';
+import 'package:wild/widgets/reader_system_ui_scope.dart';
+import 'package:wild/widgets/reader_paper_view.dart';
+import 'package:wild/widgets/reader_footer.dart';
+import 'package:wild/cubits/screen_keep_on.dart';
+import 'package:wild/utils/controller_event.dart';
+import 'package:wild/widgets/reader_volume_turn_scope.dart';
+import 'dart:io';
+
+import '../../src/rust/wenku8/models.dart';
+import 'font_size_cubit.dart';
+import 'line_height_cubit.dart';
+import 'top_bar_height_cubit.dart';
+import 'bottom_bar_height_cubit.dart';
+import 'left_padding_cubit.dart';
+import 'right_padding_cubit.dart';
+import 'reader_type_cubit.dart';
+import 'package:wild/cubits/reader_background_cubit.dart';
+import 'package:wild/widgets/reader_cover_view.dart';
+import 'package:wild/cubits/reader_curl_cubit.dart';
+import 'package:wild/widgets/page_curl_view.dart';
+import 'package:wild/widgets/apple_glass_chrome.dart' show usesAppleGlass;
+import 'package:wild/settings/settings_preferences.dart';
+import 'package:wild/settings/reading_session_scope.dart';
+import 'dart:async';
+import 'package:wild/services/reader_mark_store.dart';
+import 'package:wild/widgets/reader_mark_selection.dart';
+import 'package:wild/widgets/reader_marks_panel.dart';
+import 'package:wild/theme/ios_page_arrival.dart';
+
+class _CssProgressVisibility extends StatefulWidget {
+  const _CssProgressVisibility({
+    super.key,
+    required this.pages,
+    required this.child,
+  });
+
+  final List<ReaderCssPage> pages;
+  final Widget child;
+
+  @override
+  State<_CssProgressVisibility> createState() => _CssProgressVisibilityState();
+}
+
+class _CssProgressVisibilityState extends State<_CssProgressVisibility> {
+  // Share the renderer's cached image metadata for these visible leaves.
+  late final _images = Future.wait([
+    for (final page in widget.pages) Future.sync(page.readImages!),
+  ]);
+
+  @override
+  Widget build(BuildContext context) =>
+      FutureBuilder<List<List<ReaderCssImageRegion>>>(
+        future: _images,
+        builder:
+            (context, snapshot) =>
+                snapshot.data?.every((regions) => regions.isEmpty) == true
+                    ? widget.child
+                    : const SizedBox.shrink(),
+      );
+}
+
+class ReaderPage extends StatelessWidget {
+  final String aid;
+  final String cid;
+  final String initialTitle;
+  final List<Volume> volumes;
+  final NovelInfo novelInfo;
+  final int? initialPage;
+  final int? initialTextOffset;
+  final int? initialSourceOffset;
+  final ReaderMarkStore? markStore;
+
+  const ReaderPage({
+    super.key,
+    required this.aid,
+    required this.cid,
+    required this.initialTitle,
+    required this.volumes,
+    required this.novelInfo,
+    this.initialPage,
+    this.initialTextOffset,
+    this.initialSourceOffset,
+    this.markStore,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fontSizeCubit = context.read<FontSizeCubit>();
+    final paragraphSpacingCubit = context.read<ParagraphSpacingCubit>();
+    final lineHeightCubit = context.read<LineHeightCubit>();
+    final topBarHeightCubit = context.read<TopBarHeightCubit>();
+    final bottomBarHeightCubit = context.read<BottomBarHeightCubit>();
+    final leftPaddingCubit = context.read<LeftPaddingCubit>();
+    final rightPaddingCubit = context.read<RightPaddingCubit>();
+    final readerTypeCubit = context.read<ReaderTypeCubit>();
+
+    return ReaderSystemUiScope(
+      child: MultiBlocProvider(
+        providers: [
+          BlocProvider.value(value: fontSizeCubit),
+          BlocProvider.value(value: paragraphSpacingCubit),
+          BlocProvider.value(value: lineHeightCubit),
+          BlocProvider.value(value: topBarHeightCubit),
+          BlocProvider.value(value: bottomBarHeightCubit),
+          BlocProvider.value(value: leftPaddingCubit),
+          BlocProvider.value(value: rightPaddingCubit),
+          BlocProvider.value(value: readerTypeCubit),
+          BlocProvider(
+            create:
+                (context) => ReaderCubit(
+                  novelInfo: novelInfo,
+                  initialAid: aid,
+                  initialCid: cid,
+                  initialVolumes: volumes,
+                  fontSizeCubit: fontSizeCubit,
+                  paragraphSpacingCubit: paragraphSpacingCubit,
+                  lineHeightCubit: lineHeightCubit,
+                  topBarHeightCubit: topBarHeightCubit,
+                  bottomBarHeightCubit: bottomBarHeightCubit,
+                  leftPaddingCubit: leftPaddingCubit,
+                  rightPaddingCubit: rightPaddingCubit,
+                  fontSettingsCubit: context.read<FontSettingsCubit>(),
+                  readerTheme: () => context.read<ThemeCubit>().state,
+                  layoutReady: ReaderSystemUiScope.layoutReadyOf(context),
+                  initialRouteArrival: IosPageArrival.pendingOf(context),
+                )..loadChapter(
+                  initialPage: initialPage,
+                  initialTextOffset: initialTextOffset,
+                  initialSourceOffset: initialSourceOffset,
+                ),
+          ),
+        ],
+        child: BlocListener<FontSettingsCubit, FontSettingsState>(
+          listenWhen:
+              (previous, current) =>
+                  previous.readerFamily != current.readerFamily,
+          listener:
+              (context, _) => context.read<ReaderCubit>().reloadCurrentPage(),
+          child: BlocBuilder<ReaderCubit, ReaderState>(
+            builder: (context, state) {
+              if (state is ReaderLoading) {
+                return Scaffold(
+                  body:
+                      state.preparingLocalPage
+                          ? const Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                AppLoadingIndicator(),
+                                SizedBox(height: 16),
+                                Text('正在准备当前页'),
+                              ],
+                            ),
+                          )
+                          : SourceLoadingIndicator(
+                            source: sourceOf(aid),
+                            requestKey: state,
+                          ),
+                );
+              }
+              if (state is ReaderError) {
+                return Scaffold(
+                  body: SafeArea(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(state.error),
+                          const SizedBox(height: 16),
+                          SourceWebsiteLink(
+                            source: sourceOf(aid),
+                            readError: state.cause,
+                          ),
+                          AppButton.elevated(
+                            onPressed:
+                                () => context.read<ReaderCubit>().loadChapter(
+                                  refresh: sourceOf(aid) == SourceId.bili,
+                                ),
+                            child: const Text('重试'),
+                          ),
+                          Wenku8RecoveryButton(
+                            error: state.error,
+                            source: sourceOf(aid),
+                            onRecovered:
+                                () => context.read<ReaderCubit>().loadChapter(),
+                          ),
+                          BiliRecoveryButton(
+                            error: state.cause,
+                            source: sourceOf(aid),
+                            onRecovered:
+                                () => context.read<ReaderCubit>().loadChapter(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }
+              if (state is ReaderLoaded) {
+                // A new page list means new pagination. Recreate its controller at
+                // the latest clamped position, cancelling any old turn safely.
+                final cubit = context.read<ReaderCubit>();
+                final chapter = (aid: state.aid, cid: state.cid);
+                final text = cubit.markText(chapter, ReaderMarkAxis.text);
+                return ReaderSpeechScope(
+                  chapter: ReaderListeningChapter(
+                    aid: chapter.aid,
+                    cid: chapter.cid,
+                    title: state.title,
+                    text: text?.text ?? '',
+                    encoded: text?.encoded ?? false,
+                  ),
+                  request:
+                      (chapter) => ReaderListeningRequest(
+                        chapter: chapter,
+                        volumes: state.volumes,
+                        info: novelInfo,
+                        offset: cubit.listeningOffset(state, chapter.text),
+                      ),
+                  child: ReadingSessionScope(
+                    bookId: state.aid,
+                    title: novelInfo.title,
+                    active: !state.showControls,
+                    child: _ReaderView(
+                      key: ObjectKey(state.presentationKey ?? state.pages),
+                      state: state,
+                      title: state.title,
+                      bookId: aid,
+                      markStore: markStore,
+                      panelContext: context,
+                    ),
+                  ),
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReaderView extends StatefulWidget {
+  final ReaderLoaded state;
+  final String title;
+  final String bookId;
+  final ReaderMarkStore? markStore;
+  final BuildContext panelContext;
+
+  const _ReaderView({
+    super.key,
+    required this.state,
+    required this.title,
+    required this.bookId,
+    required this.panelContext,
+    this.markStore,
+  });
+
+  @override
+  State<_ReaderView> createState() => _ReaderViewState();
+}
+
+class _ReaderViewState extends State<_ReaderView> {
+  late final _hardwareTurns = HardwareTurnBuffer(
+    active:
+        () =>
+            mounted &&
+            !ReaderSpeechController.isAnyPlaying &&
+            ModalRoute.of(context)?.isCurrent != false &&
+            (WidgetsBinding.instance.lifecycleState == null ||
+                WidgetsBinding.instance.lifecycleState ==
+                    AppLifecycleState.resumed) &&
+            context.read<VolumeControlCubit>().state,
+    busy: () => _isTurning,
+    dispatch: _onController,
+  );
+  late ReaderCoverController _pageController;
+  final _curlKey = GlobalKey<PageCurlViewState>();
+  final _markViewport = GlobalKey();
+  final _readingPointers = <int>{};
+  bool _nativeTurnActive = false;
+  late final ReaderMarkSelection _marks;
+  bool _selecting = false;
+  int _markPaintRevision = 0;
+  bool _wasCurlEnabled = false;
+  Size? _lastLayoutSize;
+  EdgeInsets? _lastLayoutPadding;
+  TextScaler? _lastTextScaler;
+  bool? _lastBoldText;
+  String? _lastHanVariant;
+  Color? _lastPaperColor, _lastTextColor;
+  var preTime = 0;
+
+  int get _viewIndex =>
+      widget.state.layout.viewIndex(widget.state.currentPageIndex);
+  int get _viewCount =>
+      widget.state.layout.viewCount(widget.state.pages.length);
+
+  void _onViewChanged(int index) => context.read<ReaderCubit>().onPageChanged(
+    widget.state.layout.firstPage(index),
+  );
+
+  /// The open book owns its image policy. Read the book id from the cubit so a
+  /// later source switch in settings cannot re-route this reader's images.
+  SourceId get _bookSource => sourceOf(context.read<ReaderCubit>().initialAid);
+
+  ReaderPageEffect _pageEffect(ReaderPageEffect effect) =>
+      _bookSource == SourceId.localEpub &&
+              defaultTargetPlatform != TargetPlatform.android
+          ? ReaderPageEffect.slide
+          : effect.forPlatform(isIos: usesAppleGlass);
+
+  bool get _curlEnabled =>
+      _pageEffect(context.read<ReaderCurlCubit>().state) ==
+          ReaderPageEffect.nativeCurl &&
+      !MediaQuery.of(context).disableAnimations;
+
+  bool get _isTurning =>
+      _curlEnabled
+          ? (_curlKey.currentState?.isTurning ?? false)
+          : _pageController.isTurning;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = ReaderCoverController();
+    final cubit = context.read<ReaderCubit>();
+    _marks = ReaderMarkSelection(
+      viewport: _markViewport,
+      book: widget.bookId,
+      store: widget.markStore,
+      chapterText: cubit.markText,
+      canSelect:
+          (group) =>
+              mounted &&
+              group == _viewIndex &&
+              !_isTurning &&
+              ModalRoute.of(context)?.isCurrent != false,
+      onStart: () {
+        if (cubit.state.showControls) cubit.toggleControls();
+      },
+    )..addListener(_selectionChanged);
+    _marks.store.addListener(_savedMarksChanged);
+    _markPaintRevision = _chapterMarksRevision();
+    unawaited(_marks.store.load(_marks.book).catchError((Object _) {}));
+    setKeepScreenUpOnReading(true);
+  }
+
+  void _selectionChanged() {
+    final selecting = _marks.value != null;
+    if (selecting != _selecting && mounted) {
+      setState(() => _selecting = selecting);
+    }
+  }
+
+  int _chapterMarksRevision() => Object.hashAll(
+    _marks.store
+        .marks(_marks.book)
+        .where(
+          (mark) =>
+              !mark.isBookmark &&
+              mark.location.chapter ==
+                  (aid: widget.state.aid, cid: widget.state.cid),
+        )
+        .map(
+          (mark) => (
+            mark.id,
+            mark.location.offset,
+            mark.quote,
+            mark.color,
+            mark.note.isNotEmpty,
+          ),
+        ),
+  );
+
+  void _savedMarksChanged() {
+    if (!mounted) return;
+    final revision = _chapterMarksRevision();
+    if (revision != _markPaintRevision) {
+      setState(() => _markPaintRevision = revision);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _ReaderView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state.layout.viewIndex(oldWidget.state.currentPageIndex) !=
+            _viewIndex ||
+        oldWidget.state.cid != widget.state.cid) {
+      _marks.clear();
+    }
+  }
+
+  @override
+  void dispose() {
+    _hardwareTurns.dispose();
+    _pageController.dispose();
+    _marks.store.removeListener(_savedMarksChanged);
+    _marks.dispose();
+    setKeepScreenUpOnReading(false);
+    setKeepScreenUpOnScroll(false);
+
+    super.dispose();
+  }
+
+  void _handleMenuTap() {
+    if (_marks.clear()) return;
+    context.read<ReaderCubit>().toggleControls();
+  }
+
+  Widget _progressOnTextPages(ReaderState state, Widget child) {
+    if (state is! ReaderLoaded) return const SizedBox.shrink();
+    final first = state.layout.firstPage(
+      state.layout.viewIndex(state.currentPageIndex),
+    );
+    final leaves = state.pages.skip(first).take(state.layout.isSpread ? 2 : 1);
+    if (leaves.any((page) => page.isImage || page.artworkText != null)) {
+      return const SizedBox.shrink();
+    }
+    final css = [
+      for (final leaf in leaves)
+        if (leaf.cssPage case final page? when page.readImages != null) page,
+    ];
+    if (css.isEmpty) return child;
+    if (!state.showControls) return const SizedBox.shrink();
+    return _CssProgressVisibility(
+      key: ValueKey((css.first, css.skip(1).firstOrNull)),
+      pages: css,
+      child: child,
+    );
+  }
+
+  void _handleTap(TapUpDetails details) {
+    if (_marks.clear()) return;
+    if (!settingsPreferencesOf(context, listen: false).tapToTurn) {
+      _handleMenuTap();
+      return;
+    }
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final tapX = details.globalPosition.dx;
+    final tapY = details.globalPosition.dy;
+
+    // 将屏幕分为左、中、右三个区域
+    final leftArea = screenWidth * 0.3;
+    final rightArea = screenWidth * 0.7;
+    // 将屏幕分为上、中、下三个区域
+    final topArea = screenHeight * 0.3;
+    final bottomArea = screenHeight * 0.7;
+
+    // On iOS the side zones run the full height. The upper edge must not
+    // override a tap on the right, even in single-page portrait mode.
+    final useVerticalZones =
+        Theme.of(context).platform != TargetPlatform.iOS &&
+        !widget.state.layout.isSpread;
+    if (tapX < leftArea || (useVerticalZones && tapY < topArea)) {
+      // 点击左侧或上方区域，上一页
+      if (_viewIndex > 0) {
+        _turnPage(-1, startY: details.localPosition.dy);
+      } else {
+        _handleBoundaryTurn(-1);
+      }
+    } else if (tapX > rightArea || (useVerticalZones && tapY > bottomArea)) {
+      // 点击右侧或下方区域，下一页
+      if (_viewIndex < _viewCount - 1) {
+        _turnPage(1, startY: details.localPosition.dy);
+      } else {
+        _handleBoundaryTurn(1);
+      }
+    } else {
+      // 点击中央区域，切换菜单栏显示状态
+      _handleMenuTap();
+    }
+  }
+
+  void _handleBoundaryTurn(int direction) {
+    if (_bookSource == SourceId.localEpub) {
+      context.read<ReaderCubit>().turnBookBoundary(direction);
+      return;
+    }
+    if (!settingsPreferencesOf(context, listen: false).boundaryChapters) return;
+    if (direction < 0) {
+      if (_viewIndex != 0) return;
+      final currentVolumeIndex = _findCurrentVolumeIndex();
+      final currentChapterIndex = _findCurrentChapterIndex();
+      if (currentChapterIndex > 0 || currentVolumeIndex > 0) {
+        final now = DateTime.now().millisecondsSinceEpoch;
+        if (now - preTime > 2000) {
+          preTime = now;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('再次点击加载上一章'),
+              duration: Duration(seconds: 2),
+              behavior: SnackBarBehavior.floating,
+              margin: EdgeInsets.only(bottom: 16),
+            ),
+          );
+        } else {
+          preTime = 0;
+          context.read<ReaderCubit>().goToPreviousChapter();
+        }
+      }
+      return;
+    }
+    if (_viewIndex != _viewCount - 1) {
+      return;
+    }
+    final currentVolumeIndex = _findCurrentVolumeIndex();
+    final currentChapterIndex = _findCurrentChapterIndex();
+    if (currentVolumeIndex < 0) return;
+    final volume = widget.state.volumes[currentVolumeIndex];
+    if (currentChapterIndex < volume.chapters.length - 1 ||
+        currentVolumeIndex < widget.state.volumes.length - 1) {
+      context.read<ReaderCubit>().goToNextChapter();
+    }
+  }
+
+  Future<void> _showChapterList() async {
+    final cubit = context.read<ReaderCubit>();
+    final chapter = await showReaderChapterSheet(
+      context,
+      volumes: widget.state.volumes,
+      currentAid: widget.state.aid,
+      currentCid: widget.state.cid,
+    );
+    if (mounted && !cubit.isClosed && chapter != null) {
+      await cubit.loadChapter(aid: chapter.aid, cid: chapter.cid);
+    }
+  }
+
+  Future<void> _showSettings() async {
+    // The paper widget can be recreated while a typography setting is saved.
+    // The route and sheet must outlive that presentation key.
+    final panelContext = widget.panelContext;
+    final cubit = panelContext.read<ReaderCubit>();
+    _marks.clear();
+    final openMarks = await showReaderSettingsPanel(
+      panelContext,
+      localEpub: _bookSource == SourceId.localEpub,
+      includeMarks: true,
+      footerPreferences: panelContext.read<SettingsPreferencesCubit?>(),
+      onLayoutChanged: () async {
+        if (!cubit.isClosed) await cubit.reloadCurrentPage();
+      },
+      onReloadChapter:
+          _bookSource == SourceId.bili
+              ? () async {
+                if (!cubit.isClosed) await cubit.reloadCurrentChapter();
+              }
+              : null,
+    );
+    final loaded = cubit.state;
+    if (!openMarks ||
+        !panelContext.mounted ||
+        cubit.isClosed ||
+        loaded is! ReaderLoaded ||
+        ModalRoute.of(panelContext)?.isCurrent == false) {
+      return;
+    }
+    final current = cubit.markLocation(loaded);
+    final page = loaded.pages[loaded.currentPageIndex];
+    final text = cubit.markText(current.chapter, current.axis);
+    final quote =
+        page.isImage || page.artworkText != null
+            ? '插图'
+            : readerMarkExcerpt(
+              (page.cssPage?.semanticText ?? page.content).characters
+                  .take(72)
+                  .toString(),
+              encoded: text?.encoded == true,
+            );
+    final mark = await showReaderMarks(
+      panelContext,
+      selection: _marks,
+      current: current,
+      bookmarkExcerpt: quote,
+      bookmarkPageNumber: cubit.chapterProgress.index + 1,
+      pageNumberForMark: cubit.savedMarkPageNumber,
+      onCurrentPage: (location) => cubit.markOnPage(loaded, location),
+    );
+    if (mark == null || !panelContext.mounted || cubit.isClosed) return;
+    final opened = await cubit.openMark(mark);
+    if (!opened && panelContext.mounted) {
+      showReaderMarkError(panelContext, '未能定位该标记');
+    }
+  }
+
+  void _turnPage(int direction, {double? startY}) {
+    if (_curlEnabled) {
+      _curlKey.currentState?.turn(direction, startY: startY);
+    } else {
+      _pageController.turn(direction, startY: startY);
+    }
+  }
+
+  void _onController(ReaderControllerEventArgs args) {
+    if (!mounted || _isTurning || _selecting) return;
+    ReadingSessionScope.recordActivity(context);
+    if (args.key == "UP") {
+      if (_bookSource == SourceId.localEpub && _viewIndex == 0) {
+        context.read<ReaderCubit>().turnBookBoundary(-1);
+        return;
+      }
+      // 音量上键 - 上一页
+      if (_viewIndex > 0) {
+        _turnPage(-1);
+      } else {
+        // 如果是第一页，尝试加载上一章
+        if (!settingsPreferencesOf(context, listen: false).boundaryChapters) {
+          return;
+        }
+        final currentVolumeIndex = _findCurrentVolumeIndex();
+        final currentChapterIndex = _findCurrentChapterIndex();
+        if (currentChapterIndex > 0 || currentVolumeIndex > 0) {
+          context.read<ReaderCubit>().goToPreviousChapter();
+        }
+      }
+    } else if (args.key == "DOWN") {
+      if (_bookSource == SourceId.localEpub && _viewIndex == _viewCount - 1) {
+        context.read<ReaderCubit>().turnBookBoundary(1);
+        return;
+      }
+      // 音量下键 - 下一页
+      if (_viewIndex < _viewCount - 1) {
+        _turnPage(1);
+      } else {
+        // 如果是最后一页，尝试加载下一章
+        if (!settingsPreferencesOf(context, listen: false).boundaryChapters) {
+          return;
+        }
+        final currentVolumeIndex = _findCurrentVolumeIndex();
+        final currentChapterIndex = _findCurrentChapterIndex();
+        if (currentVolumeIndex < 0) return;
+        final volume = widget.state.volumes[currentVolumeIndex];
+        if (currentChapterIndex < volume.chapters.length - 1 ||
+            currentVolumeIndex < widget.state.volumes.length - 1) {
+          context.read<ReaderCubit>().goToNextChapter();
+        }
+      }
+    }
+  }
+
+  Widget _buildReaderPage(BuildContext context, int index, Color textColor) {
+    return ReaderPaperView(
+      pages: widget.state.pages,
+      viewIndex: index,
+      layout: widget.state.layout,
+      chapterTitle: widget.title,
+      titleFontFamily: context.read<FontSettingsCubit>().state.readerFamily,
+      source: _bookSource,
+      textStyle: readerBodyStyle(
+        fontFamily: widget.state.fontFamily,
+        fontSize: context.read<FontSizeCubit>().state,
+        lineHeight: context.read<LineHeightCubit>().state,
+        boldText: widget.state.layout.boldText,
+        color: textColor,
+      ),
+      paragraphSpacing: context.read<ParagraphSpacingCubit>().state,
+      marks: _marks,
+      markChapter: (aid: widget.state.aid, cid: widget.state.cid),
+    );
+  }
+
+  void _syncCurlMode(bool enabled) {
+    if (_wasCurlEnabled && !enabled) {
+      final old = _pageController;
+      _pageController = ReaderCoverController();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        old.dispose();
+        if (mounted && !_wasCurlEnabled) _onNativeTurnActive(false);
+      });
+    }
+    _wasCurlEnabled = enabled;
+  }
+
+  void _onNativeTurnActive(bool active) {
+    if (!mounted) return;
+    _nativeTurnActive = active;
+    context.read<ReaderCubit>().setLocalBookTouchActive(
+      active || _readingPointers.isNotEmpty,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final cubit = context.read<ReaderCubit>();
+    final preferences = settingsPreferencesOf(context);
+    final hanChanged =
+        _lastHanVariant != null && _lastHanVariant != preferences.hanVariant;
+    _lastHanVariant = preferences.hanVariant;
+    if (hanChanged) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.read<ReaderCubit>().reloadCurrentPage();
+      });
+    }
+    final metricsChanged =
+        widget.state.layout.viewportSize != mediaQuery.size ||
+        widget.state.layout.systemPadding != mediaQuery.padding ||
+        widget.state.layout.textScaler != mediaQuery.textScaler ||
+        widget.state.layout.boldText != mediaQuery.boldText;
+    if (metricsChanged &&
+        (_lastLayoutSize != mediaQuery.size ||
+            _lastLayoutPadding != mediaQuery.padding ||
+            _lastTextScaler != mediaQuery.textScaler ||
+            _lastBoldText != mediaQuery.boldText)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.read<ReaderCubit>().reloadCurrentPage();
+      });
+    }
+    _lastLayoutSize = mediaQuery.size;
+    _lastLayoutPadding = mediaQuery.padding;
+    _lastTextScaler = mediaQuery.textScaler;
+    _lastBoldText = mediaQuery.boldText;
+
+    final ThemeCubit themeCubit = context.read<ThemeCubit>();
+    bool isDarkMode;
+    if (themeCubit.state.themeMode == ReaderThemeMode.dark) {
+      isDarkMode = true;
+    } else if (themeCubit.state.themeMode == ReaderThemeMode.light) {
+      isDarkMode = false;
+    } else {
+      isDarkMode = mediaQuery.platformBrightness == Brightness.dark;
+    }
+    final backgroundColor =
+        isDarkMode
+            ? themeCubit.state.darkBackgroundColor
+            : themeCubit.state.lightBackgroundColor;
+    final textColor =
+        isDarkMode
+            ? themeCubit.state.darkTextColor
+            : themeCubit.state.lightTextColor;
+    if (widget.state.pages.first.cssPage != null &&
+        _lastPaperColor != null &&
+        (_lastPaperColor != backgroundColor || _lastTextColor != textColor)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.read<ReaderCubit>().reloadCurrentPage();
+      });
+    }
+    _lastPaperColor = backgroundColor;
+    _lastTextColor = textColor;
+
+    // Never squeeze pages laid out for the previous orientation into half a
+    // leaf. Repagination creates a fresh view and cancels any active curl.
+    if (metricsChanged) {
+      return Scaffold(
+        backgroundColor: backgroundColor,
+        body: const CenteredLoadingIndicator(),
+      );
+    }
+
+    var viewer = BlocBuilder<ReaderCubit, ReaderState>(
+      builder: (BuildContext context, state) {
+        return BlocBuilder<ReaderBackgroundCubit, ReaderBackgroundState>(
+          builder: (context, backgroundState) {
+            String? backgroundImagePath;
+            if (isDarkMode) {
+              backgroundImagePath =
+                  context.read<ReaderBackgroundCubit>().getDarkBackgroundPath();
+            } else {
+              backgroundImagePath =
+                  context
+                      .read<ReaderBackgroundCubit>()
+                      .getLightBackgroundPath();
+            }
+
+            final paperDecoration = BoxDecoration(
+              color: backgroundColor.withValues(alpha: 1),
+              image:
+                  backgroundImagePath == null
+                      ? null
+                      : DecorationImage(
+                        image: FileImage(File(backgroundImagePath)),
+                        fit: BoxFit.cover,
+                        opacity: backgroundState.opacity,
+                      ),
+            );
+
+            return Scaffold(
+              backgroundColor: backgroundColor,
+              body: Stack(
+                key: _markViewport,
+                children: [
+                  // 背景图片
+                  if (backgroundImagePath != null)
+                    Positioned.fill(
+                      child: Image.file(
+                        File(backgroundImagePath),
+                        fit: BoxFit.cover,
+                        opacity: AlwaysStoppedAnimation(
+                          backgroundState.opacity,
+                        ),
+                      ),
+                    ),
+                  // 阅读内容
+                  Positioned.fill(
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: cubit.localPagePreload,
+                      builder:
+                          (
+                            context,
+                            idle,
+                            _,
+                          ) => BlocBuilder<ReaderCurlCubit, ReaderPageEffect>(
+                            builder: (context, selectedEffect) {
+                              final localCss =
+                                  widget.state.pages.firstOrNull?.cssPage !=
+                                  null;
+                              final preload =
+                                  idle && !state.showControls && !_selecting;
+                              final effect = _pageEffect(selectedEffect);
+                              final curlEnabled =
+                                  effect == ReaderPageEffect.nativeCurl &&
+                                  !mediaQuery.disableAnimations;
+                              _syncCurlMode(curlEnabled);
+                              if (curlEnabled) {
+                                final curl = PageCurlView(
+                                  leafCount: widget.state.pages.length,
+                                  key: _curlKey,
+                                  pageCount: _viewCount,
+                                  index: _viewIndex,
+                                  isSpread: widget.state.layout.isSpread,
+                                  tapToTurn: preferences.tapToTurn,
+                                  waitForPageContent: localCss,
+                                  preloadAdjacentPages: preload,
+                                  onNativeInteraction:
+                                      localCss ? _onNativeTurnActive : null,
+                                  paperDecoration: paperDecoration,
+                                  paperColor: backgroundColor,
+                                  onCenterTap: _handleMenuTap,
+                                  onTextHold:
+                                      (point) => unawaited(
+                                        _marks.beginAtWithGeometry(
+                                          point,
+                                          _viewIndex,
+                                        ),
+                                      ),
+                                  contentRevision: _markPaintRevision,
+                                  onBoundaryTurn: _handleBoundaryTurn,
+                                  pageBuilder:
+                                      (context, index) => _buildReaderPage(
+                                        context,
+                                        index,
+                                        textColor,
+                                      ),
+                                  onPageChanged: _onViewChanged,
+                                );
+                                return Platform.isAndroid
+                                    ? curl
+                                    : GestureDetector(
+                                      onTapUp: _handleTap,
+                                      child: curl,
+                                    );
+                              }
+                              return GestureDetector(
+                                onTapUp: _handleTap,
+                                child: ReaderCoverView(
+                                  controller: _pageController,
+                                  index: _viewIndex,
+                                  pageCount: _viewCount,
+                                  leafCount: widget.state.pages.length,
+                                  isSpread: widget.state.layout.isSpread,
+                                  waitForPageContent: localCss,
+                                  preloadAdjacentPages: preload,
+                                  active: !state.showControls && !_selecting,
+                                  revision: Object.hash(
+                                    widget.state.presentationKey ??
+                                        widget.state.pages,
+                                    paperDecoration,
+                                    widget.title,
+                                  ),
+                                  paperDecoration: paperDecoration,
+                                  effect: effect,
+                                  paperColor: backgroundColor,
+                                  onPageChanged: _onViewChanged,
+                                  onBoundaryTurn: _handleBoundaryTurn,
+                                  pageBuilder:
+                                      (context, index) => _buildReaderPage(
+                                        context,
+                                        index,
+                                        textColor,
+                                      ),
+                                ),
+                              );
+                            },
+                          ),
+                    ),
+                  ),
+                  if (preferences.showReaderFooter)
+                    Positioned(
+                      key: const ValueKey('reader-footer'),
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: ReaderFooter(
+                        layout: widget.state.layout,
+                        pageLabel: context.read<ReaderCubit>().footerPageLabel,
+                        color: textColor,
+                        fontFamily:
+                            context
+                                .read<FontSettingsCubit>()
+                                .state
+                                .readerFamily,
+                      ),
+                    ),
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: ReaderMenuMotion(
+                      visible: state.showControls,
+                      child: ReaderToolbar(
+                        title: widget.title,
+                        onBack: () => Navigator.pop(context),
+                        onCatalog: _showChapterList,
+                        onSettings: _showSettings,
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: _progressOnTextPages(
+                      state,
+                      ReaderMenuMotion(
+                        visible: state.showControls,
+                        fromBottom: true,
+                        child: Builder(
+                          builder: (context) {
+                            final cubit = context.read<ReaderCubit>();
+                            final progress = cubit.chapterProgress;
+                            return ReaderPageScrubber(
+                              index: progress.index,
+                              count: progress.count,
+                              revision: progress.revision,
+                              active: state.showControls,
+                              onSeek: (page) async {
+                                try {
+                                  await cubit.seekChapterPage(page);
+                                } catch (_) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('未能跳转到该页，请重试'),
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_selecting)
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _marks.clear,
+                      ),
+                    ),
+                  Positioned.fill(
+                    child: ReaderMarkLayer(
+                      selection: _marks,
+                      pageNumberAt: context.read<ReaderCubit>().markPageNumber,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+    return ReaderVolumeTurnScope(
+      active: !_selecting,
+      onTurn: _hardwareTurns.add,
+      child: PopScope(
+        canPop:
+            !_selecting &&
+            (!preferences.preventBack || widget.state.showControls),
+        onPopInvokedWithResult: (didPop, result) {
+          if (!didPop && _marks.clear()) return;
+          if (!didPop && !widget.state.showControls) {
+            context.read<ReaderCubit>().toggleControls();
+          }
+        },
+        child:
+            _bookSource == SourceId.localEpub
+                ? Listener(
+                  onPointerDown: (event) {
+                    _readingPointers.add(event.pointer);
+                    cubit.setLocalBookTouchActive(true);
+                  },
+                  onPointerUp: (event) {
+                    _readingPointers.remove(event.pointer);
+                    cubit.setLocalBookTouchActive(
+                      _nativeTurnActive || _readingPointers.isNotEmpty,
+                    );
+                  },
+                  onPointerCancel: (event) {
+                    _readingPointers.remove(event.pointer);
+                    cubit.setLocalBookTouchActive(
+                      _nativeTurnActive || _readingPointers.isNotEmpty,
+                    );
+                  },
+                  child: viewer,
+                )
+                : viewer,
+      ),
+    );
+  }
+
+  int _findCurrentVolumeIndex() {
+    for (var i = 0; i < widget.state.volumes.length; i++) {
+      final volume = widget.state.volumes[i];
+      if (volume.chapters.any(
+        (chapter) =>
+            chapter.aid == widget.state.aid && chapter.cid == widget.state.cid,
+      )) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  int _findCurrentChapterIndex() {
+    final volumeIndex = _findCurrentVolumeIndex();
+    if (volumeIndex == -1) return -1;
+    final volume = widget.state.volumes[volumeIndex];
+    for (var i = 0; i < volume.chapters.length; i++) {
+      final chapter = volume.chapters[i];
+      if (chapter.aid == widget.state.aid && chapter.cid == widget.state.cid) {
+        return i;
+      }
+    }
+    return -1;
+  }
+}

@@ -1,0 +1,1231 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:wild/sources/book_source.dart';
+import 'package:wild/src/rust/api/wenku8.dart' show PageStatsNovelCover;
+import 'package:wild/src/rust/wenku8/models.dart';
+import 'package:wild/utils/bili_cover_url.dart';
+import 'package:wild/utils/bili_site_dom.dart';
+import 'package:wild/services/read_request.dart';
+import 'package:wild/services/read_diagnostics.dart';
+
+abstract interface class BiliBrowserPort {
+  Future<void> loadUrl(String url);
+  Future<dynamic> executeScript(String script);
+  Future<void> setDesktopSite(bool enabled);
+}
+
+/// The search page can present this request's original WebView while it loads.
+class BiliSearchRequest extends ReadRequest {
+  bool openOriginalPage = false;
+}
+
+class BiliBrowserException implements Exception {
+  const BiliBrowserException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+enum BiliProbeKind { document, searchForm, searchResults, chapter }
+
+class BiliSiteAccessDenied extends BiliBrowserException {
+  const BiliSiteAccessDenied(this.target)
+    : super('原站已拒绝访问此页面，当前没有可完成的验证。请稍后重试或更换书源。');
+  final Uri target;
+}
+
+class BiliSiteBrowserUnsupported extends BiliBrowserException {
+  const BiliSiteBrowserUnsupported(this.target)
+    : super('哔哩轻小说提示内置浏览器不兼容。请在 Safari 或 Chrome 中打开原站章节。');
+  final Uri target;
+}
+
+class BiliSiteVerificationRequired extends BiliBrowserException {
+  const BiliSiteVerificationRequired({
+    required this.target,
+    required this.kind,
+    required this.revision,
+    this.desktopSite = false,
+    this.contentRequired = false,
+    this.searchChallenge = false,
+    this.manualSearch = false,
+    this.searchKeyword,
+    this.searchEntry,
+    this.searchPage,
+  }) : super(
+         contentRequired
+             ? '原站正文尚未完整加载，可稍后重试，或打开原站页面加载完整正文后继续。'
+             : manualSearch
+             ? '原站还没有返回搜索结果，可以在应用内继续搜索。'
+             : searchChallenge
+             ? '原站要求填写搜索验证码，验证后可继续本次搜索。'
+             : '哔哩轻小说要求浏览器验证，请打开原站完成验证后继续。',
+       );
+
+  final Uri target;
+  final BiliProbeKind kind;
+  final int revision;
+  final bool desktopSite;
+  final bool contentRequired;
+  final bool searchChallenge;
+  final bool manualSearch;
+  final String? searchKeyword;
+  final Uri? searchEntry;
+  final int? searchPage;
+
+  bool get isSearchVerification => searchKeyword != null && searchEntry != null;
+}
+
+class _VerifiedBiliPage {
+  const _VerifiedBiliPage(this.data, this.revision, this.expires, this.bytes);
+  final Map<String, dynamic> data;
+  final int revision, bytes;
+  final DateTime expires;
+}
+
+/// Ordinary site rendering. Website sessions stay in the platform browser;
+/// this service receives only bounded public book data and visible chapter text.
+class BiliBrowserSession extends ChangeNotifier {
+  // Long chapters can legitimately exceed eight mobile website pages.
+  // Keep a finite ceiling, same-chapter validation and the shared deadline.
+  static const maxChapterPages = 64;
+  static final _noticeFormatting = RegExp(
+    r'[\s\u00ad\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]',
+  );
+  // The compatibility message may be split across DOM text nodes and lines.
+  // Check the site's upgrade and browser instructions together.
+  static final _browserCompatibilityNotice = RegExp(
+    r'[网網]站[阅閱閲][读讀]器[升昇][级級].{0,24}'
+    r'[浏瀏][览覽]器似乎[无無]法完美使用本(?:[网網])?站.{0,120}'
+    r'(?:Chrome.{0,48}Safari|Safari.{0,48}Chrome).{0,40}原生[浏瀏][览覽]器',
+    caseSensitive: false,
+  );
+
+  static bool _isBrowserCompatibilityNotice(String content) =>
+      _browserCompatibilityNotice.hasMatch(
+        content.replaceAll(_noticeFormatting, ''),
+      );
+
+  BiliBrowserSession({
+    this.operationTimeout = const Duration(seconds: 30),
+    this.pollInterval = const Duration(milliseconds: 150),
+    this.verificationGrace = const Duration(seconds: 6),
+    this.searchPageGrace = const Duration(seconds: 10),
+    this.verifiedPageTtl = const Duration(minutes: 2),
+  });
+  static final instance = BiliBrowserSession();
+  final Duration operationTimeout, pollInterval;
+  final Duration verificationGrace, searchPageGrace, verifiedPageTtl;
+  bool requested = false, _disposed = false;
+  int rendererGeneration = 0;
+  BiliBrowserPort? _port;
+  Completer<BiliBrowserPort>? _attachment;
+  Uri? _searchOrigin;
+  BiliBrowserException? _navigationError;
+  BiliSiteVerificationRequired? _heldSearch;
+  Timer? _unclaimedSearch;
+  bool _hasRetainedSearchPage = false;
+  bool get showingSearchChallenge => _showingSearchChallenge;
+  bool _showingSearchChallenge = false;
+  Future<void> _queue = Future.value();
+  final _searchPages = <String, Map<int, Uri>>{};
+  final _verifiedSearches = <(String, int), _VerifiedBiliPage>{};
+  final _verifiedPages = <String, _VerifiedBiliPage>{};
+
+  static String verificationScript(
+    BiliSiteVerificationRequired request,
+  ) => switch (request.kind) {
+    BiliProbeKind.document => biliDocumentProbeScript,
+    BiliProbeKind.searchForm =>
+      request.searchEntry == null ? biliHomeReadyScript : biliSearchProbeScript,
+    BiliProbeKind.searchResults => biliSearchProbeScript,
+    BiliProbeKind.chapter => biliChapterProbeScript,
+  };
+
+  static BiliProbeKind _kind(String script) {
+    if (script == biliDocumentProbeScript) return BiliProbeKind.document;
+    if (script == biliHomeReadyScript) return BiliProbeKind.searchForm;
+    if (script == biliSearchProbeScript) return BiliProbeKind.searchResults;
+    return BiliProbeKind.chapter;
+  }
+
+  /// Visible verification stays on the requested site's HTTPS origin. Its
+  /// normal challenge navigation may use paths outside the reading allowlist.
+  static bool allowsVerificationNavigation(
+    String raw,
+    BiliSiteVerificationRequired request,
+  ) {
+    if (raw == 'about:blank') return true;
+    if (!isVerificationTarget(request)) return false;
+    final uri = Uri.tryParse(raw);
+    return uri != null && _sameOrigin(uri, request.target);
+  }
+
+  static bool isVerificationTarget(BiliSiteVerificationRequired request) {
+    if (allowsNavigation('${request.target}')) return true;
+    if (!request.isSearchVerification) return false;
+    final entry = request.searchEntry!;
+    return allowsNavigation('$entry') && _sameOrigin(request.target, entry);
+  }
+
+  static Map<String, dynamic> _decodeProbe(dynamic raw) {
+    for (var i = 0; i < 2 && raw is String; i++) {
+      raw = jsonDecode(raw);
+    }
+    if (raw is! Map || utf8.encode(jsonEncode(raw)).length > 2 * 1024 * 1024) {
+      throw const BiliBrowserException('哔哩页面返回数据无效或过大');
+    }
+    return Map<String, dynamic>.from(raw);
+  }
+
+  static bool isAccessDeniedProbe(dynamic raw) =>
+      _decodeProbe(raw)['accessDenied'] == true;
+
+  static bool isReadySearchProbe(dynamic raw) {
+    final probe = _decodeProbe(raw);
+    return probe['ready'] == true &&
+        probe['verificationRequired'] != true &&
+        probe['accessDenied'] != true &&
+        probe['error'] == null;
+  }
+
+  static bool _sameOrigin(Uri actual, Uri expected) =>
+      actual.scheme == 'https' &&
+      actual.userInfo.isEmpty &&
+      actual.origin == expected.origin;
+
+  static bool _samePage(Uri actual, Uri expected) =>
+      _sameOrigin(actual, expected) &&
+      actual.path == expected.path &&
+      actual.queryParametersAll.length == expected.queryParametersAll.length &&
+      expected.queryParametersAll.entries.every(
+        (entry) =>
+            listEquals(actual.queryParametersAll[entry.key], entry.value),
+      );
+
+  static bool _matchesSearch(Uri uri, String keyword, int page) {
+    final query = uri.queryParametersAll;
+    final keywords = query['searchkey'];
+    final pages = query['page'];
+    return !uri.hasFragment &&
+        (keywords == null || listEquals(keywords, [keyword])) &&
+        (pages == null || listEquals(pages, ['$page']));
+  }
+
+  static bool _matchesSearchChallenge(
+    Uri uri,
+    Map<String, dynamic> probe,
+    Uri origin,
+    String keyword,
+    int page,
+  ) {
+    if (probe['searchChallenge'] != true ||
+        !_sameOrigin(uri, origin) ||
+        !_matchesSearch(uri, keyword, page)) {
+      return false;
+    }
+    final formKeyword = probe['searchKeyword'];
+    return formKeyword == null || formKeyword == keyword;
+  }
+
+  static String _probeKey(Uri uri, BiliProbeKind kind) {
+    // The verified desktop catalogue is the same public document as the
+    // mobile entry. Never generalize this alias to other sources or hosts.
+    final catalogAlias =
+        kind == BiliProbeKind.document &&
+        RegExp(r'^/novel/[1-9]\d*/catalog$').hasMatch(uri.path) &&
+        const {'www.linovelib.com', 'www.bilinovel.net'}.contains(uri.host);
+    final host = catalogAlias ? 'bili-public-catalog' : uri.host;
+    return '${kind.name}:$host:${uri.path}?${uri.query}';
+  }
+
+  Map<String, dynamic>? _verifiedProbe(Uri uri, BiliProbeKind kind) {
+    if (!allowsNavigation('$uri')) return null;
+    _verifiedPages.removeWhere(
+      (_, value) =>
+          value.revision != sourceRevision.value ||
+          !DateTime.now().isBefore(value.expires) ||
+          value.data['contentIncomplete'] == true ||
+          (value.data['content'] is String &&
+              biliHasIncompleteChapterNotice(value.data['content'] as String)),
+    );
+    return _verifiedPages[_probeKey(uri, kind)]?.data;
+  }
+
+  /// Drops only the targeted chapter's verified page snapshots so an explicit
+  /// chapter reload bypasses stale page fragments without clearing other books.
+  void invalidateChapter(String bookId, String chapterId) {
+    final bid = RegExp(r'^bili:([1-9]\d*)$').firstMatch(bookId);
+    final cid = RegExp(r'^bili:([1-9]\d*):([1-9]\d*)$').firstMatch(chapterId);
+    if (bid == null || cid == null || bid[1] != cid[1]) return;
+    final pattern = RegExp(
+      '^${BiliProbeKind.chapter.name}:[^:]+:/novel/${bid[1]}/${cid[2]}(?:_[1-9][0-9]*)?\\.html\\?\$',
+    );
+    _verifiedPages.removeWhere((key, _) => pattern.hasMatch(key));
+  }
+
+  /// Adopt only the requested, actually loaded public page. Cookies remain in
+  /// the platform store; the short-lived snapshot prevents a second request
+  /// immediately discarding a chapter the user has just verified.
+  Future<bool> adoptVisiblePage(
+    BiliSiteVerificationRequired request,
+    dynamic raw, {
+    required Future<void> Function() persistSession,
+    required bool Function() isCurrent,
+  }) async {
+    bool current() =>
+        !_disposed &&
+        isCurrent() &&
+        activeSource.value == SourceId.bili &&
+        sourceRevision.value == request.revision;
+    if (!current()) return false;
+    final value = _decodeProbe(raw);
+    if (value['accessDenied'] == true) {
+      throw BiliSiteAccessDenied(request.target);
+    }
+    final uri = Uri.tryParse('${value['url']}');
+    final keyword = request.searchKeyword;
+    final page = request.searchPage;
+    final loadedSearch =
+        uri != null &&
+        keyword != null &&
+        request.searchEntry != null &&
+        _sameOrigin(uri, request.searchEntry!) &&
+        _matchesSearchResult(uri, value, keyword, page ?? 1);
+    if (!isVerificationTarget(request) ||
+        uri == null ||
+        !allowsVerificationNavigation('$uri', request) ||
+        (request.isSearchVerification
+            ? !loadedSearch
+            : !_samePage(uri, request.target)) ||
+        value['retiredSearchPage'] == true ||
+        value['verificationRequired'] == true ||
+        value['contentIncomplete'] == true ||
+        value['error'] != null ||
+        value['ready'] != true) {
+      throw BiliBrowserException(
+        request.contentRequired
+            ? '原站正文仍未完整加载，请按网页提示完成后再试。'
+            : request.manualSearch
+            ? '请先在原站搜索并打开本次搜索的结果，再返回。'
+            : '请先在原站完成验证并打开所需页面，再继续。',
+      );
+    }
+    if (request.kind == BiliProbeKind.chapter) {
+      final match = RegExp(
+        r'^/novel/([1-9]\d*)/([1-9]\d*)(?:_\d+)?\.html$',
+      ).firstMatch(request.target.path);
+      final content = value['content'];
+      if (match == null || content is! String || content.trim().isEmpty) {
+        throw const BiliBrowserException('原站章节尚未加载完成，请稍后再试。');
+      }
+      if (_isBrowserCompatibilityNotice(content)) {
+        throw BiliSiteBrowserUnsupported(request.target);
+      }
+      if (biliHasIncompleteChapterNotice(content)) {
+        throw const BiliBrowserException('原站正文仍未完整加载，请按网页提示完成后再试。');
+      }
+      if (value['next'] case final String rawNext) {
+        final next = Uri.tryParse(rawNext);
+        if (next == null ||
+            !allowsNavigation('$next') ||
+            next.origin != request.target.origin ||
+            next.hasQuery ||
+            !RegExp(
+              '^/novel/${match[1]}/${match[2]}_[1-9][0-9]*\\.html\$',
+            ).hasMatch(next.path)) {
+          throw const BiliBrowserException('章节分页不属于当前章节');
+        }
+      }
+    } else if (request.kind == BiliProbeKind.document &&
+        (value['html'] is! String ||
+            (value['html'] as String).trim().isEmpty)) {
+      throw const BiliBrowserException('原站页面尚未加载完成，请稍后再试。');
+    }
+    if (keyword != null && page != null) {
+      _parseSearchPage(value, page, keyword);
+    }
+    await persistSession().timeout(const Duration(seconds: 5));
+    if (!current()) return false;
+    if (keyword != null && page != null) {
+      _verifiedSearches.removeWhere(
+        (_, entry) =>
+            entry.revision != request.revision ||
+            !DateTime.now().isBefore(entry.expires),
+      );
+      final bytes = utf8.encode(jsonEncode(value)).length;
+      _verifiedSearches[(keyword, page)] = _VerifiedBiliPage(
+        Map.unmodifiable(value),
+        request.revision,
+        DateTime.now().add(verifiedPageTtl),
+        bytes,
+      );
+      while (_verifiedSearches.length > 4 ||
+          _verifiedSearches.values.fold<int>(
+                0,
+                (size, entry) => size + entry.bytes,
+              ) >
+              512 * 1024) {
+        _verifiedSearches.remove(_verifiedSearches.keys.first);
+      }
+    }
+    if (request.kind == BiliProbeKind.document ||
+        request.kind == BiliProbeKind.chapter) {
+      final data = Map<String, dynamic>.from(value)
+        ..['url'] = '${request.target}';
+      final bytes = utf8.encode(jsonEncode(data)).length;
+      _verifiedPages[_probeKey(
+        request.target,
+        request.kind,
+      )] = _VerifiedBiliPage(
+        Map.unmodifiable(data),
+        request.revision,
+        DateTime.now().add(verifiedPageTtl),
+        bytes,
+      );
+      while (_verifiedPages.length > 8 ||
+          _verifiedPages.values.fold<int>(0, (n, p) => n + p.bytes) >
+              2 * 1024 * 1024) {
+        _verifiedPages.remove(_verifiedPages.keys.first);
+      }
+    }
+    return true;
+  }
+
+  static bool _matchesSearchResult(
+    Uri uri,
+    Map<String, dynamic> value,
+    String keyword,
+    int page,
+  ) {
+    if (!_matchesSearch(uri, keyword, page)) return false;
+    final displayedKeyword = value['resultKeyword'];
+    if (displayedKeyword != null && displayedKeyword != keyword) return false;
+    final books = value['books'];
+    final count = value['resultCount'];
+    if (displayedKeyword != null &&
+        (count is! int ||
+            count < 0 ||
+            books is! List ||
+            (count == 0 ? books.isNotEmpty : books.isEmpty))) {
+      return false;
+    }
+    if (const {'/search.html', '/S6/'}.contains(uri.path)) return true;
+    // Some searches return a standalone mobile result page. Accept it only
+    // with the site's result count and the exact keyword visibly on that page.
+    if (page == 1 && displayedKeyword == keyword) return true;
+    final book = RegExp(r'^/novel/([1-9]\d*)\.html$').firstMatch(uri.path);
+    return page == 1 &&
+        book != null &&
+        !uri.hasQuery &&
+        books is List &&
+        books.length == 1 &&
+        books.single is Map &&
+        '${(books.single as Map)['nid']}' == book[1];
+  }
+
+  static bool allowsNavigation(String raw) {
+    if (raw == 'about:blank') return true;
+    final uri = Uri.tryParse(raw);
+    return uri != null &&
+        uri.scheme == 'https' &&
+        uri.userInfo.isEmpty &&
+        (!uri.hasPort || uri.port == 443) &&
+        const {
+          'www.linovelib.com',
+          'linovelib.com',
+          'www.bilinovel.net',
+          'bilinovel.net',
+        }.contains(uri.host) &&
+        (uri.path == '/' ||
+            uri.path == '/S6/' ||
+            uri.path == '/search.html' ||
+            RegExp(r'^/novel/[1-9]\d*/catalog$').hasMatch(uri.path) ||
+            (RegExp(r'^/reviews_[1-9]\d*_[1-9]\d*\.html$').hasMatch(uri.path) &&
+                !uri.hasQuery &&
+                !uri.hasFragment) ||
+            RegExp(r'^/top/[a-z]+/[1-9]\d*\.html$').hasMatch(uri.path) ||
+            RegExp(r'^/wenku/(?:[a-z]+/[1-9]\d*\.html)?$').hasMatch(uri.path) ||
+            RegExp(
+              r'^/wenku/lastupdate_(?:\d+_){7}[1-9]\d*_0\.html$',
+            ).hasMatch(uri.path) ||
+            RegExp(
+              r'^/novel/[1-9]\d*(?:\.html|/[1-9]\d*(?:_\d+)?\.html)$',
+            ).hasMatch(uri.path));
+  }
+
+  /// Inspect a site-issued redirect only during the submitted search. The
+  /// probe still accepts only supported results or a confirmed same-site form.
+  bool allowsRendererNavigation(String raw) {
+    final search = _searchOrigin;
+    if (search == null || raw == 'about:blank') return allowsNavigation(raw);
+    final uri = Uri.tryParse(raw);
+    return uri != null && _sameOrigin(uri, search);
+  }
+
+  void navigationFailed(BiliBrowserPort port, {bool blocked = false}) {
+    if (!identical(_port, port) || _heldSearch != null) return;
+    _navigationError ??= BiliBrowserException(
+      blocked ? '原站跳转到不支持的页面，请打开原网站确认。' : '哔哩原站连接中断，请重试。',
+    );
+  }
+
+  bool showHeldSearch(
+    BiliSiteVerificationRequired request,
+    BiliBrowserPort port,
+  ) {
+    if (_showingSearchChallenge ||
+        _disposed ||
+        !identical(_heldSearch, request) ||
+        !identical(_port, port) ||
+        activeSource.value != SourceId.bili ||
+        sourceRevision.value != request.revision) {
+      return false;
+    }
+    _unclaimedSearch?.cancel();
+    _showingSearchChallenge = true;
+    notifyListeners();
+    return true;
+  }
+
+  void releaseHeldSearch(
+    BiliSiteVerificationRequired request, {
+    bool unclaimedOnly = false,
+    bool verified = false,
+  }) {
+    if (!identical(_heldSearch, request) ||
+        (unclaimedOnly && _showingSearchChallenge)) {
+      return;
+    }
+    if (verified &&
+        _showingSearchChallenge &&
+        _port != null &&
+        activeSource.value == SourceId.bili &&
+        sourceRevision.value == request.revision) {
+      // Keep the same browser and its site session after a confirmed search.
+      // Only the matching query can consume the just-loaded result.
+      _unclaimedSearch?.cancel();
+      _unclaimedSearch = null;
+      _heldSearch = null;
+      _showingSearchChallenge = false;
+      _hasRetainedSearchPage = true;
+      _navigationError = null;
+      notifyListeners();
+      return;
+    }
+    requested = false;
+    _invalidate();
+  }
+
+  void attach(BiliBrowserPort port, int generation) {
+    if (_disposed || generation != rendererGeneration) return;
+    _port = port;
+    if (_attachment case final pending? when !pending.isCompleted) {
+      pending.complete(port);
+    }
+    _attachment = null;
+  }
+
+  void detach(BiliBrowserPort port) {
+    if (identical(_port, port)) _port = null;
+  }
+
+  void attachmentFailed() => _invalidate();
+  void _invalidate() {
+    _unclaimedSearch?.cancel();
+    _unclaimedSearch = null;
+    _heldSearch = null;
+    _showingSearchChallenge = false;
+    _hasRetainedSearchPage = false;
+    _searchOrigin = null;
+    _navigationError = null;
+    _port = null;
+    if (_attachment case final pending? when !pending.isCompleted) {
+      pending.completeError(const BiliBrowserException('哔哩网页组件未就绪，请重试'));
+    }
+    _attachment = null;
+    rendererGeneration++;
+    // Cancellation may come from a page's dispose while Flutter is removing
+    // the route. The new generation is immediate, the host rebuild is queued.
+    if (!_disposed) {
+      scheduleMicrotask(() {
+        if (!_disposed) notifyListeners();
+      });
+    }
+  }
+
+  Future<BiliBrowserPort> _renderer() async {
+    if (_port != null) return _port!;
+    final attaching = _attachment ??= Completer<BiliBrowserPort>();
+    if (!requested) {
+      requested = true;
+      notifyListeners();
+    }
+    return attaching.future;
+  }
+
+  Future<T> _operation<T>(
+    Future<T> Function(
+      BiliBrowserPort,
+      Future<dynamic> Function(String),
+      Future<void> Function(String),
+      Future<void> Function(bool),
+      Stopwatch,
+    )
+    run, {
+    Duration? timeout,
+    String timeoutMessage = '哔哩网页操作超时，请重试',
+  }) {
+    final totalLimit = timeout ?? operationTimeout;
+    final clock = Stopwatch()..start();
+    final request = ReadRequest.current;
+    final predecessor = _queue;
+    int? activeGeneration;
+    var finished = false;
+    void invalidateActive() {
+      if (!finished && activeGeneration == rendererGeneration) _invalidate();
+    }
+
+    final removeCancel = request?.onCancel((_) => invalidateActive());
+
+    final work = predecessor.then<T>((_) async {
+      request?.check();
+      if (_heldSearch != null) {
+        throw const BiliBrowserException('请先完成或关闭当前搜索验证。');
+      }
+      ReadDiagnostics.record('bili', 'queue', clock.elapsed);
+      final generation = rendererGeneration;
+      activeGeneration = generation;
+      void check() {
+        request?.check();
+        if (_disposed ||
+            generation != rendererGeneration ||
+            clock.elapsed >= totalLimit) {
+          throw const BiliBrowserException('哔哩网页操作已超时，请重试');
+        }
+      }
+
+      Future<R> command<R>(Future<R> Function() call) async {
+        check();
+        final left = totalLimit - clock.elapsed;
+        final limit =
+            left < const Duration(seconds: 5)
+                ? left
+                : const Duration(seconds: 5);
+        final value = await call().timeout(
+          limit,
+          onTimeout: () {
+            invalidateActive();
+            throw const BiliBrowserException('哔哩网页组件响应超时，请重试');
+          },
+        );
+        check();
+        return value;
+      }
+
+      // Mounting a cold platform view is not an already-attached command.
+      // Give attachment the remaining operation budget; real platform calls
+      // below still have their separate five-second limit.
+      check();
+      final attaching = _renderer();
+      final port = await (request?.wait(attaching) ?? attaching).timeout(
+        totalLimit - clock.elapsed,
+        onTimeout: () {
+          invalidateActive();
+          throw const BiliBrowserException('哔哩网页组件启动超时，请重试');
+        },
+      );
+      check();
+      _navigationError = null;
+      try {
+        await command(() => port.setDesktopSite(false));
+        if (_hasRetainedSearchPage) {
+          // The next navigation replaces this document. Until it commits,
+          // ignore the old search even if it uses the same address.
+          await command(() => port.executeScript(biliRetireSearchPageScript));
+          _hasRetainedSearchPage = false;
+        }
+        return await run(
+          port,
+          (script) {
+            if (_navigationError case final error?) throw error;
+            return command(() => port.executeScript(script));
+          },
+          (url) async {
+            if (!allowsNavigation(url)) {
+              throw const BiliBrowserException('哔哩页面跳转地址无效');
+            }
+            _navigationError = null;
+            await ReadDiagnostics.measure(
+              'bili',
+              'navigation',
+              () => command(() => port.loadUrl(url)),
+            );
+          },
+          (enabled) => command(() => port.setDesktopSite(enabled)),
+          clock,
+        );
+      } on BiliSiteVerificationRequired catch (error) {
+        check();
+        if (error.isSearchVerification &&
+            activeSource.value == SourceId.bili &&
+            error.revision == sourceRevision.value) {
+          _heldSearch = error;
+          _unclaimedSearch = Timer(
+            const Duration(minutes: 2),
+            () => releaseHeldSearch(error),
+          );
+        }
+        rethrow;
+      } finally {
+        if (generation == rendererGeneration) _searchOrigin = null;
+        if (generation == rendererGeneration && _heldSearch == null) {
+          try {
+            await port
+                .loadUrl('about:blank')
+                .timeout(const Duration(seconds: 2));
+          } catch (_) {
+            invalidateActive();
+          }
+        }
+      }
+    });
+    final result = (request?.wait(work) ?? work).timeout(
+      totalLimit,
+      onTimeout: () {
+        invalidateActive();
+        final error = BiliBrowserException(timeoutMessage);
+        request?.cancel(error);
+        throw error;
+      },
+    );
+    // A queued cancellation cannot release its predecessor's slot. An active
+    // cancellation invalidates only its own renderer; late commands/finally
+    // cannot blank or reset the replacement renderer.
+    final settled = result.whenComplete(() {
+      finished = true;
+      removeCancel?.call();
+    });
+    _queue = predecessor.then<void>(
+      (_) => settled.then<void>((_) {}, onError: (Object _) {}),
+    );
+    return settled;
+  }
+
+  Future<Map<String, dynamic>> _poll(
+    Future<dynamic> Function(String) js,
+    String script,
+    Stopwatch clock, {
+    bool Function(Map<String, dynamic>)? accepts,
+    Uri? verificationTarget,
+    bool desktopSite = false,
+    String? searchKeyword,
+    Uri? searchEntry,
+    int? searchPage,
+  }) => ReadDiagnostics.measure(
+    'bili',
+    'page_ready',
+    () => _pollReady(
+      js,
+      script,
+      clock,
+      accepts: accepts,
+      verificationTarget: verificationTarget,
+      desktopSite: desktopSite,
+      searchKeyword: searchKeyword,
+      searchEntry: searchEntry,
+      searchPage: searchPage,
+    ),
+  );
+
+  Future<Map<String, dynamic>> _pollReady(
+    Future<dynamic> Function(String) js,
+    String script,
+    Stopwatch clock, {
+    bool Function(Map<String, dynamic>)? accepts,
+    Uri? verificationTarget,
+    bool desktopSite = false,
+    String? searchKeyword,
+    Uri? searchEntry,
+    int? searchPage,
+  }) async {
+    Duration? verificationStarted;
+    ({Uri url, String content, Object? next})? chapterCandidate;
+    final request = ReadRequest.current;
+    final manualSearchAt = clock.elapsed + searchPageGrace;
+    while (clock.elapsed < operationTimeout) {
+      final previousChapter = chapterCandidate;
+      chapterCandidate = null;
+      dynamic raw;
+      try {
+        raw = await js(script);
+      } catch (error) {
+        if (RegExp(
+          r'execution context.*destroy|navigation.*cancel|ERR_ABORTED',
+          caseSensitive: false,
+        ).hasMatch('$error')) {
+          await Future<void>.delayed(pollInterval);
+          continue;
+        }
+        rethrow;
+      }
+      final value = _decodeProbe(raw);
+      if (value['retiredSearchPage'] == true) {
+        await Future<void>.delayed(pollInterval);
+        continue;
+      }
+      final loaded = Uri.tryParse('${value['url']}');
+      if (loaded == null) {
+        throw const BiliBrowserException('哔哩页面跳转地址无效');
+      }
+      final searchTarget = searchEntry ?? verificationTarget;
+      final searchVerification =
+          searchKeyword != null &&
+          searchTarget != null &&
+          value['verificationRequired'] == true &&
+          _sameOrigin(loaded, searchTarget);
+      final searchResult =
+          script == biliSearchProbeScript &&
+          searchKeyword != null &&
+          searchTarget != null &&
+          value['ready'] == true &&
+          _sameOrigin(loaded, searchTarget) &&
+          _matchesSearchResult(loaded, value, searchKeyword, searchPage ?? 1);
+      if (!allowsNavigation('${value['url']}') &&
+          !searchVerification &&
+          !searchResult) {
+        final origin = _searchOrigin;
+        if (origin != null &&
+            _sameOrigin(loaded, origin) &&
+            value['documentLoading'] == true) {
+          await Future<void>.delayed(pollInterval);
+          continue;
+        }
+        throw const BiliBrowserException('哔哩页面跳转地址无效');
+      }
+      if (accepts != null && !accepts(value)) {
+        await Future<void>.delayed(pollInterval);
+        continue;
+      }
+      if (value['accessDenied'] == true) {
+        throw BiliSiteAccessDenied(
+          verificationTarget ?? Uri.parse('${value['url']}'),
+        );
+      }
+      if (value['contentIncomplete'] == true ||
+          (script == biliChapterProbeScript &&
+              value['content'] is String &&
+              biliHasIncompleteChapterNotice(value['content'] as String))) {
+        verificationStarted ??= clock.elapsed;
+        if (clock.elapsed - verificationStarted < verificationGrace) {
+          await Future<void>.delayed(pollInterval);
+          continue;
+        }
+        throw BiliSiteVerificationRequired(
+          target: verificationTarget ?? Uri.parse('${value['url']}'),
+          kind: _kind(script),
+          desktopSite: desktopSite,
+          contentRequired: true,
+          revision: sourceRevision.value,
+        );
+      }
+      if (value['error'] != null) {
+        if (value['verificationRequired'] == true ||
+            '${value['error']}'.contains('浏览器验证')) {
+          if (value['verificationPending'] == true) {
+            verificationStarted ??= clock.elapsed;
+            if (clock.elapsed - verificationStarted < verificationGrace) {
+              await Future<void>.delayed(pollInterval);
+              continue;
+            }
+          }
+          final page = loaded;
+          throw BiliSiteVerificationRequired(
+            target:
+                searchVerification
+                    ? page.removeFragment()
+                    : verificationTarget ??
+                        page.replace(queryParameters: {}).removeFragment(),
+            kind: _kind(script),
+            desktopSite: desktopSite,
+            searchChallenge:
+                searchVerification && value['searchChallenge'] == true,
+            revision: sourceRevision.value,
+            searchKeyword: searchKeyword,
+            searchEntry: searchVerification ? searchTarget : null,
+            searchPage: searchPage,
+          );
+        }
+        throw BiliBrowserException('${value['error']}');
+      }
+      if (value['ready'] == true) {
+        final content = value['content'];
+        if (script != biliChapterProbeScript || content is! String) {
+          return value;
+        }
+        // The first readable snapshot can precede the page's visibility
+        // styles or continuation link. Confirm both before appending it.
+        chapterCandidate = (url: loaded, content: content, next: value['next']);
+        if (chapterCandidate == previousChapter) return value;
+      }
+      if (searchEntry != null &&
+          searchKeyword != null &&
+          searchPage == 1 &&
+          (clock.elapsed >= manualSearchAt ||
+              (request is BiliSearchRequest && request.openOriginalPage)) &&
+          _samePage(loaded, searchEntry)) {
+        throw BiliSiteVerificationRequired(
+          target: loaded,
+          kind: _kind(script),
+          revision: sourceRevision.value,
+          desktopSite: desktopSite,
+          manualSearch: true,
+          searchKeyword: searchKeyword,
+          searchEntry: searchEntry,
+          searchPage: searchPage,
+        );
+      }
+      await Future<void>.delayed(pollInterval);
+    }
+    throw const BiliBrowserException('原站未返回内容，请稍后重试');
+  }
+
+  Future<String> document(Uri uri) => _operation(
+    (port, js, load, mode, clock) => _readDocument(uri, js, load, mode, clock),
+    timeout: const Duration(seconds: 15),
+    timeoutMessage: '哔哩页面读取超时，请重试',
+  );
+
+  /// Metadata and the complete catalogue share one queue slot, attachment,
+  /// deadline and final cleanup. Neither page is fetched per volume.
+  Future<List<String>> documents(List<Uri> uris) =>
+      _operation((port, js, load, mode, clock) async {
+        if (uris.isEmpty ||
+            uris.length > 2 ||
+            uris.any((uri) => !allowsNavigation('$uri'))) {
+          throw const BiliBrowserException('哔哩页面请求无效');
+        }
+        final results = <String>[];
+        for (final uri in uris) {
+          results.add(await _readDocument(uri, js, load, mode, clock));
+        }
+        return results;
+      }, timeoutMessage: '哔哩详情与目录读取超时，请重试');
+
+  Future<String> _readDocument(
+    Uri uri,
+    Future<dynamic> Function(String) js,
+    Future<void> Function(String) load,
+    Future<void> Function(bool) mode,
+    Stopwatch clock,
+  ) async {
+    final cached = _verifiedProbe(uri, BiliProbeKind.document);
+    if (cached != null) return '${cached['html']}';
+    await load('$uri');
+    var desktopFallback = false;
+    Future<Map<String, dynamic>> read() => _poll(
+      js,
+      biliDocumentProbeScript,
+      clock,
+      verificationTarget:
+          desktopFallback ? uri.replace(host: 'www.linovelib.com') : uri,
+      desktopSite: desktopFallback,
+      accepts: (value) {
+        final page = Uri.parse('${value['url']}');
+        return _samePage(
+          page,
+          desktopFallback ? uri.replace(host: 'www.linovelib.com') : uri,
+        );
+      },
+    );
+    Map<String, dynamic> value;
+    try {
+      value = await read();
+    } on BiliSiteVerificationRequired {
+      // Both hosts are the site's own observed mobile/desktop entry points.
+      // Only a blocked full catalogue gets one desktop-site fallback.
+      if (!uri.host.endsWith('bilinovel.net') ||
+          !uri.path.endsWith('/catalog')) {
+        rethrow;
+      }
+      await mode(true);
+      desktopFallback = true;
+      await load('${uri.replace(host: 'www.linovelib.com')}');
+      value = await read();
+    }
+    if (Uri.parse('${value['url']}').path != uri.path) {
+      throw const BiliBrowserException('原站返回的页面不匹配');
+    }
+    return '${value['html']}';
+  }
+
+  Future<PageStatsNovelCover> search(String keyword, int page) async {
+    ReadRequest.current?.check();
+    final query = keyword.trim();
+    if (query.isEmpty || query.length > 200 || page < 1 || page > 100) {
+      throw const FormatException('搜索关键词或页码无效');
+    }
+    final verified = _verifiedSearches.remove((query, page));
+    if (verified != null &&
+        activeSource.value == SourceId.bili &&
+        verified.revision == sourceRevision.value &&
+        DateTime.now().isBefore(verified.expires)) {
+      return _acceptSearchPage(verified.data, page, query);
+    }
+    return _operation((port, js, load, mode, clock) async {
+      Uri? requestedPage;
+      Uri? searchEntry;
+      if (page == 1) {
+        _searchPages.remove(query);
+        final desktop = defaultTargetPlatform == TargetPlatform.windows;
+        final entry =
+            desktop
+                ? 'https://www.linovelib.com/'
+                : 'https://www.bilinovel.net/search.html';
+        searchEntry = Uri.parse(entry);
+        _searchOrigin = searchEntry;
+        await load(entry);
+        await _poll(
+          js,
+          biliHomeReadyScript,
+          clock,
+          verificationTarget: searchEntry,
+          searchKeyword: query,
+          searchEntry: searchEntry,
+          searchPage: page,
+          accepts: (value) {
+            final actual = Uri.parse('${value['url']}');
+            final target = searchEntry!;
+            if (value['searchChallenge'] == true) {
+              return _matchesSearchChallenge(
+                actual,
+                value,
+                target,
+                query,
+                page,
+              );
+            }
+            if (value['verificationRequired'] == true) {
+              return _sameOrigin(actual, target) &&
+                  _matchesSearch(actual, query, page);
+            }
+            return _samePage(actual, target);
+          },
+        );
+        if (await js(biliSubmitSearchScript(query)) != true) {
+          throw const BiliBrowserException('原站搜索表单已变化');
+        }
+      } else {
+        final next = _searchPages[query]?[page];
+        if (next == null) throw const BiliBrowserException('搜索分页已失效，请重新搜索');
+        requestedPage = next;
+        _searchOrigin = next;
+        await load('$next');
+      }
+      final value = await _poll(
+        js,
+        biliSearchProbeScript,
+        clock,
+        verificationTarget: requestedPage,
+        searchKeyword: query,
+        searchEntry: searchEntry,
+        searchPage: page,
+        accepts: (value) {
+          final expected = requestedPage;
+          final actual = Uri.parse('${value['url']}');
+          if (value['searchChallenge'] == true) {
+            return _matchesSearchChallenge(
+              actual,
+              value,
+              expected ?? searchEntry!,
+              query,
+              page,
+            );
+          }
+          if (value['verificationRequired'] == true && expected != null) {
+            return _sameOrigin(actual, expected) &&
+                _matchesSearch(actual, query, page);
+          }
+          if (expected == null) {
+            return _sameOrigin(actual, searchEntry!) &&
+                _matchesSearch(actual, query, page) &&
+                (value['ready'] != true ||
+                    _matchesSearchResult(actual, value, query, page));
+          }
+          // loadRequest may return before the previous document is replaced.
+          // Match the real next link, regardless of query parameter order.
+          return _samePage(actual, expected) &&
+              (value['ready'] != true ||
+                  _matchesSearchResult(actual, value, query, page));
+        },
+      );
+      return _acceptSearchPage(value, page, query);
+    });
+  }
+
+  ({PageStatsNovelCover result, Uri? next}) _parseSearchPage(
+    Map<String, dynamic> value,
+    int page,
+    String query,
+  ) {
+    final books = <NovelCover>[];
+    final seen = <String>{};
+    final resultPage = Uri.parse('${value['url']}');
+    for (final raw in value['books'] as List? ?? const []) {
+      final item = Map<String, dynamic>.from(raw as Map);
+      final nid = '${item['nid']}';
+      final title = '${item['title'] ?? ''}'.trim();
+      if (!RegExp(r'^[1-9]\d*$').hasMatch(nid) ||
+          title.isEmpty ||
+          !seen.add(nid)) {
+        continue;
+      }
+      final images = item['images'];
+      final cover = biliCoverUrl(
+        images is List
+            ? images.whereType<String>()
+            : [if (item['image'] case final String url) url],
+        page: resultPage,
+      );
+      books.add(
+        NovelCover(
+          aid: 'bili:$nid',
+          title: title,
+          img: cover ?? '',
+          detailUrl: 'bili:$nid',
+        ),
+      );
+      if (books.length > 100) throw const BiliBrowserException('搜索结果过多');
+    }
+    Uri? next;
+    if (books.isNotEmpty && page < 100 && value['next'] is String) {
+      final raw = value['next'] as String;
+      final candidate = Uri.tryParse(raw);
+      if (candidate != null &&
+          allowsNavigation(raw) &&
+          _sameOrigin(candidate, resultPage) &&
+          const ['/S6/', '/search.html'].contains(candidate.path) &&
+          listEquals(candidate.queryParametersAll['page'], ['${page + 1}']) &&
+          _matchesSearch(candidate, query, page + 1) &&
+          !_samePage(candidate, resultPage)) {
+        next = candidate;
+      }
+    }
+    return (
+      result: PageStatsNovelCover(
+        currentPage: page,
+        maxPage: next == null ? page : page + 1,
+        records: books,
+      ),
+      next: next,
+    );
+  }
+
+  PageStatsNovelCover _acceptSearchPage(
+    Map<String, dynamic> value,
+    int page,
+    String query,
+  ) {
+    final parsed = _parseSearchPage(value, page, query);
+    _searchPages[query]?.removeWhere((index, _) => index > page);
+    if (parsed.next case final next?) {
+      if (_searchPages.length >= 16 && !_searchPages.containsKey(query)) {
+        _searchPages.remove(_searchPages.keys.first);
+      }
+      (_searchPages[query] ??= {})[page + 1] = next;
+    }
+    return parsed.result;
+  }
+
+  Future<SourceChapter> chapter(String bookId, String chapterId) => _operation((
+    port,
+    js,
+    load,
+    mode,
+    clock,
+  ) async {
+    final bid = RegExp(r'^bili:([1-9]\d*)$').firstMatch(bookId);
+    final cid = RegExp(r'^bili:([1-9]\d*):([1-9]\d*)$').firstMatch(chapterId);
+    if (bid == null || cid == null || bid[1] != cid[1]) {
+      throw const FormatException('章节不属于当前作品');
+    }
+    var uri = Uri.parse(
+      'https://www.bilinovel.net/novel/${bid[1]}/${cid[2]}.html',
+    );
+    final seen = <String>{};
+    final chunks = <String>[];
+    var contentLength = 0;
+    var retriedIncomplete = false;
+    Future<Map<String, dynamic>> pollChapter(Uri pageUri) => _poll(
+      js,
+      biliChapterProbeScript,
+      clock,
+      verificationTarget: pageUri,
+      accepts: (value) => _samePage(Uri.parse('${value['url']}'), pageUri),
+    );
+    for (var page = 0; page < maxChapterPages; page++) {
+      if (!seen.add('$uri')) throw const BiliBrowserException('章节分页发生循环');
+      var value = _verifiedProbe(uri, BiliProbeKind.chapter);
+      if (value == null) {
+        await load('$uri');
+        try {
+          value = await pollChapter(uri);
+        } on BiliSiteVerificationRequired catch (error) {
+          if (!error.contentRequired ||
+              retriedIncomplete ||
+              clock.elapsed + verificationGrace >= operationTimeout) {
+            rethrow;
+          }
+          retriedIncomplete = true;
+          await load('$uri');
+          value = await pollChapter(uri);
+        }
+      }
+      final finalUri = Uri.parse('${value['url']}');
+      if (!_samePage(finalUri, uri)) {
+        throw const BiliBrowserException('原站返回了其他章节');
+      }
+      final content = '${value['content'] ?? ''}'.trim();
+      if (content.isEmpty) throw const BiliBrowserException('原站正文为空');
+      if (_isBrowserCompatibilityNotice(content)) {
+        throw BiliSiteBrowserUnsupported(uri);
+      }
+      if (value['contentIncomplete'] == true ||
+          biliHasIncompleteChapterNotice(content)) {
+        throw BiliSiteVerificationRequired(
+          target: uri,
+          kind: BiliProbeKind.chapter,
+          revision: sourceRevision.value,
+          contentRequired: true,
+        );
+      }
+      chunks.add(content);
+      contentLength += content.length;
+      if (contentLength > 2 * 1024 * 1024) {
+        throw const BiliBrowserException('章节正文过大');
+      }
+      if (value['next'] == null) return SourceChapter(chunks.join('\n'));
+      final next = Uri.parse('${value['next']}');
+      if (!allowsNavigation('$next') ||
+          next.origin != uri.origin ||
+          next.hasQuery ||
+          !RegExp(
+            '^/novel/${bid[1]}/${cid[2]}_[1-9][0-9]*\\.html\$',
+          ).hasMatch(next.path)) {
+        throw const BiliBrowserException('章节分页不属于当前章节');
+      }
+      uri = next;
+    }
+    throw const BiliBrowserException('章节分页超过64页安全上限');
+  });
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _verifiedPages.clear();
+    _verifiedSearches.clear();
+    _invalidate();
+    super.dispose();
+  }
+}
