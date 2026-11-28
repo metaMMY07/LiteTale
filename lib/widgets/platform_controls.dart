@@ -984,6 +984,7 @@ Future<T?> showAppBottomSheet<T>({
   bool enableDrag = true,
   bool? showDragHandle,
   BoxConstraints? constraints,
+  RouteSettings? routeSettings,
   bool useGlass = true,
 }) {
   if (!usesAppleGlass) {
@@ -998,12 +999,14 @@ Future<T?> showAppBottomSheet<T>({
       enableDrag: enableDrag,
       showDragHandle: showDragHandle,
       constraints: constraints,
+      routeSettings: routeSettings,
     );
   }
   return showCupertinoModalPopup<T>(
     context: context,
     useRootNavigator: useRootNavigator,
     barrierDismissible: isDismissible,
+    routeSettings: routeSettings,
     builder:
         (sheetContext) => AnimatedPadding(
           duration: const Duration(milliseconds: 200),

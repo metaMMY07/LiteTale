@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wild/theme/ios_dock_insets.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/bookshelf_tile.dart';
 import 'package:wild/widgets/platform_controls.dart';
@@ -15,6 +16,7 @@ Future<String?> showBookshelfFolderName(
   useGlass: false,
   useSafeArea: true,
   showDragHandle: true,
+  routeSettings: const RouteSettings(name: bookshelfFolderSheetRouteName),
   builder:
       (sheetContext) => _ShelfSheet(
         title: initialName == null ? '新建文件夹' : '重命名文件夹',

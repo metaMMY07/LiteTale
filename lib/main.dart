@@ -141,6 +141,10 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
               novelReaderRouteName,
               novelListeningRouteName,
             },
+            horizontalGlassCoverRoutes: const {
+              novelReaderRouteName,
+              '/novel/reviews',
+            },
           )
           : null;
 
@@ -194,8 +198,8 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
                                   : HeroControllerScope.none(
                                     child: IosAppDockHost(
                                       controller: dock,
-                                      child: child!,
                                       revealHomeOnStartup: true,
+                                      child: child!,
                                     ),
                                   ),
                         );

@@ -307,6 +307,7 @@ class IosReaderBackButton extends StatelessWidget {
     this.color,
     this.brightness,
     this.keepGlassInSheets = false,
+    this.keepGlassInHorizontalCover = false,
   });
 
   static const double iosIconSize = 24;
@@ -316,6 +317,7 @@ class IosReaderBackButton extends StatelessWidget {
   final Color? color;
   final Brightness? brightness;
   final bool keepGlassInSheets;
+  final bool keepGlassInHorizontalCover;
 
   @override
   Widget build(BuildContext context) => ReaderRoundAction(
@@ -328,6 +330,7 @@ class IosReaderBackButton extends StatelessWidget {
     color: color ?? Theme.of(context).colorScheme.onSurface,
     brightness: brightness,
     keepGlassInSheets: keepGlassInSheets,
+    keepGlassInHorizontalCover: keepGlassInHorizontalCover,
     onPressed: onPressed,
   );
 }
@@ -351,6 +354,7 @@ class ReaderRoundAction extends StatelessWidget {
     this.motion,
     this.color,
     this.keepGlassInSheets = false,
+    this.keepGlassInHorizontalCover = false,
   });
   final String label;
   final IconData icon;
@@ -367,6 +371,7 @@ class ReaderRoundAction extends StatelessWidget {
   final MaterialReaderMotion? motion;
   final Color? color;
   final bool keepGlassInSheets;
+  final bool keepGlassInHorizontalCover;
 
   @override
   Widget build(BuildContext context) {
@@ -401,6 +406,7 @@ class ReaderRoundAction extends StatelessWidget {
                     tint: preserveTint ? tint : null,
                     selected: selected,
                     keepGlassInSheets: keepGlassInSheets,
+                    keepGlassInHorizontalCover: keepGlassInHorizontalCover,
                     fallback: appleButton,
                   )
                   : AppleGlassSurface(
@@ -408,6 +414,7 @@ class ReaderRoundAction extends StatelessWidget {
                     tint: tint,
                     preserveTint: preserveTint,
                     brightness: brightness,
+                    keepGlassInHorizontalCover: keepGlassInHorizontalCover,
                     child: appleButton,
                   )
               : motion != null &&

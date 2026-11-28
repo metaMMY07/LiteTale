@@ -2,6 +2,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
+/// The bookshelf folder-name sheet is the only keyboard sheet that restores
+/// the native dock with a composited reveal after it closes.
+const bookshelfFolderSheetRouteName = '/bookshelf/folder-name';
+
 /// Gives each ordinary iOS route its own scroll clearance. A fullscreen
 /// route above it can hide the bar without resizing the covered page.
 class IosDockInsets extends InheritedWidget {

@@ -717,7 +717,20 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     else if let slider {
       slider.frame = bounds.insetBy(dx: 2, dy: 0)
     }
-    else if let button = glassButton ?? menuButton { button.frame = bounds }
+    else if let button = glassButton ?? menuButton {
+      button.frame = bounds
+      if button === glassButton && keepGlassInSheets {
+        // Flutter clips the host so a sheet's barrier can dim the glass. Shape
+        // that same host as the 44pt circle: UIButton.Configuration's capsule
+        // only shapes the resting glass, not its pressed composition.
+        let radius = min(bounds.width, bounds.height) / 2
+        layer.cornerRadius = radius
+        layer.cornerCurve = .circular
+        button.layer.cornerRadius = radius
+        button.layer.cornerCurve = .circular
+        button.clipsToBounds = true
+      }
+    }
     else if let tabs {
       tabs.view.frame = bounds
     } else if let segments {

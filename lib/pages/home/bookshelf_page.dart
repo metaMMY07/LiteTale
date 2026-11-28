@@ -240,6 +240,14 @@ class _OrganizedBookshelfPageState extends State<_OrganizedBookshelfPage> {
     ];
     final showFilters = !editing && folderId == null;
     final showGroups = showFilters && wenku8Only && state.bookcases.isNotEmpty;
+    final sourceLeading = apple && showFilters;
+    final sourceLeadingWidth =
+        sourceLeading
+            ? (MediaQuery.sizeOf(context).width * .40)
+                .clamp(136.0, 164.0)
+                .toDouble()
+            : null;
+    final bottomFilters = showFilters && !apple;
     final refreshing = showWenku8 && state.isRefreshing;
     // The home Scaffold extends under the floating bar and supplies its
     // measured height in MediaQuery. The last row can scroll clear of it.
@@ -270,8 +278,29 @@ class _OrganizedBookshelfPageState extends State<_OrganizedBookshelfPage> {
         ),
         centerTitle: apple && !editing,
         automaticallyImplyLeading: folderId != null,
+        leadingWidth: sourceLeading ? sourceLeadingWidth : null,
         leading:
-            apple && folderId != null
+            sourceLeading
+                ? Padding(
+                  padding: const EdgeInsetsDirectional.only(start: 12),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: _ShelfSourcePicker(
+                      sources: sources,
+                      source: source,
+                      compact: true,
+                      onSelected: (value) {
+                        setState(() {
+                          _sourceFilter = value;
+                          _editingScope = null;
+                          _mode = _ShelfMode.browse;
+                          _selection.clear();
+                        });
+                      },
+                    ),
+                  ),
+                )
+                : apple && folderId != null
                 ? Padding(
                   padding: const EdgeInsetsDirectional.only(start: 8),
                   child: Center(
@@ -308,14 +337,14 @@ class _OrganizedBookshelfPageState extends State<_OrganizedBookshelfPage> {
         ],
         bottom: PreferredSize(
           preferredSize: Size.fromHeight(
-            (showFilters ? 48 : 0) +
+            (bottomFilters ? 48 : 0) +
                 (showGroups ? (apple ? 60 : 48) : 0) +
                 (refreshing || _busy ? 3 : 0),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (showFilters)
+              if (bottomFilters)
                 _ShelfSourcePicker(
                   sources: sources,
                   source: source,
@@ -728,11 +757,13 @@ class _ShelfSourcePicker extends StatelessWidget {
     required this.sources,
     required this.source,
     required this.onSelected,
+    this.compact = false,
   });
 
   final List<SourceId?> sources;
   final SourceId? source;
   final ValueChanged<SourceId?> onSelected;
+  final bool compact;
 
   Future<void> _pickSource(BuildContext context) async {
     final index = await chooseSetting(context, '书架筛选', {
@@ -748,23 +779,25 @@ class _ShelfSourcePicker extends StatelessWidget {
     final VoidCallback? onTap =
         sources.length == 1 ? null : () => _pickSource(context);
     if (usesAppleGlass) {
+      final pill = IosAccentPillButton(
+        key: const ValueKey('bookshelf-source-filter-capsule'),
+        label: labelText,
+        trailingIcon: CupertinoIcons.chevron_down,
+        trailingIconSize: 14,
+        minHeight: 36,
+        fontSize: 15,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        semanticsLabel: '书架筛选，当前$labelText',
+        onPressed: onTap,
+      );
+      if (compact) return pill;
       return SizedBox(
         height: 48,
         child: Align(
           alignment: AlignmentDirectional.centerStart,
           child: Padding(
             padding: const EdgeInsetsDirectional.only(start: 16, end: 16),
-            child: IosAccentPillButton(
-              key: const ValueKey('bookshelf-source-filter-capsule'),
-              label: labelText,
-              trailingIcon: CupertinoIcons.chevron_down,
-              trailingIconSize: 14,
-              minHeight: 36,
-              fontSize: 15,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-              semanticsLabel: '书架筛选，当前$labelText',
-              onPressed: onTap,
-            ),
+            child: pill,
           ),
         ),
       );

@@ -87,6 +87,7 @@ class AppleGlassSurface extends StatelessWidget {
     this.preserveTint = false,
     this.brightness,
     this.keepGlassInSheets = false,
+    this.keepGlassInHorizontalCover = false,
   });
   final Widget child;
   final Color? tint;
@@ -94,6 +95,7 @@ class AppleGlassSurface extends StatelessWidget {
   final bool preserveTint;
   final Brightness? brightness;
   final bool keepGlassInSheets;
+  final bool keepGlassInHorizontalCover;
   @override
   Widget build(BuildContext context) {
     if (!usesAppleGlass) return child;
@@ -116,6 +118,8 @@ class AppleGlassSurface extends StatelessWidget {
             parameters: {
               'kind': 'surface',
               if (keepGlassInSheets) 'keepGlassInSheets': true,
+              if (keepGlassInHorizontalCover)
+                'keepGlassInHorizontalCover': true,
               if (capsule) 'capsule': true,
               if (materialTint != null) 'tint': materialTint.toARGB32(),
               'dark': resolvedBrightness == Brightness.dark,
@@ -168,6 +172,7 @@ class AppleGlassButton extends StatelessWidget {
     this.brightness,
     this.selected = false,
     this.keepGlassInSheets = false,
+    this.keepGlassInHorizontalCover = false,
   });
 
   final String? symbol;
@@ -181,6 +186,7 @@ class AppleGlassButton extends StatelessWidget {
   final Brightness? brightness;
   final bool selected;
   final bool keepGlassInSheets;
+  final bool keepGlassInHorizontalCover;
 
   @override
   Widget build(BuildContext context) {
@@ -206,6 +212,7 @@ class AppleGlassButton extends StatelessWidget {
       parameters: {
         'kind': 'button',
         if (keepGlassInSheets) 'keepGlassInSheets': true,
+        if (keepGlassInHorizontalCover) 'keepGlassInHorizontalCover': true,
         'dark': appearance == Brightness.dark,
         'label': label,
         'enabled': onPressed != null,
@@ -482,6 +489,7 @@ class AppleGlassActions extends StatelessWidget {
     this.iconSize = defaultIconSize,
     this.fallback,
     this.keepGlassInSheets = false,
+    this.keepGlassInHorizontalCover = false,
   });
 
   static const double defaultIconSize = 20;
@@ -493,6 +501,7 @@ class AppleGlassActions extends StatelessWidget {
   final double iconSize;
   final Widget? fallback;
   final bool keepGlassInSheets;
+  final bool keepGlassInHorizontalCover;
 
   @override
   Widget build(BuildContext context) {
@@ -550,6 +559,7 @@ class AppleGlassActions extends StatelessWidget {
         parameters: {
           'kind': 'actions',
           if (keepGlassInSheets) 'keepGlassInSheets': true,
+          if (keepGlassInHorizontalCover) 'keepGlassInHorizontalCover': true,
           'capsule': true,
           'dark': appearance == Brightness.dark,
           'foreground': foregroundColor.toARGB32(),
@@ -1295,8 +1305,20 @@ class _AppleChromeState extends State<_AppleChrome> {
     // The detail and reader headers clip their native drawing to the platform
     // view bounds, so a sheet can dim the same glass through its entire slide.
     final keepGlassInSheets = widget.parameters['keepGlassInSheets'] == true;
+    final keepGlassInHorizontalCover =
+        widget.parameters['keepGlassInHorizontalCover'] == true;
+    // A reader or reviews page slides over the detail without replacing its
+    // scene. Keep opted-in native chrome in that shared scene so the glass
+    // moves with the page instead of swapping to a static preview. TickerMode
+    // still takes it out once the upper opaque route fully covers the page.
+    final keepLiveUnderHorizontalCover =
+        keepGlassInHorizontalCover &&
+        cover == IosRouteCover.horizontalCover &&
+        onstage;
+    final keepLiveUnderSheet =
+        keepGlassInSheets && cover == IosRouteCover.sheet;
     final parkNative =
-        covered && !(keepGlassInSheets && cover == IosRouteCover.sheet);
+        covered && !(keepLiveUnderSheet || keepLiveUnderHorizontalCover);
     // A freshly pushed route is offstage for one frame while Hero targets are
     // measured. Its current route still has to start attaching there, so the
     // native glass exists before the first visible entrance frame.
