@@ -11,8 +11,7 @@ import 'package:wild/theme/ios_glass_theme.dart' show iosHomeTitleStyle;
 import 'package:wild/theme/ios_page_arrival.dart';
 import 'package:wild/theme/ios_system_colors.dart';
 import 'package:wild/widgets/app_launch_screen.dart';
-import 'package:wild/widgets/ios_app_dock.dart'
-    show IosAppDockHost, IosRouteCover;
+import 'package:wild/widgets/ios_app_dock.dart' show IosAppDockHost;
 
 bool get usesAppleGlass => defaultTargetPlatform == TargetPlatform.iOS;
 
@@ -87,7 +86,6 @@ class AppleGlassSurface extends StatelessWidget {
     this.preserveTint = false,
     this.brightness,
     this.keepGlassInSheets = false,
-    this.keepGlassInHorizontalCover = false,
   });
   final Widget child;
   final Color? tint;
@@ -95,7 +93,6 @@ class AppleGlassSurface extends StatelessWidget {
   final bool preserveTint;
   final Brightness? brightness;
   final bool keepGlassInSheets;
-  final bool keepGlassInHorizontalCover;
   @override
   Widget build(BuildContext context) {
     if (!usesAppleGlass) return child;
@@ -118,8 +115,6 @@ class AppleGlassSurface extends StatelessWidget {
             parameters: {
               'kind': 'surface',
               if (keepGlassInSheets) 'keepGlassInSheets': true,
-              if (keepGlassInHorizontalCover)
-                'keepGlassInHorizontalCover': true,
               if (capsule) 'capsule': true,
               if (materialTint != null) 'tint': materialTint.toARGB32(),
               'dark': resolvedBrightness == Brightness.dark,
@@ -172,7 +167,6 @@ class AppleGlassButton extends StatelessWidget {
     this.brightness,
     this.selected = false,
     this.keepGlassInSheets = false,
-    this.keepGlassInHorizontalCover = false,
   });
 
   final String? symbol;
@@ -186,7 +180,6 @@ class AppleGlassButton extends StatelessWidget {
   final Brightness? brightness;
   final bool selected;
   final bool keepGlassInSheets;
-  final bool keepGlassInHorizontalCover;
 
   @override
   Widget build(BuildContext context) {
@@ -212,7 +205,6 @@ class AppleGlassButton extends StatelessWidget {
       parameters: {
         'kind': 'button',
         if (keepGlassInSheets) 'keepGlassInSheets': true,
-        if (keepGlassInHorizontalCover) 'keepGlassInHorizontalCover': true,
         'dark': appearance == Brightness.dark,
         'label': label,
         'enabled': onPressed != null,
@@ -489,7 +481,6 @@ class AppleGlassActions extends StatelessWidget {
     this.iconSize = defaultIconSize,
     this.fallback,
     this.keepGlassInSheets = false,
-    this.keepGlassInHorizontalCover = false,
   });
 
   static const double defaultIconSize = 20;
@@ -501,7 +492,6 @@ class AppleGlassActions extends StatelessWidget {
   final double iconSize;
   final Widget? fallback;
   final bool keepGlassInSheets;
-  final bool keepGlassInHorizontalCover;
 
   @override
   Widget build(BuildContext context) {
@@ -559,7 +549,6 @@ class AppleGlassActions extends StatelessWidget {
         parameters: {
           'kind': 'actions',
           if (keepGlassInSheets) 'keepGlassInSheets': true,
-          if (keepGlassInHorizontalCover) 'keepGlassInHorizontalCover': true,
           'capsule': true,
           'dark': appearance == Brightness.dark,
           'foreground': foregroundColor.toARGB32(),
@@ -1153,6 +1142,8 @@ class _AppleChromeState extends State<_AppleChrome> {
   bool _nativeReady = false;
   bool _deferPreviewHandoff = false;
   bool _acceptActions = false;
+  bool _sliderActive = false;
+  bool _sliderCancelQueued = false;
   IosPageChromeWarmup? _chromeWarmup;
   bool _warmupPending = false;
   VoidCallback? _finishStartupAttachment;
@@ -1207,15 +1198,34 @@ class _AppleChromeState extends State<_AppleChrome> {
     final channel = MethodChannel('litetale/apple_glass/$id');
     _channel = channel;
     channel.setMethodCallHandler((call) async {
-      if (!mounted || !_acceptActions || _route?.isCurrent == false) return;
-      if (call.method == 'action') {
-        final args = Map<Object?, Object?>.from(call.arguments as Map);
-        if (widget.parameters['kind'] == 'slider' &&
-            args['revision'] != widget.parameters['revision']) {
+      if (!mounted || call.method != 'action') return;
+      final args = Map<Object?, Object?>.from(call.arguments as Map);
+      if (widget.parameters['kind'] == 'slider') {
+        if (args['revision'] != widget.parameters['revision']) return;
+        final action = args['action'];
+        if (action is! String) return;
+        final allowed = _acceptActions && _route?.isCurrent != false;
+        if (action == 'start') {
+          if (!allowed) return;
+          _sliderActive = true;
+        } else if (action == 'change') {
+          if (!allowed || !_sliderActive) return;
+        } else if (action == 'end') {
+          if (!allowed || !_sliderActive) return;
+          _sliderActive = false;
+        } else if (action == 'cancel') {
+          // Cancellation must still reach the widget after a modal or route
+          // has blocked interaction, otherwise its draft would survive.
+          if (!_sliderActive) return;
+          _sliderActive = false;
+        } else {
           return;
         }
-        widget.onAction(args['action'] as String, args['value']);
+        widget.onAction(action, args['value']);
+        return;
       }
+      if (!_acceptActions || _route?.isCurrent == false) return;
+      widget.onAction(args['action'] as String, args['value']);
     });
     // UIKit creation is asynchronous. Sync only when the Flutter values
     // changed since creation (including a selection made during attachment).
@@ -1273,6 +1283,20 @@ class _AppleChromeState extends State<_AppleChrome> {
     }
   }
 
+  void _queueSliderCancel() {
+    if (_sliderCancelQueued || !_sliderActive) return;
+    _sliderCancelQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _sliderCancelQueued = false;
+      if (!mounted || !_sliderActive) return;
+      if (_acceptActions && _route?.isCurrent != false) return;
+      // Let the widget restore its preview first; a native revision update
+      // then clears any remaining UISlider tracking.
+      _sliderActive = false;
+      widget.onAction('cancel', null);
+    });
+  }
+
   @override
   void dispose() {
     _primaryAnimation?.removeStatusListener(_onRouteAnimationStatus);
@@ -1296,29 +1320,15 @@ class _AppleChromeState extends State<_AppleChrome> {
     final routePopping = _route?.animation?.status == AnimationStatus.reverse;
     final coveredByActiveRoute =
         _route != null && !_route!.isCurrent && !routePopping;
-    final cover =
+    final coveredAbove =
         _route == null
-            ? IosRouteCover.none
-            : IosAppDockHost.coverAboveOf(context, _route!);
-    final covered =
-        coveredByPage || coveredByActiveRoute || cover != IosRouteCover.none;
-    // The detail and reader headers clip their native drawing to the platform
-    // view bounds, so a sheet can dim the same glass through its entire slide.
-    final keepGlassInSheets = widget.parameters['keepGlassInSheets'] == true;
-    final keepGlassInHorizontalCover =
-        widget.parameters['keepGlassInHorizontalCover'] == true;
-    // A reader or reviews page slides over the detail without replacing its
-    // scene. Keep opted-in native chrome in that shared scene so the glass
-    // moves with the page instead of swapping to a static preview. TickerMode
-    // still takes it out once the upper opaque route fully covers the page.
-    final keepLiveUnderHorizontalCover =
-        keepGlassInHorizontalCover &&
-        cover == IosRouteCover.horizontalCover &&
-        onstage;
-    final keepLiveUnderSheet =
-        keepGlassInSheets && cover == IosRouteCover.sheet;
-    final parkNative =
-        covered && !(keepLiveUnderSheet || keepLiveUnderHorizontalCover);
+            ? false
+            : IosAppDockHost.coveredAboveOf(context, _route!);
+    // Visibility drives painting. A modal route leaves the page underneath
+    // onstage, so its own live chrome keeps drawing as the barrier dims it; a
+    // fully opaque page or an inactive tab turns TickerMode off and hides it.
+    // Coverage only gates input and semantics, never the native surface.
+    final covered = coveredByPage || coveredByActiveRoute || coveredAbove;
     // A freshly pushed route is offstage for one frame while Hero targets are
     // measured. Its current route still has to start attaching there, so the
     // native glass exists before the first visible entrance frame.
@@ -1335,16 +1345,20 @@ class _AppleChromeState extends State<_AppleChrome> {
         ),
       );
     }
-    // Start attachment in the destination's first layout. Once attached, a
-    // live glass view follows its page until it needs to be parked.
+    // Start attachment in the destination's first layout. Once attached, the
+    // same live glass view follows its page for the page's visible lifetime.
     if (_nativeView == null && canAttach) {
       _registerChromeWarmup();
       _finishStartupAttachment = IosStartupTransition.waitForGlass(context);
       _nativeView = _createView();
     }
     if (_deferPreviewHandoff && atRest) _deferPreviewHandoff = false;
-    final showingPreview = !_nativeReady || _deferPreviewHandoff || parkNative;
-    _acceptActions = interactive && _nativeReady && !_deferPreviewHandoff;
+    // The Flutter preview is only an attachment placeholder; it never
+    // substitutes for a live view just because another route covers it.
+    final showingPreview = !_nativeReady || _deferPreviewHandoff;
+    final acceptActions = interactive && _nativeReady && !_deferPreviewHandoff;
+    if (_sliderActive && !acceptActions) _queueSliderCancel();
+    _acceptActions = acceptActions;
     final preview = IgnorePointer(
       child: ExcludeFocus(
         child: ExcludeSemantics(child: widget.attachmentFallback),
@@ -1358,17 +1372,11 @@ class _AppleChromeState extends State<_AppleChrome> {
           if (_nativeView case final view?)
             Positioned.fill(
               key: const ValueKey('glass-native'),
-              child: Offstage(
-                offstage: parkNative,
-                child: IgnorePointer(
-                  ignoring: !_acceptActions,
-                  child: ExcludeSemantics(
-                    excluding: !_acceptActions,
-                    child: ExcludeFocus(
-                      excluding: !_acceptActions,
-                      child: view,
-                    ),
-                  ),
+              child: IgnorePointer(
+                ignoring: !_acceptActions,
+                child: ExcludeSemantics(
+                  excluding: !_acceptActions,
+                  child: ExcludeFocus(excluding: !_acceptActions, child: view),
                 ),
               ),
             ),

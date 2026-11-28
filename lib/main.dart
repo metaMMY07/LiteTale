@@ -141,10 +141,6 @@ class _YourAppState extends State<YourApp> with WidgetsBindingObserver {
               novelReaderRouteName,
               novelListeningRouteName,
             },
-            horizontalGlassCoverRoutes: const {
-              novelReaderRouteName,
-              '/novel/reviews',
-            },
           )
           : null;
 

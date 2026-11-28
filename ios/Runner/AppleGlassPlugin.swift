@@ -24,29 +24,6 @@ final class AppleGlassFactory: NSObject, FlutterPlatformViewFactory {
   }
 }
 
-final class AppleGlassModalCoordinator {
-  static let shared = AppleGlassModalCoordinator()
-  static let didChangeNotification = Notification.Name("AppleGlassModalCoordinatorDidChange")
-
-  private var activeSessions = Set<Int>()
-  var isModalPresented: Bool { !activeSessions.isEmpty }
-
-  func begin(session: Int) {
-    let wasEmpty = activeSessions.isEmpty
-    activeSessions.insert(session)
-    if wasEmpty {
-      NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
-    }
-  }
-
-  func end(session: Int) {
-    let removed = activeSessions.remove(session) != nil
-    if removed && activeSessions.isEmpty {
-      NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
-    }
-  }
-}
-
 /// Renders bundled Flutter icon-font glyphs (such as CupertinoIcons) with the
 /// exact advance-width and even-leading baseline centering used by Flutter's
 /// `Icon` widget, so live UIKit Liquid Glass controls match Flutter's preview
@@ -184,14 +161,24 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
   private var surface: UIVisualEffectView?
   private var surfaceTint: UInt32?
   private var surfaceCapsule = false
-  private var modalBackdrop: UIView?
   private var keepGlassInSheets = false
-  private var buttonTint: UIColor?
   private var isDark = false
+  // Every native chrome view is composited while its Flutter page remains
+  // visible, including behind a modal barrier. Keep the effect inside the
+  // control's actual area so the barrier can dim it without square spill.
+  private var clipsGlassToHostBounds: Bool {
+    switch kind {
+    case "surface", "actions", "button", "menu", "segments", "toolbar":
+      return true
+    default:
+      return false
+    }
+  }
   private var actionBar: UIStackView?
   private var glassButton: UIButton?
   private var menuButton: UIButton?
   private var menuItems: [[String: String]] = []
+  private var menuTextOnly = false
   private var applyingSelection = false
   private let sourceButton = UIButton(type: .system)
   private let themeButton = UIButton(type: .system)
@@ -259,14 +246,6 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
       makeToolbar()
     }
     update(config)
-    if kind == "surface" || kind == "actions" || kind == "button" {
-      NotificationCenter.default.addObserver(
-        self,
-        selector: #selector(modalPresentationChanged),
-        name: AppleGlassModalCoordinator.didChangeNotification,
-        object: nil
-      )
-    }
     channel.setMethodCallHandler { [weak self] call, result in
       guard let self else { result(nil); return }
       if call.method == "update", let config = call.arguments as? [String: Any] {
@@ -397,87 +376,11 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     searchButton.accessibilityLabel = "搜索"
   }
 
-  private func ensureModalBackdrop() -> UIView {
-    if let modalBackdrop { return modalBackdrop }
-    let backdrop = UIView()
-    backdrop.isUserInteractionEnabled = false
-    backdrop.isHidden = true
-    backdrop.alpha = 0
-    backdrop.clipsToBounds = true
-    insertSubview(backdrop, at: 0)
-    modalBackdrop = backdrop
-    return backdrop
-  }
-
-  private func layoutModalBackdrop() {
-    guard let backdrop = modalBackdrop else { return }
-    backdrop.frame = bounds
-    if kind == "button" || surfaceCapsule {
-      let radius = min(bounds.width, bounds.height) / 2
-      backdrop.layer.cornerRadius = radius
-      backdrop.layer.cornerCurve = .circular
-    } else {
-      backdrop.layer.cornerRadius = 20
-      backdrop.layer.cornerCurve = .continuous
-    }
-  }
-
-  @objc private func modalPresentationChanged() {
-    syncModalBackdrop(animated: !AppleGlassModalCoordinator.shared.isModalPresented)
-  }
-
-  private func syncModalBackdrop(animated: Bool) {
-    let supportsBackdrop = !keepGlassInSheets &&
-      (kind == "surface" || kind == "actions" || (kind == "button" && buttonTint == nil))
-    guard supportsBackdrop else {
-      modalBackdrop?.isHidden = true
-      modalBackdrop?.alpha = 0
-      return
-    }
-    if AppleGlassModalCoordinator.shared.isModalPresented {
-      let backdrop = ensureModalBackdrop()
-      backdrop.layer.removeAllAnimations()
-      backdrop.backgroundColor = isDark
-        ? UIColor(white: 0.16, alpha: 0.84)
-        : UIColor(white: 1.0, alpha: 0.84)
-      layoutModalBackdrop()
-      backdrop.isHidden = false
-      backdrop.alpha = 1
-      return
-    }
-    guard let backdrop = modalBackdrop, !backdrop.isHidden else { return }
-    let hide = {
-      backdrop.alpha = 0
-    }
-    let complete: (Bool) -> Void = { _ in
-      if !AppleGlassModalCoordinator.shared.isModalPresented {
-        backdrop.isHidden = true
-      }
-    }
-    if animated && !UIAccessibility.isReduceMotionEnabled {
-      // Wait one runloop tick so UIKit's UIGlassEffect restores its live backdrop
-      // after modal sheet dismissal before fading out the temporary backing.
-      DispatchQueue.main.async {
-        guard !AppleGlassModalCoordinator.shared.isModalPresented else { return }
-        UIView.animate(
-          withDuration: 0.14,
-          delay: 0,
-          options: [.beginFromCurrentState, .allowUserInteraction],
-          animations: hide,
-          completion: complete
-        )
-      }
-    } else {
-      hide()
-      complete(true)
-    }
-  }
-
   private func update(_ config: [String: Any]) {
     keepGlassInSheets = config["keepGlassInSheets"] as? Bool ?? false
     // Keep the effect inside Flutter's composited rectangle, including while a
     // Flutter sheet paints its barrier above the view.
-    clipsToBounds = kind == "surface" || keepGlassInSheets
+    clipsToBounds = clipsGlassToHostBounds || keepGlassInSheets
     let dark = config["dark"] as? Bool ?? false
     isDark = dark
     overrideUserInterfaceStyle = dark ? .dark : .light
@@ -494,7 +397,6 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
         button.accessibilityTraits.remove(.selected)
       }
       let resolvedTint = colorFromARGB(config["tint"])
-      buttonTint = resolvedTint
       let displayScale = window?.screen.scale ?? UIScreen.main.scale
       let glyphImage = AppleGlassIconGlyphRenderer.shared.image(
         family: config["iconFontFamily"] as? String,
@@ -509,7 +411,6 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
         tint: resolvedTint,
         foreground: colorFromARGB(config["foreground"]) ?? .label
       )
-      syncModalBackdrop(animated: false)
       return
     }
     if let slider {
@@ -553,13 +454,21 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
         surface.effect = glass
         surfaceTint = argb
       }
-      syncModalBackdrop(animated: false)
       return
     }
     if let button = menuButton {
       menuItems = config["items"] as? [[String: String]] ?? []
       let label = config["label"] as? String ?? "分类"
-      if config["textOnly"] as? Bool == true {
+      let textOnly = config["textOnly"] as? Bool ?? false
+      let modeChanged = textOnly != menuTextOnly
+      menuTextOnly = textOnly
+      if modeChanged {
+        // A platform view may be reconfigured in place. Never leave the other
+        // mode's radius or button clip behind.
+        resetMenuHostShape()
+        setNeedsLayout()
+      }
+      if textOnly {
         button.contentHorizontalAlignment = .trailing
         if #available(iOS 15.0, *) {
           var style = UIButton.Configuration.plain()
@@ -688,9 +597,23 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     }
   }
 
+  private func shapeHostAsCapsule(_ button: UIButton) {
+    let radius = min(bounds.width, bounds.height) / 2
+    layer.cornerRadius = radius
+    layer.cornerCurve = .circular
+    button.layer.cornerRadius = radius
+    button.layer.cornerCurve = .circular
+    button.clipsToBounds = true
+  }
+
+  private func resetMenuHostShape() {
+    layer.cornerRadius = 0
+    menuButton?.layer.cornerRadius = 0
+    menuButton?.clipsToBounds = false
+  }
+
   override func layoutSubviews() {
     super.layoutSubviews()
-    layoutModalBackdrop()
     if let surface {
       surface.frame = bounds
       actionBar?.frame = surface.contentView.bounds
@@ -717,18 +640,21 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
     else if let slider {
       slider.frame = bounds.insetBy(dx: 2, dy: 0)
     }
-    else if let button = glassButton ?? menuButton {
+    else if let button = glassButton {
       button.frame = bounds
-      if button === glassButton && keepGlassInSheets {
-        // Flutter clips the host so a sheet's barrier can dim the glass. Shape
-        // that same host as the 44pt circle: UIButton.Configuration's capsule
-        // only shapes the resting glass, not its pressed composition.
-        let radius = min(bounds.width, bounds.height) / 2
-        layer.cornerRadius = radius
-        layer.cornerCurve = .circular
-        button.layer.cornerRadius = radius
-        button.layer.cornerCurve = .circular
-        button.clipsToBounds = true
+      // UIButton.Configuration's capsule only shapes the resting glass, not
+      // its pressed composition. Shape the host as the same circle.
+      shapeHostAsCapsule(button)
+    }
+    else if let button = menuButton {
+      button.frame = bounds
+      if menuTextOnly {
+        // AppleGlassMenu(textOnly: true) is a transparent trailing label with
+        // zero insets, not a glass control. Keep only the rectangular host
+        // boundary so a capsule never cuts into the label's trailing edge.
+        resetMenuHostShape()
+      } else {
+        shapeHostAsCapsule(button)
       }
     }
     else if let tabs {
@@ -809,7 +735,6 @@ private final class AppleGlassView: UIView, FlutterPlatformView, UITabBarControl
   }
 
   deinit {
-    NotificationCenter.default.removeObserver(self)
     if kind == "toolbar" { AppleThemeReveal.shared.cancel() }
     channel.setMethodCallHandler(nil)
     if let tabs, tabs.parent != nil {

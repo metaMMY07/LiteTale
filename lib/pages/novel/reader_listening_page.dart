@@ -643,7 +643,11 @@ class _ReaderListeningPageState extends State<ReaderListeningPage>
   Widget _exitButton(BuildContext context) {
     void exit() => Navigator.of(context).pop();
     return usesAppleGlass
-        ? IosReaderBackButton(label: '退出听书', onPressed: exit)
+        ? IosReaderBackButton(
+          label: '退出听书',
+          keepGlassInSheets: true,
+          onPressed: exit,
+        )
         : ReaderRoundAction(
           label: '退出听书',
           onPressed: exit,

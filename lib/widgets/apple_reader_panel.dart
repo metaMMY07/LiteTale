@@ -23,7 +23,14 @@ class AppleReaderPanel {
   static bool isPresentationRoute(Route<dynamic> route) =>
       route is _AppleReaderRoute;
 
+  /// Lets widget tests exercise the native-panel route on non-iOS hosts.
+  @visibleForTesting
+  static bool? debugAvailableOverride;
+
   static Future<bool> get available {
+    if (debugAvailableOverride case final available?) {
+      return SynchronousFuture(available);
+    }
     if (kIsWeb || !Platform.isIOS) return SynchronousFuture(_supported = false);
     return _support ??= channel
         .invokeMethod<bool>('supported')

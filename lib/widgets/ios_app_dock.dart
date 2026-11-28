@@ -3,14 +3,10 @@ import 'dart:async';
 import 'package:flutter/cupertino.dart' show CupertinoModalPopupRoute;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:wild/theme/horizontal_page_transitions.dart';
 import 'package:wild/theme/ios_dock_insets.dart';
 import 'package:wild/theme/ios_page_arrival.dart';
 import 'package:wild/widgets/apple_glass_chrome.dart';
 import 'package:wild/widgets/app_launch_screen.dart';
-import 'package:wild/widgets/apple_reader_panel.dart';
-
-enum IosRouteCover { none, sheet, horizontalCover, other }
 
 typedef _DockState =
     ({
@@ -24,18 +20,11 @@ typedef _DockState =
 
 /// Owns the selection independently of any one page in the Navigator.
 class IosDockController extends NavigatorObserver {
-  IosDockController({
-    this.fullscreenRoutes = const {},
-    this.horizontalGlassCoverRoutes = const {},
-  });
+  IosDockController({this.fullscreenRoutes = const {}});
 
   static const homeRouteName = '/home';
 
   final Set<String> fullscreenRoutes;
-
-  /// Named [HorizontalCoverPageRoute]s that keep an opted-in native glass view
-  /// painting on the page underneath during their push, pop and edge swipe.
-  final Set<String> horizontalGlassCoverRoutes;
   final _routes = <Route<dynamic>>[];
   final _dismissing = <TransitionRoute<dynamic>, Set<Route<dynamic>>>{};
   final _selection = ValueNotifier<int>(0);
@@ -81,14 +70,11 @@ class IosDockController extends NavigatorObserver {
     return null;
   }
 
-  bool _isSheet(Route<dynamic> route) =>
-      route is ModalBottomSheetRoute ||
-      route is CupertinoModalPopupRoute ||
-      AppleReaderPanel.isPresentationRoute(route);
-
-  bool _isHorizontalGlassCover(Route<dynamic> route) =>
-      route is HorizontalCoverPageRoute &&
-      horizontalGlassCoverRoutes.contains(route.settings.name);
+  bool _hasRouteAbove(ModalRoute<dynamic> route) {
+    final index = _routes.lastIndexOf(route);
+    if (index >= 0 && index < _routes.length - 1) return true;
+    return _dismissing.entries.any((entry) => entry.value.contains(route));
+  }
 
   bool get _folderSheetVisible =>
       _routes.any(
@@ -97,29 +83,6 @@ class IosDockController extends NavigatorObserver {
       _dismissing.keys.any(
         (route) => route.settings.name == bookshelfFolderSheetRouteName,
       );
-
-  IosRouteCover _coverAbove(ModalRoute<dynamic> route) {
-    if (_disposed) return IosRouteCover.none;
-    final index = _routes.lastIndexOf(route);
-    final routesAbove = [
-      if (index >= 0) ..._routes.skip(index + 1),
-      // A popped page is still painting during its exit gesture. Classify it
-      // too, otherwise a reader pop loses the compatible route at didPop.
-      for (final entry in _dismissing.entries)
-        if (entry.value.contains(route)) entry.key,
-    ];
-    if (routesAbove.isEmpty) return IosRouteCover.none;
-    var horizontal = false;
-    for (final upper in routesAbove) {
-      if (_isSheet(upper)) continue;
-      if (_isHorizontalGlassCover(upper)) {
-        horizontal = true;
-        continue;
-      }
-      return IosRouteCover.other;
-    }
-    return horizontal ? IosRouteCover.horizontalCover : IosRouteCover.sheet;
-  }
 
   void select(int index) {
     final nav = navigator;
@@ -176,10 +139,8 @@ class IosDockController extends NavigatorObserver {
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
     _routes.remove(route);
-    if (route is TransitionRoute<dynamic>) {
-      // Keep every exit classified until its completion: ordinary comments or
-      // category pages still park glass, while named reader/reviews pages can
-      // opt in to the shared transition scene.
+    if (route is TransitionRoute<dynamic> &&
+        (route is PopupRoute || _isFullscreen(route))) {
       _dismissing[route] = _routes.toSet();
       unawaited(
         route.completed.then((_) {
@@ -240,13 +201,13 @@ class IosAppDockHost extends StatelessWidget {
   final Widget child;
   final bool revealHomeOnStartup;
 
-  static IosRouteCover coverAboveOf(
-    BuildContext context,
-    ModalRoute<dynamic> route,
-  ) {
+  /// Whether another route still paints above [route]. Drawing no longer parks
+  /// native glass, but this keeps interaction and semantics blocked until a
+  /// dismissing modal has fully left the screen.
+  static bool coveredAboveOf(BuildContext context, ModalRoute<dynamic> route) {
     final scope =
         context.dependOnInheritedWidgetOfExactType<_IosOverlayScope>();
-    return scope?.controller._coverAbove(route) ?? IosRouteCover.none;
+    return scope?.controller._hasRouteAbove(route) ?? false;
   }
 
   @override

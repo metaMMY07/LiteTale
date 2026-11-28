@@ -391,7 +391,6 @@ class _BookDetailsViewState extends State<BookDetailsView> {
                     preserveTint: widget.inShelf,
                     color: widget.inShelf ? colors.onPrimary : colors.onSurface,
                     keepGlassInSheets: true,
-                    keepGlassInHorizontalCover: true,
                     icon:
                         widget.inShelf
                             ? CupertinoIcons.bookmark_fill
